@@ -1,4 +1,4 @@
-﻿-- SPDX-License-Identifier: GPL-3.0-or-later
+-- SPDX-License-Identifier: GPL-3.0-or-later
 -- Spike 5: can a script trigger a BG3 spell cast end-to-end?
 --
 -- Original design assumed an FP aim ray would already be live. It isn't

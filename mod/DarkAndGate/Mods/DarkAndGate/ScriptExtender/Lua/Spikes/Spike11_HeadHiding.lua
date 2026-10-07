@@ -1,4 +1,4 @@
-﻿-- SPDX-License-Identifier: GPL-3.0-or-later
+-- SPDX-License-Identifier: GPL-3.0-or-later
 -- Spike 11: head / hair / helmet hiding on the local client only. v5.
 --
 -- Prior attempts:

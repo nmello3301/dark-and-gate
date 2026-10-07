@@ -92,11 +92,63 @@ via `Ext.IO` or a tiny helper, DLL polls the region per frame.
   lock-free queues or a mutex. Yet another thing to maintain.
 - Hard to test — can't just call a function.
 
-## My recommendation
+## Update 2026-10-08 (source check): Option 1 is harder than claimed
 
-**Option 1 (Osiris custom calls).** It's the sanctioned path, SE itself
-uses it to extend Osiris, call overhead is negligible, and the API shape
-survives SE updates. The vec3-via-3-floats annoyance is cheap tax.
+Source review of
+`reference/bg3se/BG3Extender/Osiris/Shared/CustomFunctions.h` found that
+`CustomFunctionManager::Register(std::unique_ptr<CustomCallBase>)` and
+friends are **internal C++, not a public C ABI**. A third-party DLL
+registering a custom Osiris call would need to:
+
+1. Pattern-scan SE's binary to find the `CustomFunctionManager` singleton.
+2. Match SE's internal types (`STDString`, `FunctionHandle`, custom base
+   classes with vtables) exactly, including vtable layouts that drift
+   between SE releases.
+
+Doable, but version-brittle enough to belong behind a dedicated spike,
+not inside the M1a critical path. **Option 1 is deferred unless a later
+spike proves it clean.**
+
+## My recommendation (revised)
+
+**Option A (new): DLL-autonomous, Lua talks only via SE's existing net
+channels + a shared config file.**
+
+The DLL owns everything that touches engine state Lua can't reach —
+camera, mouselook, bone transforms, animation playback, physics raycast
+normals. Lua owns intent (hotbar press, swing-start trigger), server
+truth (mana, hotbar state, saves), and spawn/apply via `Osi.*`.
+
+Communication:
+- **Lua → DLL config:** Lua writes a small JSON/TOML into
+  `Script Extender/DarkAndGate/native-config.toml`. The DLL hot-reloads
+  it (same pattern as NCT's `WatchForConfigChanges`). Covers "which bone
+  the camera tracks", MCM toggles, swing speed overrides.
+- **DLL → Lua events:** The DLL fires an Osiris event (via a hooked
+  game function) or writes a line to a watched file. Lua subscribes.
+  For high-frequency hit events we batch: DLL appends to
+  `native-events.ndjson`; Lua polls once per `Ext.OnNextTick` and drains.
+- **Smoke test (M1a kickoff):** DLL writes
+  `Script Extender/DarkAndGate/native-version.txt` on load; Lua reads
+  it at SessionLoaded, logs it, exposes `!dag_native_version`. Zero
+  per-call bridging needed to prove the DLL loaded.
+
+**Pros:**
+- Zero SE internals touched. DLL and Lua side evolve independently.
+- Same pattern NCT and BG3WASD use (both are DLL-autonomous).
+- Config-file latency doesn't matter — settings change at human speed.
+- Event-batching makes the ms-latency of file I/O a non-issue even at
+  swing frequency (DLL emits per hit; Lua drains at tick granularity).
+
+**Cons:**
+- The blade-path hit check moves from Lua into C++. More C++ code; the
+  "server owns truth" rule stays intact because the authoritative hit
+  arrives in Lua as an event and Lua still validates mana / HP there.
+- Can't do per-frame bone lookup from Lua (we don't need to — the
+  check happens in the DLL, which already has bone access).
+
+**Options 1 / 2 / 3 revisited** below in case Option A turns out to feel
+wrong once we hit M1b combat work.
 
 Concrete C ABI the DLL exports (shaped as Osiris queries):
 

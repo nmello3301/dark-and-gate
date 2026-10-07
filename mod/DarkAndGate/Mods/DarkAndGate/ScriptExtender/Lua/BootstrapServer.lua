@@ -21,3 +21,6 @@ ServerNet.Register()
 
 local OsiDump = Ext.Require("Server/OsiDump.lua")
 OsiDump.Register()
+
+local NativeBridge = Ext.Require("Shared/NativeBridge.lua")
+NativeBridge.Register("Server")

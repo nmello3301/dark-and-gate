@@ -1,4 +1,4 @@
-﻿-- SPDX-License-Identifier: GPL-3.0-or-later
+-- SPDX-License-Identifier: GPL-3.0-or-later
 -- Spike 1: capture + suppress LMB / RMB / keys 1-0 on the client.
 --
 -- Subscribes to Ext.Events.EclLuaKeyInput and EclLuaMouseButton. Two toggles:

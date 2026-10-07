@@ -1,4 +1,4 @@
-﻿-- SPDX-License-Identifier: GPL-3.0-or-later
+-- SPDX-License-Identifier: GPL-3.0-or-later
 -- Shared net-channel registry.
 --
 -- Dark and Gate always runs as client/server, even in single player. Every

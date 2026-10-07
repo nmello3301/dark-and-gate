@@ -1,4 +1,4 @@
-﻿-- SPDX-License-Identifier: GPL-3.0-or-later
+-- SPDX-License-Identifier: GPL-3.0-or-later
 -- Spike 2: can we raycast from the camera through the screen centre?
 --
 -- Two parts:

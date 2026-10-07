@@ -1,4 +1,4 @@
-﻿-- SPDX-License-Identifier: GPL-3.0-or-later
+-- SPDX-License-Identifier: GPL-3.0-or-later
 -- Dumps every Osiris function visible to the current SE build to
 -- Script Extender/DarkAndGate/osiris-functions.txt. Fires on the first
 -- !dag_osidump console call so we never run it on load.

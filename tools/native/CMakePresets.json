@@ -1,0 +1,29 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+    "configurePresets": [
+        {
+            "name": "vs2022-windows",
+            "displayName": "Visual Studio 2022 (Windows x64)",
+            "description": "Default preset for Dark and Gate native plugin",
+            "generator": "Visual Studio 17 2022",
+            "architecture": "x64",
+            "binaryDir": "${sourceDir}/out/build",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "release",
+            "configurePreset": "vs2022-windows",
+            "configuration": "Release"
+        },
+        {
+            "name": "debug",
+            "configurePreset": "vs2022-windows",
+            "configuration": "Debug"
+        }
+    ]
+}

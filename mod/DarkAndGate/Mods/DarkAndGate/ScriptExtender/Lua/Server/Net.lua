@@ -1,4 +1,4 @@
-﻿-- SPDX-License-Identifier: GPL-3.0-or-later
+-- SPDX-License-Identifier: GPL-3.0-or-later
 -- Server net handlers. Validates intents from the client and, when an action
 -- requires Osiris, defers the Osi call to the next tick so we are never in a
 -- restricted context.

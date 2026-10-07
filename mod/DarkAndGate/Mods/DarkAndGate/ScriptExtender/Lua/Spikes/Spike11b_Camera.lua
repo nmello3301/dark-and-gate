@@ -1,4 +1,4 @@
-﻿-- SPDX-License-Identifier: GPL-3.0-or-later
+-- SPDX-License-Identifier: GPL-3.0-or-later
 -- Spike 11 (camera half).
 --
 -- Answered: first-person camera position is achieved via Native Camera Tweaks

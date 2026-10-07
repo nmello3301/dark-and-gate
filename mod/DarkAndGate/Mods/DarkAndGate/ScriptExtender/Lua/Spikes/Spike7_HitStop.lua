@@ -1,4 +1,4 @@
-﻿-- SPDX-License-Identifier: GPL-3.0-or-later
+-- SPDX-License-Identifier: GPL-3.0-or-later
 -- Spike 7: freeze a single character's animation for a few frames (hit stop).
 --
 -- Design calls for 2-4 frames of per-character freeze on heavy hits. Three

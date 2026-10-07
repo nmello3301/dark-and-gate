@@ -1,4 +1,4 @@
-﻿-- SPDX-License-Identifier: GPL-3.0-or-later
+-- SPDX-License-Identifier: GPL-3.0-or-later
 -- Client net sender. Thin wrappers around Ext.Net.PostMessageToServer so
 -- the rest of the client Lua state doesn't deal with JSON serialization or
 -- channel strings directly.

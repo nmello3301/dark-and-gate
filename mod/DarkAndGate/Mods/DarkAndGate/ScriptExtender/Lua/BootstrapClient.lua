@@ -31,6 +31,9 @@ Spike2.Register()
 local ClientNet = Ext.Require("Client/Net.lua")
 ClientNet.Register()
 
+local NativeBridge = Ext.Require("Shared/NativeBridge.lua")
+NativeBridge.Register("Client")
+
 -- Combined 4+5+6+7 probe. Each spike is a module behind an MCM toggle and
 -- its own console commands; see docs/spikes/04-07-combined-test.md.
 local Spike4 = Ext.Require("Spikes/Spike4_Anims.lua");     Spike4.Register()
