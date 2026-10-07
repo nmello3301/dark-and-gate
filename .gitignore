@@ -1,0 +1,32 @@
+# Third-party repos (read-only reference)
+reference/
+
+# Downloaded third-party mods (never commit)
+downloaded_mods/
+BG3ModManager_Latest/
+BG3SE-Updater-*/
+
+# Build output and local backups
+build/
+backups/
+*.pak
+
+# LSLib tools (downloaded, not committed)
+tools/lslib/
+
+# Logs copied from the game
+logs/
+
+# Never commit game files or decompiled output
+*.exe
+*.dll
+ghidra/
+decompiled/
+
+# Local Claude Code copy of the project skills; the canonical copy lives in setup/skills/.
+.claude/
+
+# Editor and OS
+.vscode/
+Thumbs.db
+desktop.ini

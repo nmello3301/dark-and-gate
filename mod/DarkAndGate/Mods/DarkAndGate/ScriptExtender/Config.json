@@ -1,0 +1,5 @@
+{
+    "RequiredVersion": 29,
+    "ModTable": "DarkAndGate",
+    "FeatureFlags": ["Lua"]
+}
