@@ -39,7 +39,7 @@ Each spike gets a note in `docs/spikes/`. Mark the answer: ✅ yes · ❌ no (us
 
 | # | Question | Answer | Note |
 | --- | --- | --- | --- |
-| 1 | Capture LMB / RMB / keys 1–0 and suppress BG3's bindings in first person | | |
+| 1 | Capture LMB / RMB / keys 1–0 and suppress BG3's bindings in first person | ✅ | `Ext.Events.KeyInput` + `MouseButtonInput` with `event:PreventAction()`; verified in [spike 1](spikes/01-input-capture.md). |
 | 2 | Camera ray through screen centre → world point and character hit | | |
 | 3 | Read weapon bone positions every frame | | |
 | 4 | Play custom animations at a chosen speed and cancel at combo points | | |

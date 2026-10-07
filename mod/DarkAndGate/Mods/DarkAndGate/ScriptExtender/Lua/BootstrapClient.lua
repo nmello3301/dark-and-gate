@@ -17,3 +17,6 @@ Spike11.Register()
 
 local Spike11b = Ext.Require("Spikes/Spike11b_Camera.lua")
 Spike11b.Register()
+
+local Spike1 = Ext.Require("Spikes/Spike1_Input.lua")
+Spike1.Register()

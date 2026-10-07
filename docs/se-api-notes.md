@@ -44,6 +44,16 @@ end
 - `ClientControl` (tag) — enumerate with `Ext.Entity.GetAllEntitiesWithComponent("ClientControl")` to find the local client-controlled character. Verified 2026-10-08.
 - `ClientEquipmentVisuals` (`ecl::EquipmentVisualsComponent`) — hash map by `ItemSlot` to arrays of sub-visual entity handles. Useful for hiding a helmet specifically. Verified 2026-10-08 that the sub-visual entities exist and are reachable.
 
+### Input events (client)
+
+Verified by spike 1 on 2026-10-08.
+
+- `Ext.Events.KeyInput:Subscribe(fn)` — called for every keyboard event. Event shape: `{ Event: SDLKeyEvent, Key: SDLScanCode, Modifiers: SDLKeyModifier, Pressed: bool, Repeat: bool, CanPreventAction: bool }`.
+- `Ext.Events.MouseButtonInput:Subscribe(fn)` — called for mouse button events. Shape: `{ Button: int, Pressed: bool, Clicks: int, X: int, Y: int, CanPreventAction: bool }`. `Button == 1` is LMB, `3` is RMB (SDL convention).
+- `event:PreventAction()` on either event blocks BG3's default handler from running. Confirmed to work for LMB, RMB, and the digit row — the character doesn't move, context menus don't open, hotbar slots don't fire. The log subscriber still sees the event, so our handlers run while BG3's don't.
+- Digit-row scancodes stringify as `NUM_1`..`NUM_0`, not `Key1`..`Key0` as the IDE helpers' `SDLScanCode` enum suggests.
+- The IDE helpers (`reference/bg3se/BG3Extender/IdeHelpers/ExtIdeHelpers.lua`) list these events under names like `EclLuaKeyInput` / `EclLuaMouseButton` with an `Ecl` prefix. **Those are wrong.** The runtime names, taken from `LuaClient.cpp:161,171`, are `KeyInput` and `MouseButtonInput`. If a subscription silently never fires, verify against `BG3Extender/Lua/Client/LuaClient.cpp` rather than the IDE helpers.
+
 ### Console commands
 
 - `Ext.RegisterConsoleCommand(name, fn)` registers a command that is invoked from the SE console with a **`!` prefix** (`!dag11_dump`). The command only fires when the console is in the Lua state that registered it, so a client-registered command needs the console in client context (`client` to switch to `C >>`). Verified 2026-10-08 (initial Spike 11 run tripped on this because `dag11_dump` was typed without `!`).
