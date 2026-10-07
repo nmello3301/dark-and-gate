@@ -64,7 +64,7 @@ tools/native/            native plugin, only if a spike proves it is needed
 
 ## Hard rules
 
-1. **Never modify the game install or another mod's files.** The only exception is `ScriptExtenderSettings.json` in `bin`. All deployment goes through `scripts/deploy.ps1`. To return the game to vanilla, the developer runs `scripts/reset-bg3-to-vanilla.ps1` (moves, never deletes).
+1. **Never modify the game install or another mod's files.** The only exception is `ScriptExtenderSettings.json` in `bin`. All deployment goes through `scripts/deploy.ps1`. To return the game to vanilla, the developer runs `scripts/reset-bg3-to-vanilla.ps1` (moves, never deletes). We tried a loose-files `-Loose` deploy mode and it did not work — BG3 reads mod Lua from the installed pak by GUID, not from `Data\Mods\<Folder>\`. See `docs/se-api-notes.md`.
 2. **Never commit or ship game files, decompiled code, or other mods' assets.** The mod ships our own code, our own data and patches only.
 3. **`reference/` is read-only and git-ignored.** Brawl is GPL-3.0: until the fork decision is logged in `DECISIONS.md`, read it to learn from it but don't copy its code into `mod/`.
 4. **Never reimplement another game's assets.** Dark and Darker and Blade & Sorcery are design references only: no animations, sounds or art from them.

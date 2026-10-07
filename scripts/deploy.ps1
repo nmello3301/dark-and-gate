@@ -12,8 +12,11 @@
   load order exported. Re-running deploy.ps1 only replaces the .pak, so you do
   this just once.
 
-  For pure Lua changes, you do not need to redeploy: open the SE console in
-  game and type "reset" to reload the Lua VM.
+  Lua changes require re-running this script and reloading, because SE reads
+  mod Lua out of the installed .pak via the mod GUID. Loose files in
+  <GameDir>\Data\Mods\<Folder>\ do NOT override the pak once the mod is
+  registered through modsettings.lsx -- verified 2026-10-08. See the note
+  in docs\se-api-notes.md.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\scripts\deploy.ps1
@@ -58,8 +61,5 @@ First run only:
   4. File > Save Load Order to File  (or press the Export button).
   5. Launch Baldur's Gate 3.
 
-Already active? You are done — just launch the game.
-
-For Lua-only changes you do not need to redeploy; open the SE console in game
-and type:  reset
+Already active? You are done - just launch the game.
 "@

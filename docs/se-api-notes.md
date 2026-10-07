@@ -79,6 +79,30 @@ Verified by spike 1 on 2026-10-08.
 
 - `Ext.RegisterConsoleCommand(name, fn)` registers a command that is invoked from the SE console with a **`!` prefix** (`!dag11_dump`). The command only fires when the console is in the Lua state that registered it, so a client-registered command needs the console in client context (`client` to switch to `C >>`). Verified 2026-10-08 (initial Spike 11 run tripped on this because `dag11_dump` was typed without `!`).
 
+### Loose mod files do not override an installed pak
+
+Attempted 2026-10-08 against SE v32 and BG3 Patch 8: an installed
+`%LOCALAPPDATA%\Larian Studios\Baldur's Gate 3\Mods\DarkAndGate.pak` cannot
+be shadowed by loose files written into
+`<GameDir>\Data\Mods\DarkAndGate\<same tree>`. After `reset` in the SE
+console, SE still logs `Loading bootstrap script: Mods/DarkAndGate/...`
+with the pak's content, not the loose edits.
+
+Mod bootstraps are loaded via `ExtensionStateBase::LuaLoadModScript(modGuid,
+fileName)` (see `reference/bg3se/BG3Extender/Extender/Shared/ExtensionState.cpp:428`),
+which resolves the file through the mod's pak metadata — not through the
+VFS path lookup that would pick up loose files. The only paths that honour
+loose-file overrides are the game's own asset VFS and SE's
+`LuaBuiltinResourceDirectory` (for `builtin://` scripts, not mod Lua).
+
+**Workflow:** Lua changes require closing BG3, running `scripts/deploy.ps1`,
+and relaunching. `reset` alone is not enough. If this friction becomes
+painful, the two paths worth investigating are (a) wiring `Ext.IO.AddPathOverride`
+from a tiny bootstrap stub, which may or may not work depending on when SE
+resolves per-mod Lua paths, and (b) temporarily removing the installed pak
+so loose files are the only source for the mod (requires validating that
+BG3 scans `Data\Mods\` for mods without a pak).
+
 ### Logging
 
 - `Ext.Utils.Print(...)` goes to the SE debug console (when `CreateConsole: true` in `ScriptExtenderSettings.json`) and to the SE runtime log (when `EnableLogging: true` and `LogRuntime: true`). Default SE settings in release builds have `CreateConsole: false`; we rely on an explicit settings file.
