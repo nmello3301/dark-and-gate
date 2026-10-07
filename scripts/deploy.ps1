@@ -22,7 +22,12 @@
   powershell -ExecutionPolicy Bypass -File .\scripts\deploy.ps1
 #>
 param(
-  [string]$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+  [string]$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
+  # -NoWait: fail immediately if BG3 is running (old behaviour, keep for CI).
+  # Default: poll every 2s, up to 5 minutes, until BG3 exits. The pak is
+  # file-locked while BG3 holds it open, so there's no point in doing anything
+  # else — waiting is strictly nicer than throwing and asking the dev to rerun.
+  [switch]$NoWait
 )
 
 $ErrorActionPreference = 'Stop'
@@ -37,8 +42,21 @@ $installedPak = Join-Path $modsFolder "DarkAndGate.pak"
 
 if (-not (Test-Path -LiteralPath $divine))    { throw "divine.exe not found at: $divine" }
 if (-not (Test-Path -LiteralPath $modSource)) { throw "Mod source folder not found: $modSource" }
-if (Get-Process -Name bg3, bg3_dx11 -ErrorAction SilentlyContinue) {
-  throw "Close Baldur's Gate 3 before deploying."
+
+$bg3Running = { Get-Process -Name bg3, bg3_dx11 -ErrorAction SilentlyContinue }
+if (& $bg3Running) {
+  if ($NoWait) {
+    throw "Close Baldur's Gate 3 before deploying. (-NoWait set.)"
+  }
+  Write-Host "Baldur's Gate 3 is running. Waiting for it to close (Ctrl-C to abort)..." -ForegroundColor Yellow
+  $deadline = (Get-Date).AddMinutes(5)
+  while (& $bg3Running) {
+    if ((Get-Date) -gt $deadline) {
+      throw "BG3 still running after 5 min. Giving up — close it and retry."
+    }
+    Start-Sleep -Seconds 2
+  }
+  Write-Host "BG3 closed. Packing now." -ForegroundColor Green
 }
 
 New-Item -ItemType Directory -Force -Path $buildDir   | Out-Null
