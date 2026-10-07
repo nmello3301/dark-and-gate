@@ -31,7 +31,7 @@ The biggest risk to these numbers is animation work in M1 and M2, not code.
 - [x] Mod scaffold and `scripts/deploy.ps1`
 - [x] DarkAndGate enabled in BG3 Mod Manager
 - [x] "Dark and Gate loaded" on client and server, visible in the console and in the log files
-- [ ] First commit pushed to GitHub
+- [x] First commit pushed to GitHub
 
 ## M0 — Engine spikes
 
