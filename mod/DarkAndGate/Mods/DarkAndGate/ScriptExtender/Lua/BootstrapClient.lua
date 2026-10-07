@@ -11,3 +11,6 @@ Log.Write("Dark and Gate loaded. SE v" .. tostring(Ext.Utils.Version()))
 Ext.Events.SessionLoaded:Subscribe(function()
     Log.Write("SessionLoaded (client).")
 end)
+
+local Spike11 = Ext.Require("Spikes/Spike11_HeadHiding.lua")
+Spike11.Register()

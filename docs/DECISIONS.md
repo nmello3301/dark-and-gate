@@ -4,6 +4,7 @@ Newest first. One line per decision: date, decision, reason. Link the spike note
 
 | Date | Decision | Why |
 | --- | --- | --- |
+| 2026-10-08 | Head/hair/beard hiding uses `Visual.ObjectDescs[i].Renderable.PropertyList.RenderPasses = 0` on matched sub-visuals, local client only ([spike 11](spikes/11-head-hiding.md)) | Confirmed in-game: VisualFlags writes and Attachment.Offset writes don't take at runtime; RenderPasses is the per-frame live field the renderer reads. |
 | 2026-10-07 | True first person: camera on the head bone, local player's head and headwear hidden on their own client; never shrink the character (spike 11) | A camera at eye height sees inside the head; shrinking is a hack |
 | 2026-10-07 | Traversal highlights: faint glow on vines, ladders, climbable walls, stairs and jump-up ledges (M4) | First person makes the ways up hard to spot |
 | 2026-10-07 | Native mods load through Ch4nKyy's Mod Loader (`bin\version.dll`), not Native Mod Loader; never install both | WASD 1.9.9 supports it, it is current, and two loaders can load the same DLLs twice |

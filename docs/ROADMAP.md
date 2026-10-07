@@ -49,7 +49,7 @@ Each spike gets a note in `docs/spikes/`. Mark the answer: ✅ yes · ❌ no (us
 | 8 | Add a tab to the native character menu | | |
 | 9 | Net messages fast enough for hit claims at 2–4 players | | |
 | 10 | Geometry raycast fast enough for wall-bounce checks every tick | | |
-| 11 | Camera on the head bone; local player's head, hair and headwear hidden on their own client only (no shrinking) | | |
+| 11 | Camera on the head bone; local player's head, hair and headwear hidden on their own client only (no shrinking) | ◐ | Head/hair/beard hiding verified ([spike 11](spikes/11-head-hiding.md)) via `RenderableObject.PropertyList.RenderPasses`. Camera-on-head-bone still to prove (part of group A). |
 
 - [ ] First-person camera values tuned in `BG3NativeCameraTweaks.toml`
 - [ ] True first person: no view inside the head, hands and weapon visible, other players see the full model
