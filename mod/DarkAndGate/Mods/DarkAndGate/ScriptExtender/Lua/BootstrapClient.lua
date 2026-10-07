@@ -23,3 +23,6 @@ Spike1.Register()
 
 local Spike3 = Ext.Require("Spikes/Spike3_BoneReads.lua")
 Spike3.Register()
+
+local Spike2 = Ext.Require("Spikes/Spike2_AimRay.lua")
+Spike2.Register()

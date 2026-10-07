@@ -44,6 +44,27 @@ end
 - `ClientControl` (tag) — enumerate with `Ext.Entity.GetAllEntitiesWithComponent("ClientControl")` to find the local client-controlled character. Verified 2026-10-08.
 - `ClientEquipmentVisuals` (`ecl::EquipmentVisualsComponent`) — hash map by `ItemSlot` to arrays of sub-visual entity handles. Useful for hiding a helmet specifically. Verified 2026-10-08 that the sub-visual entities exist and are reachable.
 
+### Camera + aim ray from Lua
+
+Verified by spike 2 on 2026-10-08.
+
+- Find the active camera: `Ext.Entity.GetAllEntitiesWithComponent("Camera")`, then on each entity, `ent.Camera.Active` is a bool. Grab `ent.Camera.Controller` for its fields.
+- `controller.FOV` and `controller.AspectRatio` read correctly (radians for FOV).
+- `controller.Camera.ViewMatrix` and `.InvViewMatrix` return SE's **flat 16-float column-major** Lua table (one `glm::mat4`). Column `c` (0..3) occupies indices `4*c + 1 .. 4*c + 4`. From `InvViewMatrix`:
+  - Camera world position = `(invView[13], invView[14], invView[15])`.
+  - Camera forward = `-(invView[9], invView[10], invView[11])` (negate the "back" axis column).
+- `controller.LookAt` field reads back as `(0, 0, 0)` — same vec3 binding gap as `WorldTransform.Translate`. Compute forward from `InvViewMatrix` instead.
+- `Ext.Level.RaycastClosest(from, to, physicsType, collidesWith, ignoredGroups, maxHits): PhxPhysicsHit`:
+  - `physicsType`: `"Static"` or `"Dynamic"`.
+  - `collidesWith` / `ignoredGroups`: Lua arrays of `PhysicsGroupFlags` names like `{"Terrain", "Scenery", "Character", "Item"}`.
+  - `maxHits`: int, usually `1` for closest.
+- On the returned `PhxPhysicsHit`:
+  - `hit.Distance` — real; a fraction in `[0, 1]` of `|to - from|`. Reconstruct the world hit position as `from + (to - from) * hit.Distance`.
+  - `hit.PhysicsGroup` — bitmask userdata; `tostring(...)` lists flag names.
+  - `hit.Shape` — `phx::PhysicsShape` pointer; comparable across hits but not resolvable to an entity in Lua without a helper.
+  - `hit.Position`, `hit.Normal` — same vec3 bug, read as `(0, 0, 0)`. Reconstruct Position from the ray; Normal needs the native plugin.
+- Sweep / Test variants exist (`SweepSphereClosest`, `SweepCapsuleClosest`, `TestBox`, `TestSphere`), same argument shape with an extra geometry parameter.
+
 ### Input events (client)
 
 Verified by spike 1 on 2026-10-08.
