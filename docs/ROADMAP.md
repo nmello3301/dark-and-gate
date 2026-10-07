@@ -9,16 +9,28 @@ Estimates assume part-time work (evenings). They are guesses made on 2026-10-07 
 | Milestone | What it delivers | Estimate | Started | Done |
 | --- | --- | --- | --- | --- |
 | Setup | Repo, tools, mod scaffold, deploy and log loop working | 1 evening | 2026-10-07 | |
-| M0 Spikes | Answers to the 11 engine questions; fork-Brawl decision | 1–3 weeks | 2026-10-07 | 2026-10-08 (engine answers in; fork-Brawl and estimates still open) |
-| M1 Vertical slice | Longsword, Fire Bolt, Fireball, Misty Step, mana, hotbar, vs goblins | 4–8 weeks | | |
+| M0 Spikes | Answers to the 11 engine questions; fork-Brawl decision | 1–3 weeks | 2026-10-07 | 2026-10-08 |
+| M1a Native plugin | C++ DLL exports: camera follow + mouselook, then bones, anim speed/cancel, hit normals | 3–5 weeks | | |
+| M1b Combat slice | Longsword chain, blade-path hits, Fire Bolt / Fireball / Misty Step, mana, hotbar, goblins on Brawl-adapted real-time AI | 5–8 weeks | | |
 | **Gate 1** | **Combat feels tight** | | | |
-| M2 Combat breadth | All 10 weapon families, all spell types, blocking, ranged | 6–10 weeks | | |
-| M3 Companion AI | Follow / Wait / Camp; shared real-time AI | 3–6 weeks | | |
-| M4 Native UI | Prepare Hotbar tab, first-person HUD, traversal highlights | 3–6 weeks | | |
+| M2 Combat breadth | All 10 weapon families, all spell types, blocking, ranged, first MP smoke test (spike 9 answer) | 6–10 weeks | | |
+| M3 Companion AI | Follow / Wait / Camp; archetypes on top of the Brawl adapter | 2–4 weeks | | |
+| M4 Native UI | Prepare Hotbar tab (spike 8 answer), first-person HUD, traversal highlights | 3–6 weeks | | |
 | M5 Act 1 pass | Encounter overrides, balance, saves, through Act 1 | 4–8 weeks | | |
 | M6 Multiplayer | 2–4 player co-op | 4–8 weeks | | |
 | **Gate 2** | **Act 1 in 2-player co-op** | | | |
 | M7 Acts 2–3 | Campaign pass, public release | 2–4 months | | |
+
+Estimate changes vs. 2026-10-07 originals:
+
+- M1 split into M1a (native) + M1b (combat). Combined 8–13 weeks vs. the
+  original 4–8. The slip is honest: six native exports is non-trivial C++,
+  and the native plugin blocks the combat slice from feeling right. Camera
+  follow + mouselook are the critical path for M1a — once FP looks right,
+  the rest of M1a is incremental.
+- M3 shrunk 3–6 → 2–4 weeks because the Brawl AI import handles the
+  tactical loop; M3 is now mostly archetype tuning + Follow/Wait/Camp UX.
+- Everything after M3 unchanged.
 
 The biggest risk to these numbers is animation work in M1 and M2, not code.
 
@@ -54,26 +66,46 @@ Each spike gets a note in `docs/spikes/`. Mark the answer: ✅ yes · ❌ no (us
 - [ ] First-person camera values tuned in `BG3NativeCameraTweaks.toml` (M1, bundled with native plugin camera-follow)
 - [ ] True first person: no view inside the head, hands and weapon visible, other players see the full model (M1, bundled with native plugin)
 - [ ] Mouse-look without holding the middle mouse button → ❌ **not Lua-reachable, folded into M1 native plugin.** See [DECISIONS 2026-10-08](DECISIONS.md) and `se-api-notes.md`.
-- [ ] Decision logged: fork Brawl or start fresh → **comparison written at [docs/fork-brawl.md](fork-brawl.md); awaiting the dev's call.**
+- [x] Decision logged: fork Brawl or start fresh → **Option B: fork, project is GPL-3.0.** See DECISIONS 2026-10-08 and [fork-brawl.md](fork-brawl.md).
 - [x] Decision logged: data file format for `data/` → **Lua tables.** See DECISIONS 2026-10-08.
-- [ ] Estimates for M1 onwards revised
+- [x] Estimates for M1 onwards revised. M1 split into M1a + M1b above.
 
-## M1 — Vertical slice
+## M1a — Native plugin foundation
 
-- [ ] Real-time combat loop (from Brawl or our own)
-- [ ] Longsword: 3-swing chain with timing data
-- [ ] Blade-path hit check, with head / torso / limb zones
-- [ ] Blocking and parry with a shield
-- [ ] Fire Bolt aimed at the crosshair
-- [ ] Fireball with a ground preview
-- [ ] Misty Step to the crosshair
-- [ ] Mana pool, regeneration and costs (server-owned)
-- [ ] Hotbar on keys 1–0 (ImGui window to set it up)
-- [ ] Hit reactions and blood/spark effects
-- [ ] Goblin enemies on the shared real-time AI
-- [ ] **Native plugin** (`tools/native/`) bundling the engine hooks that Lua can't reach: tight camera follow (spike 11 gap) + named-bone world positions (spike 3 gap). Must-have before Gate 1 — the melee blade-path hit check depends on bone reads. See [spike 3](spikes/03-weapon-bone-reads.md) for scope.
-- [ ] The Emerald Grove gate fight playable start to finish in DEV-SAVE
-- [ ] **Gate 1 — combat feels tight.** Playtest notes written; go / no-go recorded in `DECISIONS.md`
+The DLL that lives in `tools/native/` and loads via Ch4nKyy's Mod Loader.
+Order of exports is "what makes FP look right first", so M1b can start as
+soon as the camera is usable.
+
+- [ ] Build setup: Visual Studio C++ project, Ch4nKyy loader stub, MinHook or similar for engine hooks. Template: Native Camera Tweaks source.
+- [ ] **Camera follow + mouselook** (combined — same hook): read mouse delta, drive camera yaw/pitch, place camera at a Lua-chosen bone/world point each frame. Unblocks true first person.
+- [ ] FP camera values finalized in `BG3NativeCameraTweaks.toml` once mouselook is live.
+- [ ] True first person: local head / hair / beard / headwear hidden (Lua side already works; native covers the follow lag).
+- [ ] `GetBoneWorldPos(entity, boneName) → vec3`. Unblocks the blade-path hit check.
+- [ ] `SetAnimPlaySpeed(entity, mult)` and `CancelAnim(entity)`. Unblocks swing-chain timing + hit stop.
+- [ ] `RaycastHitNormal(from, to) → vec3?`. Unblocks surface-aligned blood / spark effects.
+- [ ] (Stretch, deferred unless M1b feel demands it) `PushRagdoll(entity, vec3, force)`.
+- [ ] Smoke test: FP camera stays on the head, mouse look rotates smoothly, blade-path hits visibly land in the right places.
+
+## M1b — Combat vertical slice
+
+Depends on M1a camera + mouselook being usable. Everything else in M1a can
+land in parallel with M1b work.
+
+- [ ] Brawl import wired in: `Server/Brawl/` strips committed, `BrawlAdapter.lua` bridges Brawl's AI into our net channels and mana check.
+- [ ] Real-time combat loop (Brawl's RealTime pulse) running on DEV-SAVE goblins.
+- [ ] Longsword: 3-swing chain with timing data (`data/weapons/longsword.lua`).
+- [ ] Blade-path hit check, with head / torso / limb zones. Uses `GetBoneWorldPos`.
+- [ ] **AI melee goes through our swing + blade-path system, not BG3 attack rolls.** `Pick.decideActionOnTarget` adapted so melee choices resolve through the swing scheduler, not `Osi.UseSpell`.
+- [ ] Blocking and parry with a shield.
+- [ ] Fire Bolt aimed at the crosshair (uses the aim ray from spike 2).
+- [ ] Fireball with a ground preview.
+- [ ] Misty Step to the crosshair (needs a position-based cast; probe `Osi.UseSpellAtPosition` or spawn a transient target).
+- [ ] Mana pool, regeneration and costs (server-owned).
+- [ ] Hotbar on keys 1–0 (ImGui window to set it up — native tab is M4).
+- [ ] Hit reactions and blood/spark effects (uses `RaycastHitNormal` for surface alignment).
+- [ ] Goblin enemies on the shared Brawl-adapted AI.
+- [ ] The Emerald Grove gate fight playable start to finish in DEV-SAVE.
+- [ ] **Gate 1 — combat feels tight.** Playtest notes written; go / no-go recorded in `DECISIONS.md`.
 
 ## M2 — Combat breadth
 
