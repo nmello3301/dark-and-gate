@@ -14,6 +14,9 @@ backups/
 # LSLib tools (downloaded, not committed)
 tools/lslib/
 
+# Ghidra MCP source clone (built on the fly; too large to track)
+tools/ghidra-mcp-src/
+
 # Logs copied from the game
 logs/
 

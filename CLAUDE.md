@@ -32,7 +32,8 @@ Fill these in from `Initial todos.md`. Never guess a path; ask if one is missing
 | Downloaded mod archives | `C:\Users\nicol\Desktop\Dark and Gate\downloaded_mods` (git-ignored; never commit) |
 | Ghidra install (12.1.4) | `C:\Users\nicol\Downloads\ghidra_12.1.4_PUBLIC_20260921\ghidra_12.1.4_PUBLIC\` — launch via `ghidraRun.bat` |
 | Ghidra project (BG3) | `C:\Tools\GhidraProjects\BG3\BG3.gpr` — contains the analysed bg3.exe |
-| GhidraMCP bridge | `tools/ghidra-mcp/bridge_mcp_ghidra.py`; registered via `.mcp.json` at repo root. See `tools/ghidra-mcp/README.md` |
+| GhidraMCP source | `tools/ghidra-mcp-src/` — bethington/ghidra-mcp built from source against Ghidra 12.1.4. Extension installed to `%APPDATA%\ghidra\ghidra_12.1.4_PUBLIC\Extensions\GhidraMCP\`. HTTP server default port **8089**. See `tools/ghidra-mcp-src/README.md` and `docs/ghidra-mcp-setup.md` |
+| GhidraMCP bridge | `uv run --directory tools/ghidra-mcp-src bridge-mcp-ghidra` (stdio transport). Registered via `.mcp.json` at repo root |
 
 ## Dev save and installed mods
 
