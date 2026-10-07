@@ -79,6 +79,23 @@ Verified by spike 1 on 2026-10-08.
 
 - `Ext.RegisterConsoleCommand(name, fn)` registers a command that is invoked from the SE console with a **`!` prefix** (`!dag11_dump`). The command only fires when the console is in the Lua state that registered it, so a client-registered command needs the console in client context (`client` to switch to `C >>`). Verified 2026-10-08 (initial Spike 11 run tripped on this because `dag11_dump` was typed without `!`).
 
+### No world-level mouse motion events
+
+SE's client input surface (verified 2026-10-08 against SE v32):
+
+- `Ext.Events.KeyInput` — keyboard scancodes.
+- `Ext.Events.MouseButtonInput` — button down/up with X,Y at click time.
+- `Ext.Events.MouseWheelInput` — scroll deltas.
+- No `MouseMove` or `MouseMotion` event, no polling API for the mouse XY
+  outside UI contexts. `MouseEvent/MouseMove` exist in SE but only under
+  `ClientUI/Events.inl` for Noesis UI elements, not world input.
+  `ViewMousePosition[2]` exists in `UI.h:751` but is not bound to Lua.
+
+**Implication:** always-on mouselook (FPS style, no MMB held) cannot be
+built in Lua. It needs native hooks that read the mouse delta and drive
+the camera's yaw/pitch each frame. Rolled into the native plugin alongside
+camera follow and bone reads — see DECISIONS 2026-10-08.
+
 ### Loose mod files do not override an installed pak
 
 Attempted 2026-10-08 against SE v32 and BG3 Patch 8: an installed
