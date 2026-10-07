@@ -1,3 +1,4 @@
+﻿-- SPDX-License-Identifier: GPL-3.0-or-later
 -- Spike 4: play a custom-speed animation and cancel at a combo point.
 --
 -- Three questions:

@@ -1,0 +1,29 @@
+Dark and Gate
+Copyright (C) 2026 Nick
+
+Dark and Gate is free and open-source software, licensed under the GNU
+General Public License version 3.0 or later. See LICENSE for the full
+text.
+
+This mod includes code from:
+
+- Brawl (https://github.com/tinybike/Brawl)
+  Copyright (C) tinybike, GPL-3.0.
+  Imported at commit 1ac3c7c1a6bc01cdc21cb9ec8a0f857210f0ef31 (2026-05-09).
+  Original files live under mod/DarkAndGate/Mods/DarkAndGate/ScriptExtender/Lua/Server/Brawl/
+  and keep their original headers; modifications we make on top are also GPL-3.0.
+  Thanks to tinybike for solving the hardest 20% of real-time BG3 combat
+  so we didn't have to.
+
+This mod depends on, but does not include:
+
+- Script Extender (https://github.com/Norbyte/bg3se), by Norbyte. MIT.
+- Native Camera Tweaks (https://github.com/ersh1/BG3_NativeCameraTweaks), by ersh1.
+- Ch4nKyy's Mod Loader (version.dll).
+- WASD Character Movement, by its author.
+- Mod Configuration Menu, by Volitio.
+- AnimationUnlocker, by its author.
+
+Baldur's Gate 3 and all associated assets are property of Larian Studios.
+This mod reimplements mechanics from Dark and Darker and Blade & Sorcery
+from scratch; no assets, animations or sounds from either are included.

@@ -1,3 +1,4 @@
+﻿-- SPDX-License-Identifier: GPL-3.0-or-later
 -- Shared net-channel registry.
 --
 -- Dark and Gate always runs as client/server, even in single player. Every
@@ -24,7 +25,7 @@ Net.Channels = {
     PingReply         = "DAG_PingReply",
 
     -- Spike 5. Payload: { spell: string, fromUser: int, aim: {x,y,z}, targetUuid: string? }.
-    -- Server resolves user → character, then Osi.UseSpell on next tick.
+    -- Server resolves user â†’ character, then Osi.UseSpell on next tick.
     CastSpellRequest  = "DAG_CastSpellRequest",
 
     -- Spike 4. Payload: { animId: string, speed: number? }. Server plays the

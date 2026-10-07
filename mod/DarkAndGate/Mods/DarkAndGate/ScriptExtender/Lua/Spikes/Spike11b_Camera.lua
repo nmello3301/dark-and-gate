@@ -1,3 +1,4 @@
+﻿-- SPDX-License-Identifier: GPL-3.0-or-later
 -- Spike 11 (camera half).
 --
 -- Answered: first-person camera position is achieved via Native Camera Tweaks
@@ -7,11 +8,11 @@
 -- Unresolved from Lua: the chase-cam spring, which makes the character body
 -- drift ahead of the camera during fast movement. All our attempts failed:
 --   * writing CameraController.WorldTransform throws "lifetime expired" per tick.
---   * writing GameCameraBehavior.TargetDestination/Current — SE returns (0,0,0)
+--   * writing GameCameraBehavior.TargetDestination/Current â€” SE returns (0,0,0)
 --     from readback, so snapping Current = Dest teleports camera to origin.
---   * setting GameCameraBehavior.IsSnapping = true — writes succeed, no effect.
+--   * setting GameCameraBehavior.IsSnapping = true â€” writes succeed, no effect.
 --   * tuning GlobalSwitches.CameraSwitches[i] spring values (SnapDistance,
---     FollowSpeed, FollowSpringForce) — writes take effect but produce
+--     FollowSpeed, FollowSpringForce) â€” writes take effect but produce
 --     overshoot/oscillation; too tight causes catastrophic engine instability.
 -- Confirmed NCT itself does not hook the follow spring (only pitch/zoom/FOV/
 -- offset): https://github.com/ersh1/BG3_NativeCameraTweaks/tree/main/src.

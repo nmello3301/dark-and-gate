@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: GPL-3.0-or-later
 -- Client entry point. One client state per player (including the single-player
 -- "fake client" that always exists).
 -- Client owns feel: input, camera, aim, swing animation, HUD, effects.

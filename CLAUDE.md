@@ -5,7 +5,7 @@ A Baldur's Gate 3 mod that turns combat into first-person, real-time action: Dar
 - **Design:** `docs/DESIGN.md` is the source of truth. Read it before any feature work. Live version: https://claude.ai/code/artifact/d9d14ee0-9dac-4e0e-b924-4dc4b54b157a
 - **Decisions:** `docs/DECISIONS.md`. Append a line whenever a design question is settled.
 - **Progress:** `docs/ROADMAP.md`. Tick an item only after it is verified in-game, fill in milestone start and done dates, and record spike answers there. Keep it in sync whenever work finishes.
-- **Current milestone:** M0 is engine-closed (spikes 1-7, 10, 11 answered 2026-10-08; 8 deferred to M4, 9 deferred to M2). Two M0 admin items still open: the fork-Brawl decision (see `docs/fork-brawl.md`) and revised M1+ estimates. M1 vertical slice starts once those are decided.
+- **Current milestone:** M1a (native plugin foundation). M0 closed 2026-10-08. The project is now GPL-3.0; the repo goes public on the first shared build. Brawl's real-time + AI subsystems are imported verbatim under `Server/Brawl/` and will be stripped + wired in during M1b.
 
 ## Platform
 
@@ -65,7 +65,7 @@ tools/native/            native plugin, only if a spike proves it is needed
 ## Hard rules
 
 1. **Never modify the game install or another mod's files.** The only exception is `ScriptExtenderSettings.json` in `bin`. All deployment goes through `scripts/deploy.ps1`. To return the game to vanilla, the developer runs `scripts/reset-bg3-to-vanilla.ps1` (moves, never deletes). We tried a loose-files `-Loose` deploy mode and it did not work — BG3 reads mod Lua from the installed pak by GUID, not from `Data\Mods\<Folder>\`. See `docs/se-api-notes.md`.
-2. **Never commit or ship game files, decompiled code, or other mods' assets.** The mod ships our own code, our own data and patches only.
+2. **Never commit or ship game files, decompiled code, or other mods' assets.** The mod ships our own code, our own data and patches only. Exception: imported upstream Brawl Lua under `mod/.../Server/Brawl/` is permitted because Brawl is GPL-3 and we credit it in NOTICE; keep imported files verbatim where feasible so the diff against upstream stays legible.
 3. **`reference/` is read-only and git-ignored.** Brawl is GPL-3.0: until the fork decision is logged in `DECISIONS.md`, read it to learn from it but don't copy its code into `mod/`.
 4. **Never reimplement another game's assets.** Dark and Darker and Blade & Sorcery are design references only: no animations, sounds or art from them.
 5. **Back up saves before any test that writes to a save.** Use the dev save, never the developer's real playthroughs.

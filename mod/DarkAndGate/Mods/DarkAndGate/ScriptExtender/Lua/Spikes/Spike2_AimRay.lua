@@ -1,7 +1,8 @@
+﻿-- SPDX-License-Identifier: GPL-3.0-or-later
 -- Spike 2: can we raycast from the camera through the screen centre?
 --
 -- Two parts:
---   1. The RaycastClosest API itself works (dag2_ray — arbitrary ray).
+--   1. The RaycastClosest API itself works (dag2_ray â€” arbitrary ray).
 --   2. We can get the camera's world position + forward (dag2_dump reads
 --      InvViewMatrix; dag2_aim fires a ray along forward).
 
@@ -131,7 +132,7 @@ local function tryRaycast(label, from, to)
 end
 
 local function rayDown()
-    -- Arbitrary known-ish location in the Grove area: (0,100,0) → (0,-100,0).
+    -- Arbitrary known-ish location in the Grove area: (0,100,0) â†’ (0,-100,0).
     -- Just a smoke test that the API works with sensible from/to; if we hit
     -- something, raycast is callable.
     tryRaycast("ray-down", { 0, 100, 0 }, { 0, -100, 0 })
@@ -167,7 +168,7 @@ local function rayFromCameraForward()
 
     local len = math.sqrt(fx*fx + fy*fy + fz*fz)
     if len < 0.001 then
-        Log.Write(string.format("Spike2: forward vector too short (len=%.4f) — matrix probably not populated", len))
+        Log.Write(string.format("Spike2: forward vector too short (len=%.4f) â€” matrix probably not populated", len))
         return
     end
     fx = fx / len; fy = fy / len; fz = fz / len

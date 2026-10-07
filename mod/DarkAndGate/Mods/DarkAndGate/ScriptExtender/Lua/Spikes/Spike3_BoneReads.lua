@@ -1,3 +1,4 @@
+﻿-- SPDX-License-Identifier: GPL-3.0-or-later
 -- Spike 3: can we read live bone transforms every tick?
 --
 -- Walks the local character's visual tree to the weapon sub-visual, dumps:

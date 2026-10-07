@@ -1,3 +1,4 @@
+﻿-- SPDX-License-Identifier: GPL-3.0-or-later
 -- Spike 6: push the ragdoll in the direction of the killing blow.
 --
 -- BG3's death animation picks a direction based on the final damage hit's

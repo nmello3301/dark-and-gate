@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: GPL-3.0-or-later
 -- Server entry point. Lives in Mods/DarkAndGate/ScriptExtender/Lua/.
 -- Server owns truth: damage, mana, hit validation, AI, hotbars, saves.
 -- M0: just prove the mod loads and can write to the log file.

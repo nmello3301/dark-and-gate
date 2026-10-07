@@ -1,3 +1,4 @@
+﻿-- SPDX-License-Identifier: GPL-3.0-or-later
 -- Dumps every Osiris function visible to the current SE build to
 -- Script Extender/DarkAndGate/osiris-functions.txt. Fires on the first
 -- !dag_osidump console call so we never run it on load.
@@ -24,7 +25,7 @@ local function listViaExtApi()
 end
 
 -- Walk the hidden Osi proxy by probing a known-good set of names. Not a true
--- enumeration — just a sanity check that the proxy resolves. Returns the
+-- enumeration â€” just a sanity check that the proxy resolves. Returns the
 -- subset that resolved.
 local KNOWN_PROBE_NAMES = {
     "ApplyStatus", "ApplyDamage", "PlayAnimation", "UseSpell",

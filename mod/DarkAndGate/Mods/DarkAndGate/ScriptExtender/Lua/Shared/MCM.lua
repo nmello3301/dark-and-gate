@@ -1,3 +1,4 @@
+﻿-- SPDX-License-Identifier: GPL-3.0-or-later
 -- Thin shim for Mod Configuration Menu. If MCM is loaded we register our
 -- toggles with it; if not, we fall back to console commands that flip the
 -- same in-memory table. Either way the rest of the mod reads MCM.Get(key).
