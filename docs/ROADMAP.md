@@ -41,7 +41,7 @@ Each spike gets a note in `docs/spikes/`. Mark the answer: ✅ yes · ❌ no (us
 | --- | --- | --- | --- |
 | 1 | Capture LMB / RMB / keys 1–0 and suppress BG3's bindings in first person | ✅ | `Ext.Events.KeyInput` + `MouseButtonInput` with `event:PreventAction()`; verified in [spike 1](spikes/01-input-capture.md). |
 | 2 | Camera ray through screen centre → world point and character hit | | |
-| 3 | Read weapon bone positions every frame | | |
+| 3 | Read weapon bone positions every frame | ❌ | Weapon bones live in shared skeleton `Pose`, which SE hides from Lua. Only cloth-driven overrides are readable. See [spike 3](spikes/03-weapon-bone-reads.md). Native plugin required. |
 | 4 | Play custom animations at a chosen speed and cancel at combo points | | |
 | 5 | Cast a spell at a world point from script, with a short animation | | |
 | 6 | Push the ragdoll in the direction of the killing blow | | |
@@ -71,7 +71,7 @@ Each spike gets a note in `docs/spikes/`. Mark the answer: ✅ yes · ❌ no (us
 - [ ] Hotbar on keys 1–0 (ImGui window to set it up)
 - [ ] Hit reactions and blood/spark effects
 - [ ] Goblin enemies on the shared real-time AI
-- [ ] Native camera follow — no lag while moving. Must-have before Gate 1. See [spike 11](spikes/11-head-hiding.md#known-artifact-camera-follow-lag-during-movement) for the dead-ends we hit from Lua.
+- [ ] **Native plugin** (`tools/native/`) bundling the engine hooks that Lua can't reach: tight camera follow (spike 11 gap) + named-bone world positions (spike 3 gap). Must-have before Gate 1 — the melee blade-path hit check depends on bone reads. See [spike 3](spikes/03-weapon-bone-reads.md) for scope.
 - [ ] The Emerald Grove gate fight playable start to finish in DEV-SAVE
 - [ ] **Gate 1 — combat feels tight.** Playtest notes written; go / no-go recorded in `DECISIONS.md`
 

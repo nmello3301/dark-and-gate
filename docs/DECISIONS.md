@@ -4,6 +4,7 @@ Newest first. One line per decision: date, decision, reason. Link the spike note
 
 | Date | Decision | Why |
 | --- | --- | --- |
+| 2026-10-08 | M1 ships a native plugin bundling tight camera follow + named-bone world positions. Build it before Gate 1 ([spike 3](spikes/03-weapon-bone-reads.md), [spike 11](spikes/11-head-hiding.md#known-artifact-camera-follow-lag-during-movement)) | Both features touch engine state SE doesn't expose: `CameraController.WorldTransform` has single-tick lifetime, `Visual.MeshBinding.Pose` is `[[bg3::hidden]]`. Spikes 7 and 10 run next; if either also needs native, bundle them in. |
 | 2026-10-08 | Input capture + suppression uses `Ext.Events.KeyInput` / `MouseButtonInput` + `event:PreventAction()` from the client Lua state ([spike 1](spikes/01-input-capture.md)) | Verified in-game: LMB, RMB and 1–0 all observable, and PreventAction blocks BG3's default handler for every one. No native hook needed for input. |
 | 2026-10-08 | Head/hair/beard hiding uses `Visual.ObjectDescs[i].Renderable.PropertyList.RenderPasses = 0` on matched sub-visuals, local client only ([spike 11](spikes/11-head-hiding.md)) | Confirmed in-game: VisualFlags writes and Attachment.Offset writes don't take at runtime; RenderPasses is the per-frame live field the renderer reads. |
 | 2026-10-07 | True first person: camera on the head bone, local player's head and headwear hidden on their own client; never shrink the character (spike 11) | A camera at eye height sees inside the head; shrinking is a hack |
