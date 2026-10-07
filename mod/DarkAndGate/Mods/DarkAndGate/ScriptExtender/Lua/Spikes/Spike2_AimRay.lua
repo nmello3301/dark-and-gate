@@ -183,11 +183,28 @@ local function rayFromCameraForward()
     tryRaycast("aim", { sx, sy, sz }, to)
 end
 
+-- Spike 10 piggyback: raycast throughput benchmark.
+local function benchRays(cmd, countArg)
+    local n = tonumber(countArg) or 100
+    local from = { 0, 100, 0 }
+    local to   = { 0, -100, 0 }
+    local startMs = tonumber(Ext.Timer.MonotonicTime())
+    for _ = 1, n do
+        Ext.Level.RaycastClosest(from, to, "Static", DEFAULT_COLLIDES_WITH, DEFAULT_IGNORED, 1)
+    end
+    local endMs = tonumber(Ext.Timer.MonotonicTime())
+    local totalMs = endMs - startMs
+    local perRayUs = (totalMs * 1000.0) / n
+    Log.Write(string.format("Spike2/10: bench n=%d total=%.3fms per-ray=%.1fus",
+        n, totalMs, perRayUs))
+end
+
 function M.Register()
-    Ext.RegisterConsoleCommand("dag2_dump", function() dumpOne() end)
-    Ext.RegisterConsoleCommand("dag2_ray",  function() rayDown() end)
-    Ext.RegisterConsoleCommand("dag2_aim",  function() rayFromCameraForward() end)
-    Log.Write("Spike2: registered dag2_dump / dag2_ray / dag2_aim")
+    Ext.RegisterConsoleCommand("dag2_dump",  function() dumpOne() end)
+    Ext.RegisterConsoleCommand("dag2_ray",   function() rayDown() end)
+    Ext.RegisterConsoleCommand("dag2_aim",   function() rayFromCameraForward() end)
+    Ext.RegisterConsoleCommand("dag2_bench", benchRays)
+    Log.Write("Spike2: registered dag2_dump / dag2_ray / dag2_aim / dag2_bench")
 end
 
 return M

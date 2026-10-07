@@ -48,7 +48,7 @@ Each spike gets a note in `docs/spikes/`. Mark the answer: ✅ yes · ❌ no (us
 | 7 | Freeze one character's animation for a few frames (hit stop) | | |
 | 8 | Add a tab to the native character menu | | |
 | 9 | Net messages fast enough for hit claims at 2–4 players | | |
-| 10 | Geometry raycast fast enough for wall-bounce checks every tick | | |
+| 10 | Geometry raycast fast enough for wall-bounce checks every tick | ✅ | ~0.6 µs per `Ext.Level.RaycastClosest` call. See [spike 10](spikes/10-raycast-throughput.md). |
 | 11 | Camera on the head bone; local player's head, hair and headwear hidden on their own client only (no shrinking) | ◐ | Head/hair/beard hide via `RenderableObject.PropertyList.RenderPasses`; FP camera via Native Camera Tweaks preset (`config/native/BG3NativeCameraTweaks.toml`). Chase-cam lag during movement unsolved from Lua — needs native plugin, see [spike 11](spikes/11-head-hiding.md#known-artifact-camera-follow-lag-during-movement). |
 
 - [ ] First-person camera values tuned in `BG3NativeCameraTweaks.toml`
