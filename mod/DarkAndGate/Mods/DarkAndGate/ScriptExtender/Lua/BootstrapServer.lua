@@ -14,3 +14,9 @@ Ext.Events.SessionLoaded:Subscribe(function()
     -- Ext.Osiris.RegisterListener. For M0 the load confirmation is enough.
     Log.Write("SessionLoaded (server).")
 end)
+
+local ServerNet = Ext.Require("Server/Net.lua")
+ServerNet.Register()
+
+local OsiDump = Ext.Require("Server/OsiDump.lua")
+OsiDump.Register()

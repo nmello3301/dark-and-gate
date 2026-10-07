@@ -104,6 +104,8 @@ Claude can't play the game; the developer is the playtester. Every change that n
 
 The `bg3-deploy-test` skill has the details.
 
+**Playtest handoff convention.** When a round is ready for the developer, Claude runs `powershell -ExecutionPolicy Bypass -File scripts\notify.ps1` once. That plays `scripts\notify.mp3` and launches BG3 through its Steam URL, so the developer gets an audible cue and doesn't have to click through the Start menu. Never call it in a loop and never from inside a running playtest — one call per handoff.
+
 ## Skills
 
 Project skills in `.claude/skills/`. They ship in `setup/skills/`; if `.claude/skills/` is missing, copy them over first.

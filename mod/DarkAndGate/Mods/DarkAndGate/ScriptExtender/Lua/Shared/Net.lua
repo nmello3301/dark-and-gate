@@ -1,0 +1,55 @@
+-- Shared net-channel registry.
+--
+-- Dark and Gate always runs as client/server, even in single player. Every
+-- cross-state message goes through a named channel so there is exactly one
+-- place to grep for the full wire protocol.
+--
+-- Channels are strings. The module UUID scopes them so other mods can't
+-- cross-talk. Payloads are plain Lua tables; SE's Ext.Net serializes them.
+--
+-- Rule: client sends intents, server validates and (if needed) calls Osi.
+-- Osi calls are never allowed inside restricted contexts (e.g. SessionLoaded),
+-- so Server/Net.lua queues them to the next tick via Ext.OnNextTick.
+
+local Net = {}
+
+Net.MOD_UUID = "d5d298fd-ba29-4dc1-8346-6ac96b8c2cd7"
+
+-- Channel names. Keep sorted and documented. Add here first; handlers go in
+-- Server/Net.lua and Client/Net.lua.
+Net.Channels = {
+    -- Round-trip verification. Payload: { nonce: string, sentMs: int64 }.
+    -- Server echoes with { nonce, sentMs, recvMs, replyMs }.
+    Ping              = "DAG_Ping",
+    PingReply         = "DAG_PingReply",
+
+    -- Spike 5. Payload: { spell: string, fromUser: int, aim: {x,y,z}, targetUuid: string? }.
+    -- Server resolves user → character, then Osi.UseSpell on next tick.
+    CastSpellRequest  = "DAG_CastSpellRequest",
+
+    -- Spike 4. Payload: { animId: string, speed: number? }. Server plays the
+    -- animation on the user's character via Osi.PlayAnimation.
+    PlayAnimRequest   = "DAG_PlayAnimRequest",
+
+    -- Spike 6. Payload: { targetUuid: string, direction: {x,y,z}, force: number }.
+    -- Server lands the killing-blow push (status + impulse via Osi.ApplyStatus).
+    RagdollPush       = "DAG_RagdollPush",
+
+    -- Spike 7. Payload: { targetUuid: string, durationMs: int }.
+    -- Server freezes the target by setting a short-lived timescale status.
+    HitStopRequest    = "DAG_HitStopRequest",
+}
+
+-- Every channel both sides care about. Both server and client must register
+-- all of these up front so a message never arrives at a side that hasn't
+-- subscribed yet.
+Net.AllChannels = {
+    Net.Channels.Ping,
+    Net.Channels.PingReply,
+    Net.Channels.CastSpellRequest,
+    Net.Channels.PlayAnimRequest,
+    Net.Channels.RagdollPush,
+    Net.Channels.HitStopRequest,
+}
+
+return Net

@@ -26,3 +26,19 @@ Spike3.Register()
 
 local Spike2 = Ext.Require("Spikes/Spike2_AimRay.lua")
 Spike2.Register()
+
+local ClientNet = Ext.Require("Client/Net.lua")
+ClientNet.Register()
+
+-- Combined 4+5+6+7 probe. Each spike is a module behind an MCM toggle and
+-- its own console commands; see docs/spikes/04-07-combined-test.md.
+local Spike4 = Ext.Require("Spikes/Spike4_Anims.lua");     Spike4.Register()
+local Spike5 = Ext.Require("Spikes/Spike5_SpellCast.lua"); Spike5.Register()
+local Spike6 = Ext.Require("Spikes/Spike6_Ragdoll.lua");   Spike6.Register()
+local Spike7 = Ext.Require("Spikes/Spike7_HitStop.lua");   Spike7.Register()
+
+-- One console command to prove the client->server round-trip works before
+-- running the actual spikes.
+Ext.RegisterConsoleCommand("dag_ping", function()
+    ClientNet.Ping()
+end)
