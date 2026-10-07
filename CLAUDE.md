@@ -30,6 +30,9 @@ Fill these in from `Initial todos.md`. Never guess a path; ask if one is missing
 | BG3 Mod Manager | `C:\Users\nicol\Desktop\Dark and Gate\BG3ModManager_Latest\BG3ModManager.exe` |
 | GitHub repo | https://github.com/nmello3301/dark-and-gate |
 | Downloaded mod archives | `C:\Users\nicol\Desktop\Dark and Gate\downloaded_mods` (git-ignored; never commit) |
+| Ghidra install (12.1.4) | `C:\Users\nicol\Downloads\ghidra_12.1.4_PUBLIC_20260921\ghidra_12.1.4_PUBLIC\` — launch via `ghidraRun.bat` |
+| Ghidra project (BG3) | `C:\Tools\GhidraProjects\BG3\BG3.gpr` — contains the analysed bg3.exe |
+| GhidraMCP bridge | `tools/ghidra-mcp/bridge_mcp_ghidra.py`; registered via `.mcp.json` at repo root. See `tools/ghidra-mcp/README.md` |
 
 ## Dev save and installed mods
 
