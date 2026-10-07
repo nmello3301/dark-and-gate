@@ -1,0 +1,125 @@
+# Native Camera Tweaks config, Dark and Gate first-person preset.
+#
+# This file is tracked in the Dark and Gate repo. The game actually reads it
+# from <BG3 install>\bin\NativeMods\BG3NativeCameraTweaks.toml -- copy it
+# there with scripts/install-camera-config.ps1 whenever this file changes.
+# WatchForConfigChanges = true means the plugin reloads in-game on save, so
+# you can tune by editing the installed copy, verifying, then propagating the
+# good values back here.
+#
+# First-person preset: zoom all the way in to the character's head, pitch
+# unlocked, FOV widened to 90, vertical offset at eye height.
+# The character's head/hair/beard are hidden by our Lua on !dag11_hide.
+
+[ExplorationPitch]
+ExplorationUnlockPitch = true
+ExplorationUnlockedPitchMax = 89.0
+ExplorationUnlockedPitchMin = -89.0
+ExplorationKeepTacticalPitchLocked = false
+
+ExplorationOverrideLockedPitch = false
+ExplorationLockedPitchClose = 19.05
+ExplorationLockedPitchFar = 40.71
+ExplorationLockedTacticalPitchClose = 85.55
+ExplorationLockedTacticalPitchFar = 85.55
+ExplorationLockedAltPitchClose = 32.69
+ExplorationLockedAltPitchFar = 39.7
+
+[ExplorationZoom]
+ExplorationOverrideZoom = true
+# Minimum zoom is the headline FP setting: 0.0 pushes the camera all the way
+# into the character. Max is kept at vanilla so you can still zoom out.
+ExplorationZoomMax = 12.0
+ExplorationZoomMin = 0.0
+ExplorationTacticalZoomMax = 50.0
+ExplorationTacticalZoomMin = 10.0
+ExplorationAltZoomMax = 40.0
+ExplorationAltZoomMin = 10.0
+
+[ExplorationFOV]
+ExplorationOverrideFOV = true
+# 90 degrees horizontal is the FPS standard; widens the view compared to the
+# vanilla ~55 which looks claustrophobic when the camera is on the head.
+ExplorationFOVClose = 90.0
+ExplorationFOVFar = 55.0
+ExplorationTacticalFOV = 25.0
+ExplorationAltFOVClose = 45.0
+ExplorationAltFOVFar = 45.0
+
+[ExplorationOffset]
+ExplorationOverrideOffset = true
+# 0.95 of the character height puts the camera at the eyes (vanilla 0.8 is
+# chest level). Horizontal offset stays at 0 so the camera is centred.
+ExplorationHorizontalOffsetMult = 0.0
+ExplorationVerticalOffsetMult = 0.95
+
+
+[CombatPitch]
+CombatUnlockPitch = true
+CombatUnlockedPitchMax = 89.0
+CombatUnlockedPitchMin = -89.0
+CombatKeepTacticalPitchLocked = false
+
+CombatOverrideLockedPitch = false
+CombatLockedPitchClose = 32.73
+CombatLockedPitchFar = 52.42
+CombatLockedTacticalPitchClose = 85.55
+CombatLockedTacticalPitchFar = 85.55
+CombatLockedAltPitchClose = 32.69
+CombatLockedAltPitchFar = 39.7
+
+[CombatZoom]
+CombatOverrideZoom = true
+CombatZoomMax = 15.0
+CombatZoomMin = 0.0
+CombatTacticalZoomMax = 50.0
+CombatTacticalZoomMin = 10.0
+CombatAltZoomMax = 40.0
+CombatAltZoomMin = 10.0
+
+[CombatFOV]
+CombatOverrideFOV = true
+CombatFOVClose = 90.0
+CombatFOVFar = 55.0
+CombatTacticalFOV = 25.0
+CombatAltFOVClose = 45.0
+CombatAltFOVFar = 45.0
+
+[CombatOffset]
+CombatOverrideOffset = true
+CombatHorizontalOffsetMult = 0.0
+CombatVerticalOffsetMult = 0.95
+
+
+[General]
+UnlockedPitchInitialValue = 0.0
+UnlockedPitchClampSpeed = 5.0
+# When the camera is zoomed all the way in, the "limit clipping with the floor"
+# logic will push the camera back up if we look straight down. Turning it off
+# so the pitch is fully respected -- the mesh-hide covers the "see inside the
+# head" problem instead.
+UnlockedPitchLimitClipping = false
+UnlockedPitchFloorOffset = 0.0
+ResetZoomOnZoneChange = false
+WatchForConfigChanges = true
+
+[Keyboard]
+KeyboardCameraRotationMult = 2.0
+
+[Mouse]
+MouseCameraRotationMult = 1.0
+MousePitchMult = 0.25
+MouseZoomMult = 0.5
+InvertMousePitch = false
+
+[Controller]
+ControllerCameraRotationMult = 2.0
+ControllerPitchMult = 0.5
+ControllerZoomMult = 0.5
+InvertControllerPitch = false
+SwapZoomAndPitch = false
+UseRightStickPressForZoom = false
+
+[ControllerDeadzone]
+OverrideRightStickDeadzone = true
+NewDeadzone = 0.15

@@ -14,3 +14,6 @@ end)
 
 local Spike11 = Ext.Require("Spikes/Spike11_HeadHiding.lua")
 Spike11.Register()
+
+local Spike11b = Ext.Require("Spikes/Spike11b_Camera.lua")
+Spike11b.Register()

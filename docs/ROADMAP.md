@@ -49,7 +49,7 @@ Each spike gets a note in `docs/spikes/`. Mark the answer: ✅ yes · ❌ no (us
 | 8 | Add a tab to the native character menu | | |
 | 9 | Net messages fast enough for hit claims at 2–4 players | | |
 | 10 | Geometry raycast fast enough for wall-bounce checks every tick | | |
-| 11 | Camera on the head bone; local player's head, hair and headwear hidden on their own client only (no shrinking) | ◐ | Head/hair/beard hiding verified ([spike 11](spikes/11-head-hiding.md)) via `RenderableObject.PropertyList.RenderPasses`. Camera-on-head-bone still to prove (part of group A). |
+| 11 | Camera on the head bone; local player's head, hair and headwear hidden on their own client only (no shrinking) | ◐ | Head/hair/beard hide via `RenderableObject.PropertyList.RenderPasses`; FP camera via Native Camera Tweaks preset (`config/native/BG3NativeCameraTweaks.toml`). Chase-cam lag during movement unsolved from Lua — needs native plugin, see [spike 11](spikes/11-head-hiding.md#known-artifact-camera-follow-lag-during-movement). |
 
 - [ ] First-person camera values tuned in `BG3NativeCameraTweaks.toml`
 - [ ] True first person: no view inside the head, hands and weapon visible, other players see the full model
@@ -71,6 +71,7 @@ Each spike gets a note in `docs/spikes/`. Mark the answer: ✅ yes · ❌ no (us
 - [ ] Hotbar on keys 1–0 (ImGui window to set it up)
 - [ ] Hit reactions and blood/spark effects
 - [ ] Goblin enemies on the shared real-time AI
+- [ ] Native camera follow — no lag while moving. Must-have before Gate 1. See [spike 11](spikes/11-head-hiding.md#known-artifact-camera-follow-lag-during-movement) for the dead-ends we hit from Lua.
 - [ ] The Emerald Grove gate fight playable start to finish in DEV-SAVE
 - [ ] **Gate 1 — combat feels tight.** Playtest notes written; go / no-go recorded in `DECISIONS.md`
 

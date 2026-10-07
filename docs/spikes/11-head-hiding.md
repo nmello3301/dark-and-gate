@@ -88,3 +88,41 @@ Levers that **did not** work and are documented so we don't retry them:
 
 Full details recorded in `docs/se-api-notes.md` under "Visuals: hiding meshes on the local client" so the next spike / M1 implementer doesn't have to re-derive them.
 
+## Camera half: answered yes with a known artifact (2026-10-08)
+
+**Camera placement works** via Native Camera Tweaks 2.5.1 (installed native plugin). The repo-tracked preset in `config/native/BG3NativeCameraTweaks.toml`, installed by `scripts/install-camera-config.ps1`, sets:
+
+- `ExplorationZoomMin = 0.0` and `ExplorationOverrideZoom = true` — scroll all the way in puts the camera at the character's head position.
+- `ExplorationOverrideFOV = true` with `ExplorationFOVClose = 90.0` — standard first-person FOV instead of the vanilla ~55°.
+- `ExplorationOverrideOffset = true` with `ExplorationVerticalOffsetMult = 0.95` — camera at eye level, not chest.
+- `ExplorationUnlockPitch = true` with `±89°` — look up/down freely.
+- Matching settings in the `CombatPitch/Zoom/FOV/Offset` sections so first-person stays active in combat.
+- `UnlockedPitchLimitClipping = false` so looking down doesn't force the camera back up; the mesh-hide covers the "see inside the head" problem instead.
+
+Combined with `!dag11_hide`, Gale is headless from his own eyes with a 90° FOV. Verified in DEV-SAVE.
+
+### Known artifact: camera-follow lag during movement
+
+When the character walks or runs, the body visibly drifts ahead of the camera for a few hundred milliseconds before the chase-cam spring catches up. **No Lua-only fix found.** Attempts that failed:
+
+- Writing `CameraController.WorldTransform.Translate` each tick — throws `"rf::CameraController whose lifetime has expired"` on the second tick; SE's camera-controller references are single-tick.
+- Writing `GameCameraBehavior.TargetDestination` and `TargetCurrent` — SE's Lua binding returns `(0,0,0)` from read-back on these vec3 fields, so copying destination to current teleports the camera to world origin and black-screens the game.
+- Setting `GameCameraBehavior.IsSnapping = true` each tick — write succeeds silently, has no visible effect.
+- Tuning `GlobalSwitches.CameraSwitches[i]` spring values (`TargetSnapDistance`, `TargetFollowSpeed`, `TargetFollowSpringForce`) — writes do take effect, but values large enough to kill the lag produce overshoot/oscillation; too-tight values cause the camera to snap to world origin on load, requiring a force-quit.
+- Native Camera Tweaks and WASD Character Movement both expose nothing for the follow spring — confirmed by reading both TOML configs and skimming NCT's public source at <https://github.com/ersh1/BG3_NativeCameraTweaks>.
+
+The three "tuning" console commands (`!dag_cam_dump`, `!dag_cam_snap followSpeed springForce snapDist`, `!dag_cam_restore`) are kept in `Spikes/Spike11b_Camera.lua` so M1 can iterate on spring values quickly if the native path isn't ready yet.
+
+### Related spikes that may need native code
+
+Three other M0 questions touch the same engine region that defeated our Lua approach to camera tracking:
+
+- **Spike 3** — read weapon bone positions every frame. Bone transforms live on `AnimatableObject.OverrideTransforms_Mat3x4` which, like `WorldTransform`, is in GPU-pipeline memory not exposed as a live field in SE's Lua binding.
+- **Spike 7** — freeze one character's animation for hit-stop. Per-character timescale may not be exposed in Lua.
+- **Spike 10** — geometry raycast fast enough for wall-bounce checks every tick. SE's raycast helpers exist but tick throughput is unknown.
+
+**The decision on whether to build a native plugin waits until these three are run.** If 3/7/10 all come back needing native hooks (likely), one plugin covers all four problems together — the alternative is one native plugin per shortcoming, which is worse. If any of 3/7/10 is answered yes in Lua, the trade re-opens.
+
+M1 roadmap item added: "Native camera follow — no lag while moving" as a must-have before Gate 1.
+
+
