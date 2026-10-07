@@ -5,7 +5,7 @@ A Baldur's Gate 3 mod that turns combat into first-person, real-time action: Dar
 - **Design:** `docs/DESIGN.md` is the source of truth. Read it before any feature work. Live version: https://claude.ai/code/artifact/d9d14ee0-9dac-4e0e-b924-4dc4b54b157a
 - **Decisions:** `docs/DECISIONS.md`. Append a line whenever a design question is settled.
 - **Progress:** `docs/ROADMAP.md`. Tick an item only after it is verified in-game, fill in milestone start and done dates, and record spike answers there. Keep it in sync whenever work finishes.
-- **Current milestone:** M0 (engine spikes). Update this line when the milestone changes.
+- **Current milestone:** M0 is engine-closed (spikes 1-7, 10, 11 answered 2026-10-08; 8 deferred to M4, 9 deferred to M2). Two M0 admin items still open: the fork-Brawl decision (see `docs/fork-brawl.md`) and revised M1+ estimates. M1 vertical slice starts once those are decided.
 
 ## Platform
 

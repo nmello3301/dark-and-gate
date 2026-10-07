@@ -9,7 +9,7 @@ Estimates assume part-time work (evenings). They are guesses made on 2026-10-07 
 | Milestone | What it delivers | Estimate | Started | Done |
 | --- | --- | --- | --- | --- |
 | Setup | Repo, tools, mod scaffold, deploy and log loop working | 1 evening | 2026-10-07 | |
-| M0 Spikes | Answers to the 11 engine questions; fork-Brawl decision | 1–3 weeks | | |
+| M0 Spikes | Answers to the 11 engine questions; fork-Brawl decision | 1–3 weeks | 2026-10-07 | 2026-10-08 (engine answers in; fork-Brawl and estimates still open) |
 | M1 Vertical slice | Longsword, Fire Bolt, Fireball, Misty Step, mana, hotbar, vs goblins | 4–8 weeks | | |
 | **Gate 1** | **Combat feels tight** | | | |
 | M2 Combat breadth | All 10 weapon families, all spell types, blocking, ranged | 6–10 weeks | | |
@@ -46,16 +46,16 @@ Each spike gets a note in `docs/spikes/`. Mark the answer: ✅ yes · ❌ no (us
 | 5 | Cast a spell at a world point from script, with a short animation | ✅ | `Osi.UseSpell` fires the full engine pipeline unconditionally — ignores action economy, spell prep and known-spell list. Lvl 1 Gale cast Fireball. See [spike 5](spikes/05-spellcast-from-script.md). |
 | 6 | Push the ragdoll in the direction of the killing blow | ◐ | `Osi.ApplyStatus("KNOCKED_DOWN")` ragdolls the target; Lua has no handle on direction. M1 uses directional death animations instead. See [spike 6](spikes/06-ragdoll-direction.md). |
 | 7 | Freeze one character's animation for a few frames (hit stop) | ❌ | Same speed-field gap as spike 4. Hit stop reuses the native plugin's `SetAnimPlaySpeed`. See [spike 7](spikes/07-hit-stop.md). |
-| 8 | Add a tab to the native character menu | | |
-| 9 | Net messages fast enough for hit claims at 2–4 players | | |
+| 8 | Add a tab to the native character menu | ⏳ | **Deferred to M4** (Native UI milestone). M1 uses an ImGui window for the Prepare Hotbar tab, so the native-tab answer isn't needed to start the vertical slice. |
+| 9 | Net messages fast enough for hit claims at 2–4 players | ⏳ | **Deferred to M2** (first two-instance MP smoke test). Measuring without a real second client is theatre; M0's shared net plumbing proves the single-client round-trip (`!dag_ping` ~100 ms incl. engine tick). |
 | 10 | Geometry raycast fast enough for wall-bounce checks every tick | ✅ | ~0.6 µs per `Ext.Level.RaycastClosest` call. See [spike 10](spikes/10-raycast-throughput.md). |
 | 11 | Camera on the head bone; local player's head, hair and headwear hidden on their own client only (no shrinking) | ◐ | Head/hair/beard hide via `RenderableObject.PropertyList.RenderPasses`; FP camera via Native Camera Tweaks preset (`config/native/BG3NativeCameraTweaks.toml`). Chase-cam lag during movement unsolved from Lua — needs native plugin, see [spike 11](spikes/11-head-hiding.md#known-artifact-camera-follow-lag-during-movement). |
 
 - [ ] First-person camera values tuned in `BG3NativeCameraTweaks.toml` (M1, bundled with native plugin camera-follow)
 - [ ] True first person: no view inside the head, hands and weapon visible, other players see the full model (M1, bundled with native plugin)
 - [ ] Mouse-look without holding the middle mouse button → ❌ **not Lua-reachable, folded into M1 native plugin.** See [DECISIONS 2026-10-08](DECISIONS.md) and `se-api-notes.md`.
-- [ ] Decision logged: fork Brawl or start fresh
-- [ ] Decision logged: data file format for `data/`
+- [ ] Decision logged: fork Brawl or start fresh → **comparison written at [docs/fork-brawl.md](fork-brawl.md); awaiting the dev's call.**
+- [x] Decision logged: data file format for `data/` → **Lua tables.** See DECISIONS 2026-10-08.
 - [ ] Estimates for M1 onwards revised
 
 ## M1 — Vertical slice
