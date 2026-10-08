@@ -723,65 +723,94 @@ void Hook_UpdateCamera(void* scene, void** ctx,
 
     // ---------------- Phase 1 read-only probe (2026-10-08) ----------------
     //
-    // Logs cam[0x18], cam[0x24] and cam[0xC4] alongside Lua's ground-truth
-    // character Translate once per 500 ms. Read-only — no writes to cam.
+    // Logs cam[0x18], cam[0x24], cam[0x74..0x7F] (cameraRotation) and
+    // cam[0xC4] alongside Lua ground truth. Read-only. Fires every ~50 ms
+    // (small enough to catch a sub-frame lerp if it exists) and also
+    // whenever root/desired diverge by > 5 cm (so the exact moment of
+    // divergence lands in the log even if we never fire on a slow tick).
     //
     // Hypotheses from NCT's RE/Camera.h:
     //   - cam[0x18] = cameraRootPos         (the LERPED pivot)
     //   - cam[0x24] = desiredCameraRootPos  (pre-lerp target)
-    //   - cam[0xC4] = cameraPos             (final rendered eye after geometry adjust)
+    //   - cam[0x74] = cameraRotation        (direction from pivot to eye)
+    //   - cam[0xC4] = cameraPos             (final rendered eye)   -- but
+    //     the first probe pass showed cam[0xC4] = char.Translate (feet
+    //     level, no eye-height offset), so cam[0xC4] is really the look-at
+    //     TARGET. Keep probing it alongside the others as a sanity check.
     //
-    // What this measures:
-    //   - While standing: all three should match (lerp has converged).
-    //   - Walking: cam[0x24] should lead gt-char-pos tightly (same-frame),
-    //     cam[0x18] should trail it by the follow lag we see on screen,
-    //     and cam[0xC4] should trail or match cam[0x18] (zoom=0 base).
-    //   - Running: the gap between cam[0x18] and cam[0x24] widens; delta
-    //     magnitude = the lag we need to kill.
+    // At zoom = 0 (NCT ExplorationZoomMin = 0.0) the rendered eye =
+    // cam[0x18] exactly (confirmed by the first probe round). Writing
+    // cam[0x18] therefore moves the rendered eye deterministically —
+    // that's the write path Phase 1 will use.
     //
-    // If this prediction holds, Phase 1's injection point is "after root
-    // lerp, before eye recomputation" — which is NCT's AfterUpdateCameraZoom
-    // call-site, not post-UpdateCamera return.
-    static DWORD _lastProbeLogMs = 0;
-    if (cam && (now - _lastProbeLogMs) >= 500) {
-        _lastProbeLogMs = now;
+    // What we're trying to answer this round:
+    //   1. Do cam[0x18] and cam[0x24] ever differ during motion? If yes,
+    //      cam[0x24] is the pre-lerp target and we have to inject BOTH
+    //      cam[0x18] and cam[0x24] post-chain to keep our offset.
+    //   2. If no (they're always identical), the follow lag lives in a
+    //      different field — probably on the character or a per-tick
+    //      blended buffer the engine reads instead of either of these.
+    static DWORD _lastProbeLogMs      = 0;
+    static float _lastRoot[3]         = { 0, 0, 0 };
+    static float _lastDesired[3]      = { 0, 0, 0 };
+    if (cam) {
         float root[3]    = {};
         float desired[3] = {};
+        float rot[3]     = {};
         float eye[3]     = {};
         const bool rOk = dag::safemem::ReadFloat3(cam, 0x18, root);
         const bool dOk = dag::safemem::ReadFloat3(cam, 0x24, desired);
+        const bool wOk = dag::safemem::ReadFloat3(cam, 0x74, rot);
         const bool eOk = dag::safemem::ReadFloat3(cam, 0xC4, eye);
-        dag::log::Writef(
-            "PhaseProbe cam=%p root[0x18]=(%.3f,%.3f,%.3f)%s desired[0x24]=(%.3f,%.3f,%.3f)%s eye[0xC4]=(%.3f,%.3f,%.3f)%s gt=(%.3f,%.3f,%.3f) %s",
-            cam,
-            root[0], root[1], root[2],         rOk ? "" : "?",
-            desired[0], desired[1], desired[2], dOk ? "" : "?",
-            eye[0], eye[1], eye[2],             eOk ? "" : "?",
-            gt.x, gt.y, gt.z,
-            gtOk ? "gtOK" : "gtSTALE");
-        // Also write to a dedicated status file so Lua can pull it live
-        // via !dag_camcheck without parsing native.log.
-        wchar_t base[MAX_PATH];
-        const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", base, MAX_PATH);
-        if (n > 0 && n < MAX_PATH) {
-            wchar_t full[MAX_PATH * 2];
-            swprintf_s(full, L"%s\\Larian Studios\\Baldur's Gate 3\\Script Extender\\DarkAndGate\\native-phase-probe.txt", base);
-            char line[512];
-            const int len = std::snprintf(line, sizeof(line),
-                "cam=%p root=%.3f,%.3f,%.3f desired=%.3f,%.3f,%.3f eye=%.3f,%.3f,%.3f gt=%.3f,%.3f,%.3f gtOk=%d t=%u\n",
-                cam, root[0], root[1], root[2],
-                desired[0], desired[1], desired[2],
-                eye[0], eye[1], eye[2],
+        // Divergence between root and desired (XZ only — Y is the eye
+        // height which is static per character). If > 5 cm, log loud.
+        float divXZ = 0.0f;
+        if (rOk && dOk) {
+            const float dx = root[0] - desired[0];
+            const float dz = root[2] - desired[2];
+            divXZ = std::sqrt(dx * dx + dz * dz);
+        }
+        const bool divergent = (divXZ > 0.05f);
+        const bool dueByTime = (now - _lastProbeLogMs) >= 50;
+        if (dueByTime || divergent) {
+            _lastProbeLogMs = now;
+            dag::log::Writef(
+                "PhaseProbe cam=%p root=(%.3f,%.3f,%.3f)%s desired=(%.3f,%.3f,%.3f)%s rot=(%.3f,%.3f,%.3f)%s eye[0xC4]=(%.3f,%.3f,%.3f)%s gt=(%.3f,%.3f,%.3f) %s divXZ=%.3f%s",
+                cam,
+                root[0], root[1], root[2],         rOk ? "" : "?",
+                desired[0], desired[1], desired[2], dOk ? "" : "?",
+                rot[0], rot[1], rot[2],             wOk ? "" : "?",
+                eye[0], eye[1], eye[2],             eOk ? "" : "?",
                 gt.x, gt.y, gt.z,
-                gtOk ? 1 : 0, (unsigned)now);
-            HANDLE h = CreateFileW(full, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
-                                   CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-            if (h != INVALID_HANDLE_VALUE) {
-                DWORD written = 0;
-                WriteFile(h, line, len, &written, nullptr);
-                CloseHandle(h);
+                gtOk ? "gtOK" : "gtSTALE",
+                divXZ, divergent ? " DIVERGENT" : "");
+            // Also update the probe status file so Lua !dag_camcheck can
+            // pull the latest line without parsing native.log.
+            wchar_t base[MAX_PATH];
+            const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", base, MAX_PATH);
+            if (n > 0 && n < MAX_PATH) {
+                wchar_t full[MAX_PATH * 2];
+                swprintf_s(full, L"%s\\Larian Studios\\Baldur's Gate 3\\Script Extender\\DarkAndGate\\native-phase-probe.txt", base);
+                char line[768];
+                const int len = std::snprintf(line, sizeof(line),
+                    "cam=%p root=%.3f,%.3f,%.3f desired=%.3f,%.3f,%.3f rot=%.3f,%.3f,%.3f eye=%.3f,%.3f,%.3f gt=%.3f,%.3f,%.3f gtOk=%d divXZ=%.3f t=%u\n",
+                    cam, root[0], root[1], root[2],
+                    desired[0], desired[1], desired[2],
+                    rot[0], rot[1], rot[2],
+                    eye[0], eye[1], eye[2],
+                    gt.x, gt.y, gt.z,
+                    gtOk ? 1 : 0, divXZ, (unsigned)now);
+                HANDLE h = CreateFileW(full, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                                       CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+                if (h != INVALID_HANDLE_VALUE) {
+                    DWORD written = 0;
+                    WriteFile(h, line, len, &written, nullptr);
+                    CloseHandle(h);
+                }
             }
         }
+        if (rOk) { _lastRoot[0]    = root[0];    _lastRoot[1]    = root[1];    _lastRoot[2]    = root[2]; }
+        if (dOk) { _lastDesired[0] = desired[0]; _lastDesired[1] = desired[1]; _lastDesired[2] = desired[2]; }
     }
     // ---------------- end Phase 1 read-only probe ----------------
 
