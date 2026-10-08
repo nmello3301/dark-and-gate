@@ -39,23 +39,23 @@ local function recordEvent(kind, button, pressed)
         tostring(State:IsCombatActive()))
 end
 
--- MouseButtonInput: event.Button is an int (SDL button index). SE binds
--- some names like "Left1" / "Right1" / "Middle" as the string form of
--- the enum. We match both the string form AND the raw int code so we
--- don't rely on an exact SE build.
-local function isLMB(button)
-    local s = tostring(button or "")
-    return s == "Left1" or s == "LeftButton" or s == "1" or button == 1
-end
-local function isRMB(button)
-    local s = tostring(button or "")
-    return s == "Right1" or s == "RightButton" or s == "3" or button == 3
-end
+-- MouseButtonInput: event.Button is an SDL button index. Spike 1 verified
+-- that tonumber(e.Button) returns 1=left, 2=middle, 3=right.
+local function isLMB(button) return tonumber(button) == 1 end
+local function isRMB(button) return tonumber(button) == 3 end
 
 local function onMouse(event)
     local button  = event.Button
     local pressed = event.Pressed and true or false
     recordEvent("Mouse", button, pressed)
+
+    -- Log every mouse DOWN event. Low volume, high value: if LMB clicks
+    -- never show up here, SE isn't delivering MouseButtonInput for us
+    -- (dialogue / UI capture) and we need to look at a different hook.
+    if pressed then
+        Log.Write(string.format("Combat Input: mouse down button=%s gateActive=%s",
+            tostring(button), tostring(State:IsCombatActive())))
+    end
 
     if not State:IsCombatActive() then return end
 
@@ -70,7 +70,9 @@ local function onMouse(event)
                 Swing.OnLMB()
             end
         end
-        pcall(function() event:PreventAction() end)
+        if event.CanPreventAction then
+            pcall(function() event:PreventAction() end)
+        end
     elseif isRMB(button) then
         if pressed then
             if State.armedSpell then
@@ -86,15 +88,20 @@ local function onMouse(event)
                 Log.Write("Combat: block OFF")
             end
         end
-        pcall(function() event:PreventAction() end)
+        if event.CanPreventAction then
+            pcall(function() event:PreventAction() end)
+        end
     end
 end
 
--- KeyInput: event.Key = "1".."0", "H", etc. event.Event = "KeyDown"/"KeyUp".
+-- KeyInput: tostring(event.Key) is an SDL scancode name. The digit row
+-- comes through as NUM_1..NUM_0 (verified by Spike 1 — NOT the "Key1"
+-- the IDE helpers suggest). event.Event is "KeyDown"/"KeyUp".
 local KEY_TO_SLOT = {
-    ["1"] = 1, ["2"] = 2, ["3"] = 3, ["4"] = 4, ["5"] = 5,
-    ["6"] = 6, ["7"] = 7, ["8"] = 8, ["9"] = 9, ["0"] = 10,
+    NUM_1 = 1, NUM_2 = 2, NUM_3 = 3, NUM_4 = 4, NUM_5 = 5,
+    NUM_6 = 6, NUM_7 = 7, NUM_8 = 8, NUM_9 = 9, NUM_0 = 10,
 }
+local HOTBAR_TOGGLE_KEY = "H"
 
 local function onKey(event)
     local key   = tostring(event.Key or "")
@@ -102,7 +109,7 @@ local function onKey(event)
     recordEvent("Key[" .. evt .. "]", key, evt == "KeyDown")
 
     -- H toggles the hotbar window regardless of gate.
-    if key == "H" and evt == "KeyDown" then
+    if key == HOTBAR_TOGGLE_KEY and evt == "KeyDown" then
         requireLazy()
         Hotbar.ToggleWindow()
         return
@@ -112,9 +119,12 @@ local function onKey(event)
 
     local slot = KEY_TO_SLOT[key]
     if slot and evt == "KeyDown" then
+        Log.Write(string.format("Combat Input: hotbar key %s -> slot %d", key, slot))
         requireLazy()
         Hotbar.PressSlot(slot)
-        pcall(function() event:PreventAction() end)
+        if event.CanPreventAction then
+            pcall(function() event:PreventAction() end)
+        end
     end
 end
 

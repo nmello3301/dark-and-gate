@@ -57,18 +57,21 @@ function M.Register()
             local t = parsed.template or {}
             local p = parsed.pos      or {}
             Log.Write(string.format(
-                "SpawnDummy reply: OK uuid=%s template=%s tier=%s at (%.2f, %.2f, %.2f)",
+                "SpawnDummy reply: OK uuid=%s template=%s tier=%s type=%s at (%.2f, %.2f, %.2f)",
                 tostring(parsed.uuid), tostring(t.name), tostring(t.tier),
+                tostring(t.type),
                 p.x or 0, p.y or 0, p.z or 0))
         else
             Log.Write("SpawnDummy reply: FAIL reason=" .. tostring(parsed.reason))
             if parsed.template then
-                Log.Write(string.format("  tried: name=%s uuid=%s",
-                    tostring(parsed.template.name), tostring(parsed.template.uuid)))
+                Log.Write(string.format("  tried: name=%s uuid=%s type=%s",
+                    tostring(parsed.template.name),
+                    tostring(parsed.template.uuid),
+                    tostring(parsed.template.type)))
             end
             for i, c in ipairs(parsed.top or {}) do
-                Log.Write(string.format("  cand[%d] name=%s uuid=%s",
-                    i, tostring(c.name), tostring(c.uuid)))
+                Log.Write(string.format("  cand[%d] name=%s uuid=%s type=%s",
+                    i, tostring(c.name), tostring(c.uuid), tostring(c.type)))
             end
         end
     end)

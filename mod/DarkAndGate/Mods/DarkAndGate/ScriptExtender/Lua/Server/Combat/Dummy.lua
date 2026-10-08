@@ -16,19 +16,48 @@ local ServerNet = Ext.Require("Server/Net.lua")
 local M = {}
 
 -- Ranked name patterns. First-match wins within each tier; tiers are
--- scanned in order. "Combat_Dummy" from the Larian training area, failing
--- that any goblin from Act 1. Patterns are lowercase Lua patterns applied
--- to the lowercased template name.
+-- scanned in order. "Combat_Dummy" / "Training_Dummy" character templates
+-- first (NOT the DEC_ scenery ones — those have no HP and clicks pass
+-- through them), then any goblin from Act 1.
 local TIERS = {
-    { tag = "training",     patterns = { "trainingdummy", "training_dummy", "combat_dummy", "combatdummy" } },
-    { tag = "any-dummy",    patterns = { "dummy" } },
-    { tag = "act1-goblin",  patterns = { "^gob_", "goblin" } },
+    { tag = "training",    patterns = { "training_dummy", "trainingdummy", "combat_dummy", "combatdummy" } },
+    { tag = "act1-goblin", patterns = { "^gob_", "goblin" } },
+    { tag = "any-dummy",   patterns = { "dummy" } },
 }
 
+-- Scenery name prefixes to exclude outright. DEC_ in particular bit us —
+-- "DEC_GEN_Training_Dummy_C" is a scenery decoration that renders as a
+-- training dummy but takes no damage and clicks pass through it.
+local SCENERY_PREFIXES = { "dec_", "scn_", "wpn_", "arm_", "obj_", "door_", "trap_", "item_", "lgt_", "fx_" }
+
+-- Return template type if the SE binding exposes it, else nil. Checked
+-- in order: method call, direct field. "character" is what we want.
+local function templateTypeOf(tpl)
+    local okM, t = pcall(function() return tpl:GetTemplateType() end)
+    if okM and t and tostring(t) ~= "" then return tostring(t) end
+    local okF, t2 = pcall(function() return tpl.TemplateType end)
+    if okF and t2 and tostring(t2) ~= "" then return tostring(t2) end
+    return nil
+end
+
+-- Primary filter: real character templates. Falls back to name-prefix
+-- blocklist + Stats-field heuristic when GetTemplateType is unavailable.
+local function isCharacter(tpl, nameLower)
+    for _, p in ipairs(SCENERY_PREFIXES) do
+        if nameLower:sub(1, #p) == p then return false end
+    end
+    local t = templateTypeOf(tpl)
+    if t then
+        return t == "character" or t == "Character"
+    end
+    local okS, s = pcall(function() return tpl.Stats end)
+    return okS and s and s ~= ""
+end
+
 -- Collect templates, grouped by tier. Returns:
---   choice   = { uuid, name, tier } | nil
---   topList  = up to 10 { uuid, name } candidates when no match is found,
---              so the user can see what's actually available.
+--   choice   = { uuid, name, tier, type } | nil
+--   topList  = up to 10 { uuid, name, type } candidates when no match is
+--              found, so the user can see what's actually available.
 local function findDummyTemplate()
     if not (Ext.Template and Ext.Template.GetAllRootTemplates) then
         return nil, {}, "Ext.Template.GetAllRootTemplates unavailable"
@@ -39,34 +68,35 @@ local function findDummyTemplate()
     end
 
     local pool = {}
-    local count = 0
+    local scannedCount, charCount = 0, 0
     for uuid, tpl in pairs(templates) do
-        count = count + 1
+        scannedCount = scannedCount + 1
         local okN, n = pcall(function() return tpl.Name end)
         if okN and n and n ~= "" then
-            pool[#pool + 1] = { uuid = tostring(uuid), name = tostring(n) }
+            local nameLower = tostring(n):lower()
+            if isCharacter(tpl, nameLower) then
+                charCount = charCount + 1
+                pool[#pool + 1] = {
+                    uuid = tostring(uuid),
+                    name = tostring(n),
+                    type = templateTypeOf(tpl) or "character?",
+                    low  = nameLower,
+                }
+            end
         end
     end
-    Log.Write(string.format("Dummy: Ext.Template returned %d templates (%d with Name)", count, #pool))
-
-    -- Prefer only character-shaped templates. Filter by Stats presence if
-    -- available (characters have a Stats field; items/triggers don't).
-    local function hasStats(uuid)
-        local okTpl, tpl = pcall(function() return templates[uuid] end)
-        if not okTpl or not tpl then return false end
-        local okS, s = pcall(function() return tpl.Stats end)
-        if okS and s and s ~= "" then return true end
-        return false
-    end
+    Log.Write(string.format(
+        "Dummy: scanned %d templates, %d matched character filter",
+        scannedCount, charCount))
 
     for _, tier in ipairs(TIERS) do
         for _, cand in ipairs(pool) do
-            local n = cand.name:lower()
             for _, pat in ipairs(tier.patterns) do
-                if n:find(pat) then
-                    if hasStats(cand.uuid) then
-                        return { uuid = cand.uuid, name = cand.name, tier = tier.tag }, nil, nil
-                    end
+                if cand.low:find(pat) then
+                    return {
+                        uuid = cand.uuid, name = cand.name,
+                        tier = tier.tag, type = cand.type,
+                    }, nil, nil
                 end
             end
         end
@@ -75,21 +105,23 @@ local function findDummyTemplate()
     -- No match. Return the 10 most "dummy / goblin / monster" sounding
     -- candidates so the user can pick one.
     local function score(n)
-        n = n:lower()
-        if n:find("dummy")   then return 10 end
-        if n:find("goblin")  then return 9 end
-        if n:find("^gob_")   then return 8 end
-        if n:find("monster") then return 5 end
-        if n:find("npc")     then return 3 end
+        if n:find("training") then return 15 end
+        if n:find("dummy")    then return 10 end
+        if n:find("goblin")   then return 9 end
+        if n:find("^gob_")    then return 8 end
+        if n:find("monster")  then return 5 end
+        if n:find("npc")      then return 3 end
         return 0
     end
     table.sort(pool, function(a, b)
-        local sa, sb = score(a.name), score(b.name)
+        local sa, sb = score(a.low), score(b.low)
         if sa ~= sb then return sa > sb end
         return a.name < b.name
     end)
     local top = {}
-    for i = 1, math.min(10, #pool) do top[i] = pool[i] end
+    for i = 1, math.min(10, #pool) do
+        top[i] = { uuid = pool[i].uuid, name = pool[i].name, type = pool[i].type }
+    end
     return nil, top, "no template matched the ranked patterns"
 end
 
@@ -176,8 +208,8 @@ function M.Register()
                 return
             end
 
-            Log.Write(string.format("Dummy: chosen template name=%s uuid=%s tier=%s",
-                choice.name, choice.uuid, choice.tier))
+            Log.Write(string.format("Dummy: chosen template name=%s uuid=%s tier=%s type=%s",
+                choice.name, choice.uuid, choice.tier, tostring(choice.type)))
 
             local okC, spawned = pcall(function()
                 return Osi.CreateAt(choice.uuid, x, y, z, 1, 1, "")
