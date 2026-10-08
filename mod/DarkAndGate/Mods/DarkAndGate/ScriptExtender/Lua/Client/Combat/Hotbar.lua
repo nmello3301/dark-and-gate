@@ -28,6 +28,11 @@ local function ensureDefault()
     end
 end
 
+-- Arm-then-cast HARD mode (user requirement):
+--   Number key -> arm this slot's spell. LMB casts it; disarm.
+--   Same number again -> disarm (quick cancel).
+--   Different number  -> re-arm with the new spell.
+--   RMB tap is the general cancel path (handled in Input.lua).
 function M.PressSlot(slot)
     ensureDefault()
     local id = State.hotbar[slot]
@@ -35,9 +40,15 @@ function M.PressSlot(slot)
         Log.Write(string.format("Hotbar: slot %d empty", slot))
         return
     end
-    Spells.Cast(id)
+    if State.armedSpell == id then
+        State.armedSpell = nil
+        Log.Write("Hotbar: UNARMED " .. id .. " (same slot re-pressed)")
+        return
+    end
+    State.armedSpell = id
+    Log.Write(string.format("Hotbar: ARMED slot %d = %s (LMB to cast, RMB or same slot to cancel)",
+        slot, id))
 end
-M.Cast = M.PressSlot  -- alias
 
 function M.ToggleWindow()
     windowOpen = not windowOpen
