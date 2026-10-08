@@ -1,42 +1,146 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Mouselook: owns yaw/pitch in radians, driven by SDL raw mouse deltas.
+//
+// Rather than hooking SDL_PollEvent (BG3WASD-style — requires xbyak stub
+// to preserve registers), we:
+//   1. GetProcAddress the SDL2 entrypoints from the already-loaded SDL2.dll
+//      inside bg3.exe's address space.
+//   2. Call SDL_SetRelativeMouseMode(TRUE) when gameplay+enabled, FALSE
+//      otherwise. SDL buffers raw deltas internally while relative mode
+//      is on.
+//   3. Call SDL_GetRelativeMouseState(&dx, &dy) once per UpdateCamera
+//      invocation. The call returns the cumulative delta SINCE THE LAST
+//      CALL — perfect for a per-frame accumulator.
+//
+// This sidesteps the SDL_PollEvent hook entirely. The downside is that
+// `dx`/`dy` here are relative-mouse deltas (ints in SDL counts), which
+// won't fire if the user has moved their physical mouse while SDL was
+// in absolute mode — fine for our use since we toggle relative on and
+// off ourselves.
+//
+// Pause: the camera hook decides every frame whether to drive the yaw
+// write (gameplay cam + ground truth active). We keep accumulating
+// deltas even when paused so the first unpaused frame doesn't jerk.
 
 #include "Mouselook.h"
 
+#include <windows.h>
+
 #include <atomic>
+#include <cmath>
 
 #include "../Config.h"
+#include "../GroundTruth.h"
 #include "../Log.h"
 
 namespace dag::hooks::mouselook {
 
 namespace {
 
-std::atomic<float> g_yawRad{0.0f};
-std::atomic<float> g_pitchRad{0.0f};
-std::atomic<bool>  g_paused{true};  // start paused; UI hook unpauses
+using SDL_SetRelativeMouseMode_t    = int  (__cdecl*)(int /*SDL_bool*/);
+using SDL_GetRelativeMouseState_t   = unsigned (__cdecl*)(int*, int*);
+
+SDL_SetRelativeMouseMode_t  _SetRelativeMouseMode  = nullptr;
+SDL_GetRelativeMouseState_t _GetRelativeMouseState = nullptr;
+
+bool _sdlResolved      = false;
+bool _relativeModeOn   = false;
+std::atomic<float> _yawRad  { 0.0f };
+std::atomic<float> _pitchRad{ 0.0f };
+std::atomic<bool>  _paused  { true };
+
+constexpr float kPitchClampRad = 1.483529f;  // 85° in radians
+
+void ResolveSDL() {
+    if (_sdlResolved) return;
+    _sdlResolved = true;
+    HMODULE sdl = GetModuleHandleW(L"SDL2.dll");
+    if (!sdl) {
+        dag::log::Writef("Mouselook: SDL2.dll not loaded in process -- cannot resolve entrypoints");
+        return;
+    }
+    _SetRelativeMouseMode  = reinterpret_cast<SDL_SetRelativeMouseMode_t>(
+        GetProcAddress(sdl, "SDL_SetRelativeMouseMode"));
+    _GetRelativeMouseState = reinterpret_cast<SDL_GetRelativeMouseState_t>(
+        GetProcAddress(sdl, "SDL_GetRelativeMouseState"));
+    dag::log::Writef(
+        "Mouselook: SDL2 resolved: SetRel=%p GetRel=%p",
+        reinterpret_cast<void*>(_SetRelativeMouseMode),
+        reinterpret_cast<void*>(_GetRelativeMouseState));
+}
+
+void SetRelativeMode(bool on) {
+    if (!_SetRelativeMouseMode) return;
+    if (on == _relativeModeOn) return;
+    _SetRelativeMouseMode(on ? 1 : 0);
+    _relativeModeOn = on;
+    dag::log::Writef("Mouselook: relative mode -> %d", on ? 1 : 0);
+}
 
 }  // namespace
 
 bool Install()
 {
-    const auto& cfg = dag::config::Get();
-    if (!cfg.mouselook.enabled) {
-        dag::log::Writef("Mouselook: disabled in config, skipping install");
-        return true;
-    }
-    // Scaffold: no real hook yet. We log the intent so the first-run
-    // log shows us what Camera.cpp will be reading.
-    dag::log::Writef(
-        "Mouselook: scaffold loaded (yaw=%.2f, pitch=%.2f, paused=%d). "
-        "SDL relative-mode + delta ingest coming in follow-up commit.",
-        g_yawRad.load(), g_pitchRad.load(), g_paused.load());
+    ResolveSDL();
+    dag::log::Writef("Mouselook: install (SDL-polling model, lazy enable per frame)");
     return true;
 }
 
-float GetYawRad()   { return g_yawRad.load(std::memory_order_relaxed); }
-float GetPitchRad() { return g_pitchRad.load(std::memory_order_relaxed); }
+float GetYawRad()   { return _yawRad.load  (std::memory_order_relaxed); }
+float GetPitchRad() { return _pitchRad.load(std::memory_order_relaxed); }
+void  SetPaused(bool p) { _paused.store(p, std::memory_order_relaxed); }
+bool  IsPaused()        { return _paused.load(std::memory_order_relaxed); }
 
-void SetPaused(bool paused) { g_paused.store(paused, std::memory_order_relaxed); }
-bool IsPaused()             { return g_paused.load(std::memory_order_relaxed); }
+// Called once per UpdateCamera invocation from Camera.cpp.
+void Tick() {
+    if (!_sdlResolved) ResolveSDL();
+    const auto& cfg = dag::config::Get();
+    const auto  gt  = dag::groundtruth::Get();
+    const bool wantActive = cfg.mouselook.enabled && gt.active && !gt.stale;
+    SetRelativeMode(wantActive);
+    _paused.store(!wantActive, std::memory_order_relaxed);
+    if (!_GetRelativeMouseState) return;
+    int dx = 0, dy = 0;
+    _GetRelativeMouseState(&dx, &dy);  // call every frame to drain, even when paused
+    if (!wantActive) return;
+    const float sYaw   = cfg.mouselook.sensitivity_yaw;
+    const float sPitch = cfg.mouselook.sensitivity_pitch *
+                         (cfg.mouselook.invert_pitch ? -1.0f : 1.0f);
+    const float toRad  = 0.01745329252f;  // deg->rad
+    float yaw   = _yawRad.load  (std::memory_order_relaxed);
+    float pitch = _pitchRad.load(std::memory_order_relaxed);
+    yaw   += dx * sYaw   * toRad;
+    pitch += dy * sPitch * toRad;
+    if (pitch >  kPitchClampRad) pitch =  kPitchClampRad;
+    if (pitch < -kPitchClampRad) pitch = -kPitchClampRad;
+    _yawRad.store  (yaw,   std::memory_order_relaxed);
+    _pitchRad.store(pitch, std::memory_order_relaxed);
+}
+
+// For character-facing follow: writes yaw to a file Lua picks up.
+void MaybeWriteYawForLua() {
+    const auto& cfg = dag::config::Get();
+    if (!cfg.mouselook.enabled || !cfg.mouselook.character_facing) return;
+    static DWORD lastWriteMs = 0;
+    const DWORD now = GetTickCount();
+    if (now - lastWriteMs < 100) return;  // 10 Hz is plenty for turn-to-face
+    lastWriteMs = now;
+    // Write %LOCALAPPDATA%\...\Script Extender\DarkAndGate\native-cam-yaw.txt
+    wchar_t buf[MAX_PATH];
+    DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return;
+    wchar_t full[MAX_PATH * 2];
+    swprintf_s(full, L"%s\\Larian Studios\\Baldur's Gate 3\\Script Extender\\DarkAndGate\\native-cam-yaw.txt", buf);
+    HANDLE h = CreateFileW(full, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                           FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    char line[64];
+    int len = std::snprintf(line, sizeof(line), "yaw=%.5f t=%u\n",
+                            _yawRad.load(std::memory_order_relaxed), now);
+    DWORD written = 0;
+    WriteFile(h, line, len, &written, nullptr);
+    CloseHandle(h);
+}
 
 }  // namespace dag::hooks::mouselook

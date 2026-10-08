@@ -36,10 +36,12 @@ endif()
 add_library(DarkAndGate SHARED
     src/main.cpp
     src/Config.cpp
+    src/GroundTruth.cpp
     src/Log.cpp
     src/PatternScan.cpp
     src/Hooks/Camera.cpp
     src/Hooks/Mouselook.cpp
+    src/Hooks/Stubs.cpp
 )
 
 target_include_directories(DarkAndGate PRIVATE src)

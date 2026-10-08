@@ -14,6 +14,14 @@ namespace dag::hooks::mouselook {
 
 bool Install();
 
+// Called once per UpdateCamera invocation from Camera.cpp. Owns relative-
+// mode toggling + delta accumulation.
+void Tick();
+
+// If character_facing enabled, writes current yaw to a file that Lua
+// polls to call Ext.Entity.SetRotation. Throttled internally.
+void MaybeWriteYawForLua();
+
 // Current yaw/pitch in radians. Y-up world. Yaw unbounded; pitch
 // clamped to ±89° when the mouse hook is live. In the scaffold both
 // return 0.
