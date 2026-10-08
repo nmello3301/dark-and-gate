@@ -6,6 +6,58 @@
 `reference/BG3_NativeCameraTweaks` and `reference/BG3WASD`.
 **Rule for this spike:** static only. No debugger, no attach, no game launch.
 
+## Follow pipeline (2026-10-08, dag_camcheck)
+
+Decomp + runtime confirmed layout of UpdateCamera's write path:
+
+- `cam + 0xC4` (`float[3]`) is the engine's **look-at target**, not the
+  eye. Zero-lag update each frame; value = controlled char Translate +
+  `(0, ~1.6, 0)` head offset.
+- `cam + 0x70` (`float[3]`) is the camera forward direction (unit).
+- `cam + 0x54` (`float`) is the follow distance scalar (~12 m vanilla).
+- Final eye position `local_508` is computed inside UpdateCamera as
+  `eye = cam[0x48..0x50] + cam[0x54] * cam[0x70..0x78]` (post-LERP of
+  cam[0x48..0x50], which was earlier set from char-tracking by
+  sub-functions like `FUN_141e16940`).
+- `vt[0x58](scene, slotToken, &local_508, &cam[0x48])` is the
+  **commit**: writes `local_508` into both `cam+0x48..0x50` and the
+  rendered `InvViewMatrix.translate` (`rf::Camera + 0x50 + 0x30`).
+
+Pre-hook writes to `cam[0x48..0x50]` or `cam[0xC4]` are paved over by
+UpdateCamera's sub-functions before the LERP runs. The only clean
+intercept is **vt[0x58] itself**: hooking the CameraSystem's vtable
+slot 11 (= byte offset 0x58) lets us replace the eye position in
+flight. See `tools/native/src/Hooks/Camera.cpp` § Phase D.
+
+## Commit-timing miss (2026-10-08 playtest)
+
+**Step C is not verified end-to-end.** The post-chain write to
+`cam+0x48/4c/50` lands in memory (DLL log: `wrote=(x, char.y+4, z) w=1`)
+but the renderer's InvViewMatrix translation (read from Lua via
+`Camera.Controller.Camera.InvViewMatrix[13..15]`) is unchanged. The
+"visible 4 m lift" reported earlier was NCT's placement — our write
+contributed nothing on screen.
+
+Root cause (hypothesis matching the original design review's
+"commit timing" risk): UpdateCamera's final `vt[0x58]` virtual call
+copies the position into a render-ready buffer **before** our hook sees
+the chain return. Writing after the chain is too late — the engine's
+commit has already published the frame's camera position.
+
+Objective check tool: `!dag_camcheck` compares three positions —
+(A) rendered via InvViewMatrix, (B) DLL's `wrote=…` from
+`native-cam-status.txt`, (C) character live Translate. "Works" ≡
+|A − B| ≤ 0.05 m per axis.
+
+Phase B fix path (pending Ghidra decomp):
+1. Hook the `vt[0x58]` call itself and substitute our position as input.
+2. OR pre-hook UpdateCamera: overwrite the engine's follow-target field
+   (likely `GameCameraBehavior.TargetDestinationHigh` at +0x30) BEFORE
+   calling the original.
+
+Everything that builds on the cam-pin write (mouselook forward override,
+char-facing-follow) is **paused** until Phase B lands.
+
 ## Dev-review corrections (2026-10-08)
 
 Six corrections / open questions from the dev review, resolved in-doc below:

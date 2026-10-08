@@ -28,6 +28,7 @@ local VERSION_PATH  = "DarkAndGate/native-version.txt"
 local CONFIG_PATH   = "DarkAndGate/native-config.toml"
 local CHARPOS_PATH  = "DarkAndGate/native-char-pos.txt"
 local CAMYAW_PATH   = "DarkAndGate/native-cam-yaw.txt"
+local STATUS_PATH   = "DarkAndGate/native-cam-status.txt"  -- DLL writes
 
 -- --- Native-version readback -------------------------------------------
 local function readVersion()
@@ -78,7 +79,7 @@ local function getControlledEntity()
         return entities[1]
     end
     -- Fallback: picking helper (the entity under the player's cursor focus).
-    local ok2, pick = pcall(Ext.Client.GetPickingHelper, 1)
+    local ok2, pick = pcall(Ext.UI.GetPickingHelper, 1)
     if ok2 and pick and pick.HoverCharacter then
         local e = Ext.Entity.Get(pick.HoverCharacter)
         if e then return e end
@@ -103,10 +104,22 @@ end
 M.IsGameplayPaused = isGameplayPaused
 
 -- --- Ground-truth writer -----------------------------------------------
+-- Entity.Transform is a TransformComponent whose .Transform is the
+-- actual Transform struct (RotationQuat, Scale, Translate). Confirmed
+-- in bg3se IdeHelpers.lua:7110 and GameDefinitions/Components/Spell.inl.
 local function readTranslate(entity)
     if not entity then return nil end
-    local ok, t = pcall(function() return entity.Transform and entity.Transform.Translate end)
-    if ok and t then return t[1], t[2], t[3] end
+    local ok, t = pcall(function()
+        return entity.Transform
+           and entity.Transform.Transform
+           and entity.Transform.Transform.Translate
+    end)
+    if not ok or not t then return nil end
+    -- vec3 may expose [1..3] or .x/.y/.z depending on SE version.
+    local x = t[1] or t.x
+    local y = t[2] or t.y
+    local z = t[3] or t.z
+    if x and y and z then return x, y, z end
     return nil
 end
 
@@ -139,13 +152,13 @@ local function tickApplyCamYaw()
     if lastYawApplied and math.abs(yaw - lastYawApplied) < 0.01 then return end
     lastYawApplied = yaw
     local e = getControlledEntity()
-    if not e or not e.Transform or not e.Transform.RotationQuat then return end
+    if not e or not e.Transform or not e.Transform.Transform then return end
     -- yaw is in radians, around Y-axis. Quat (w, x, y, z) with Y rotation:
     local half = yaw * 0.5
     local w = math.cos(half)
     local y = math.sin(half)
     pcall(function()
-        e.Transform.RotationQuat = { w, 0, y, 0 }
+        e.Transform.Transform.RotationQuat = { w, 0, y, 0 }
         e:Replicate("Transform")
     end)
 end
@@ -230,19 +243,92 @@ function M.Register(side)
         Log.Write("dag_bone: wrote " .. name .. " (stub)")
     end)
 
+    -- Objective check: compare three positions.
+    --   (A) Rendered camera position — Spike2's InvViewMatrix method:
+    --       Camera.Controller.Camera.InvViewMatrix translation (indices
+    --       13..15, column-major mat4). This is what the renderer uses.
+    --   (B) DLL's last written position — read from native-cam-status.txt
+    --       which the camera hook writes once per second.
+    --   (C) Live character position via SE Transform component.
+    -- "Our write reaches the screen" iff |A - DLL.wrote| <= 0.05 m.
+    Ext.RegisterConsoleCommand("dag_camcheck", function()
+        -- (A) Rendered position.
+        local renderedX, renderedY, renderedZ
+        local activeTag = "none"
+        local cams = Ext.Entity.GetAllEntitiesWithComponent("Camera") or {}
+        for _, eh in ipairs(cams) do
+            local ent = Ext.Entity.Get(eh)
+            local _, cam = pcall(function() return ent.Camera end)
+            if cam then
+                local _, active = pcall(function() return cam.Active end)
+                local _, ctl    = pcall(function() return cam.Controller end)
+                local _, inner  = pcall(function() return ctl and ctl.Camera end)
+                local _, m      = pcall(function() return inner and inner.InvViewMatrix end)
+                if m and (active or not renderedX) then
+                    renderedX = m[13]; renderedY = m[14]; renderedZ = m[15]
+                    if active then activeTag = "active"; break else activeTag = "fallback" end
+                end
+            end
+        end
+
+        -- (B) DLL last-wrote line.
+        local statusLine = ""
+        local okS, s = pcall(Ext.IO.LoadFile, STATUS_PATH)
+        if okS and s then statusLine = s:match("[^\r\n]+") or "" end
+
+        -- (C) Live char pos.
+        local charX, charY, charZ = nil, nil, nil
+        local e = getControlledEntity()
+        if e then charX, charY, charZ = readTranslate(e) end
+
+        Log.Write("--- dag_camcheck ---")
+        Log.Write(string.format("A rendered   (%s): (%.3f, %.3f, %.3f)",
+            activeTag,
+            renderedX or 0/0, renderedY or 0/0, renderedZ or 0/0))
+        Log.Write("B DLL status : " .. (statusLine == "" and "(no status file yet)" or statusLine))
+        Log.Write(string.format("C char live  : (%.3f, %.3f, %.3f)",
+            charX or 0/0, charY or 0/0, charZ or 0/0))
+        -- Parse wrote=x,y,z from statusLine to compute diff.
+        local wx, wy, wz = statusLine:match("wrote=([%-%d%.e]+),([%-%d%.e]+),([%-%d%.e]+)")
+        if wx and renderedX then
+            local dx = renderedX - tonumber(wx)
+            local dy = renderedY - tonumber(wy)
+            local dz = renderedZ - tonumber(wz)
+            Log.Write(string.format(
+                "diff rendered - DLL wrote = (%.3f, %.3f, %.3f); |dy|=%.3f -> %s",
+                dx, dy, dz, math.abs(dy),
+                (math.abs(dx) <= 0.05 and math.abs(dy) <= 0.05 and math.abs(dz) <= 0.05)
+                    and "MATCH (write reaches screen)"
+                    or  "MISS (write does NOT reach screen)"))
+        end
+    end)
+
     -- Raycast: REAL via SE Lua. No DLL involvement.
+    -- Signature per bg3se Level.inl:280 (RaycastClosest):
+    --   (source: vec3, destination: vec3, physicsType, includeGroups,
+    --    excludeGroups, context: int) -> PhxPhysicsHit
+    -- physicsType is a PhysicsType bitmask ("Static" | "Dynamic").
+    -- Groups is PhysicsGroupFlags bitmask; empty = all.
     Ext.RegisterConsoleCommand("dag_raynormal", function()
-        local pick = Ext.Client.GetPickingHelper(1)
-        if not pick then Log.Write("raycast: no picking helper"); return end
-        local orig = pick.WalkablePosition or { 0, 0, 0 }
-        local dir  = { 0, -1, 0 }  -- straight down; simplest test
-        local hit = Ext.Level.RaycastClosest(orig, dir, { "Visible", "Walkable", "Default" })
+        local e = getControlledEntity()
+        if not e then Log.Write("raycast: no controlled entity"); return end
+        local tx, ty, tz = readTranslate(e)
+        if not tx then Log.Write("raycast: no translate"); return end
+        -- Start 1 m above the character's feet, cast 10 m straight down.
+        local src = { tx, ty + 1.0, tz }
+        local dst = { tx, ty - 10.0, tz }
+        -- include=0xFFFFFFFF matches every PhysicsGroupFlags bit (terrain,
+        -- scenery, character, etc.). exclude=0 means filter nothing out.
+        local ok, hit = pcall(function()
+            return Ext.Level.RaycastClosest(src, dst, "Static,Dynamic", 0xFFFFFFFF, 0, 0)
+        end)
+        if not ok then Log.Write("raycast: call errored: " .. tostring(hit)); return end
         if not hit then Log.Write("raycast: no hit"); return end
+        local pos = hit.Position or hit.ImpactPosition or { 0, 0, 0 }
+        local nrm = hit.Normal   or hit.ImpactNormal   or { 0, 0, 0 }
         Log.Write(string.format(
-            "raycast: pos=(%.2f,%.2f,%.2f) normal=(%.2f,%.2f,%.2f) entity=%s",
-            hit.Position[1], hit.Position[2], hit.Position[3],
-            hit.Normal[1],   hit.Normal[2],   hit.Normal[3],
-            tostring(hit.HitObject)))
+            "raycast: pos=(%.2f,%.2f,%.2f) normal=(%.2f,%.2f,%.2f)",
+            pos[1], pos[2], pos[3], nrm[1], nrm[2], nrm[3]))
     end)
 end
 

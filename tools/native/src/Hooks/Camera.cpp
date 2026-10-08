@@ -98,9 +98,153 @@ CamStats* FindOrAdd(void* cam, void* behavior) {
 uint64_t _totalCalls    = 0;
 DWORD    _lastTickLogMs = 0;
 DWORD    _lastConfigPollMs = 0;
+DWORD    _lastStatusWriteMs = 0;
 
+// Phase B pre-hook state (forward-declared so WriteStatusFile can read).
+int   _behaviorSlotIdx = -1;
+void* _behaviorPtr     = nullptr;
+DWORD _lastBehaviorLogMs = 0;
+
+// -------------------------------------------------------------------
+// Phase D: hook CameraSystem::vtable[0x58] (CommitSlotTransform).
+//
+// Why: FUN_141e0f110 (UpdateCamera) ends with `vt[0x58](this, slotTok,
+// &local_508, &cam[0x48])`. local_508 is the frame's new camera
+// position; vt[0x58] writes it to cam[0x48..0x50] AND into the
+// rendered InvViewMatrix. Writing cam[0x48..0x50] before the chain
+// gets overwritten by sub-functions in UpdateCamera; writing after
+// is too late. Intercepting vt[0x58] catches the write in flight.
+//
+// Install: on the first live UpdateCamera invocation, read the scene
+// vtable (scene is param_1 = CameraSystem*), patch slot 11 (0x58/8)
+// to our hook, remember the original for chaining.
+//
+// Per-call: if g_desiredSet is true (set by the pre-hook block in
+// Hook_UpdateCamera when gameplay is active + camera enabled),
+// overwrite the newPos vec3 in place. If false, pass through unmodified.
+// -------------------------------------------------------------------
+using CommitFn = void(__fastcall*)(void*, void*, float*, float*);
+CommitFn _OriginalCommit = nullptr;
+bool     _vt58Hooked     = false;
+void**   _vt58VtableSlot = nullptr;  // for diagnostics
+
+// Thread-local would be nice but x64 __fastcall imposes no reentrancy
+// here — UpdateCamera is called single-threaded from the render path.
+float g_desiredPos[3] = { 0, 0, 0 };
+bool  g_desiredSet    = false;
+
+void __fastcall HookCommit(void* self, void* slotToken, float* newPos, float* outPos)
+{
+    if (g_desiredSet && newPos) {
+        newPos[0] = g_desiredPos[0];
+        newPos[1] = g_desiredPos[1];
+        newPos[2] = g_desiredPos[2];
+    }
+    if (_OriginalCommit) {
+        _OriginalCommit(self, slotToken, newPos, outPos);
+    }
+}
+
+void TryInstallVt58(void* scene)
+{
+    static bool _firstLog = true;
+    if (_firstLog) {
+        _firstLog = false;
+        dag::log::Writef("VT58: TryInstall first call scene=%p hooked=%d",
+                         scene, _vt58Hooked ? 1 : 0);
+    }
+    if (_vt58Hooked) return;
+    if (!scene) {
+        if (!_firstLog) {
+            dag::log::Writef("VT58: scene is NULL -- skipping install this frame");
+        }
+        return;
+    }
+    void** vtable = nullptr;
+    const bool okV = dag::safemem::ReadBytes(scene, &vtable, sizeof(vtable));
+    if (!okV || !vtable) {
+        dag::log::Writef("VT58: vtable read failed scene=%p ok=%d vtable=%p",
+                         scene, okV ? 1 : 0, vtable);
+        return;
+    }
+    void* entry = nullptr;
+    const bool okE = dag::safemem::ReadBytes(&vtable[11], &entry, sizeof(entry));
+    if (!okE || !entry) {
+        dag::log::Writef("VT58: entry read failed vtable=%p slot11=%p ok=%d entry=%p",
+                         vtable, (void*)&vtable[11], okE ? 1 : 0, entry);
+        return;
+    }
+    DWORD oldProt = 0;
+    if (!VirtualProtect(&vtable[11], sizeof(void*), PAGE_READWRITE, &oldProt)) {
+        dag::log::Writef("VT58: VirtualProtect to RW failed (%lu)", GetLastError());
+        return;
+    }
+    _OriginalCommit = reinterpret_cast<CommitFn>(entry);
+    vtable[11]      = reinterpret_cast<void*>(&HookCommit);
+    DWORD tmp = 0;
+    VirtualProtect(&vtable[11], sizeof(void*), oldProt, &tmp);
+    _vt58VtableSlot = &vtable[11];
+    _vt58Hooked     = true;
+    dag::log::Writef(
+        "VT58: hooked. scene=%p vtable=%p slot[11]=%p -> OurHook=%p (orig=%p)",
+        scene, vtable, &vtable[11], reinterpret_cast<void*>(&HookCommit),
+        reinterpret_cast<void*>(_OriginalCommit));
+}
+
+// Write our last-wrote / engine-pre-write / live-char-pos to a status
+// file every ~1 s. Lua's !dag_camcheck reads it alongside the rendered
+// camera position (from InvViewMatrix) so we can see whether our write
+// is reaching the screen.
+void WriteStatusFile(const CamStats& s)
+{
+    const DWORD now = GetTickCount();
+    if (now - _lastStatusWriteMs < 1000) return;
+    _lastStatusWriteMs = now;
+
+    wchar_t buf[MAX_PATH];
+    DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return;
+    wchar_t full[MAX_PATH * 2];
+    swprintf_s(full, L"%s\\Larian Studios\\Baldur's Gate 3\\Script Extender\\DarkAndGate\\native-cam-status.txt", buf);
+
+    // Also expose the Phase B pre-hook state: which cameraSlot[N] held
+    // the GameCameraBehavior pointer (-1 if not identified), and the
+    // last pre-hook write target.
+    float preWrote[3] = { 0, 0, 0 };
+    if (_behaviorPtr) {
+        (void)dag::safemem::ReadFloat3(_behaviorPtr, 0x30, preWrote);
+    }
+    char line[640];
+    const int len = std::snprintf(line, sizeof(line),
+        "cam=%p calls=%llu src=%s off=0x%X "
+        "char=%.3f,%.3f,%.3f eng=%.3f,%.3f,%.3f wrote=%.3f,%.3f,%.3f w=%d "
+        "beh_slot=%d beh_ptr=%p beh_target=%.3f,%.3f,%.3f t=%u\n",
+        s.cam, (unsigned long long)s.count,
+        s.kind == ProbeKind::Behavior ? "beh" :
+        (s.kind == ProbeKind::CamStruct ? "cam" : "unprobed"),
+        s.winningOffset,
+        s.lastCharX, s.lastCharY, s.lastCharZ,
+        s.lastEngX,  s.lastEngY,  s.lastEngZ,
+        s.lastWrittenX, s.lastWrittenY, s.lastWrittenZ,
+        s.wroteLast ? 1 : 0,
+        _behaviorSlotIdx, _behaviorPtr,
+        preWrote[0], preWrote[1], preWrote[2],
+        (unsigned)now);
+
+    HANDLE h = CreateFileW(full, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    DWORD written = 0;
+    WriteFile(h, line, len, &written, nullptr);
+    CloseHandle(h);
+}
+
+// cam[0xC4] confirmed in session 725000015: probe at 0xC0 showed
+// (90.0, 219.19, 24.18) while gt=(219.19, 24.18, 372.54) — so reading
+// 3 floats at 0xC4 yields (x, y, z). Keep neighbours in probe set in
+// case layout shifts between cam types.
 constexpr uint32_t kCamStructProbes[] = {
-    0x30, 0x60, 0xA0, 0xB0, 0xC0, 0x100, 0x120, 0x160, 0x1A0, 0x200,
+    0xC4, 0xC8, 0xB4, 0x30, 0x60, 0xA0, 0xB0, 0xC0, 0x100, 0x120, 0x160, 0x1A0, 0x200,
 };
 constexpr uint32_t kBehaviorProbes[] = {
     dag::offsets::kBehaviorTargetDestinationHigh,  // 0x30 — primary
@@ -110,7 +254,11 @@ constexpr uint32_t kBehaviorProbes[] = {
 };
 
 constexpr float kCalibTolerance = 0.05f;      // match ground truth within 5 cm
-constexpr float kDivergeTolerance = 1.00f;    // un-latch if we're off by >1 m
+// Walking char moves ~2.5 m between the 500 ms gt writes. Divergence
+// must be larger than that gap or we re-latch every walking frame.
+// 5 m covers running + a bit of head-room; a true cam-mode switch
+// (dialog, menu) typically relocates the cam by tens of metres.
+constexpr float kDivergeTolerance = 5.00f;
 
 bool Match(const float probe[3], float gx, float gy, float gz, float tol) {
     return std::fabs(probe[0] - gx) <= tol
@@ -188,10 +336,46 @@ bool ReadLiveCharPos(CamStats* stat, float out[3]) {
     return dag::safemem::ReadFloat3(base, stat->winningOffset, out);
 }
 
+// Phase B: identify which cameraSlot[N] holds the GameCameraBehavior
+// pointer by probing cameraSlot[N]+0x30 (TargetDestinationHigh) for a
+// float[3] that matches Lua ground truth within 0.05 m. Cached across
+// frames via static state. Once identified, the pre-hook writes our
+// desired position to that slot's +0x30 BEFORE calling the engine
+// UpdateCamera, so the engine's LERP + vt[0x58] commit publish our
+// value to InvViewMatrix.
+constexpr size_t kBehaviorSlotProbeMax = 16;
+
+bool IdentifyBehaviorSlot(void** cameraSlot, float gx, float gy, float gz,
+                          char* out, size_t cap)
+{
+    int w = 0;
+    for (size_t i = 0; i < kBehaviorSlotProbeMax; ++i) {
+        void* candidate = nullptr;
+        // Guard against unreadable slot (unlikely for a stack-like array,
+        // but cheap). SEH wrap via SafeMem.
+        if (!dag::safemem::ReadBytes(cameraSlot + i, &candidate, sizeof(candidate))) continue;
+        if (!candidate) continue;
+        float p[3] = {};
+        if (!dag::safemem::ReadFloat3(candidate, 0x30, p)) continue;
+        if (std::fabs(p[0]) > 1e6f || std::fabs(p[2]) > 1e6f) continue;  // skip garbage
+        if (w + 60 < static_cast<int>(cap)) {
+            w += std::snprintf(out + w, cap - w, " [%zu]+0x30=(%.2f,%.2f,%.2f)",
+                               i, p[0], p[1], p[2]);
+        }
+        if (std::fabs(p[0] - gx) < 0.05f &&
+            std::fabs(p[1] - gy) < 0.05f &&
+            std::fabs(p[2] - gz) < 0.05f) {
+            _behaviorSlotIdx = static_cast<int>(i);
+            _behaviorPtr     = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
 void Hook_UpdateCamera(void* scene, void** ctx,
                        uintptr_t frameInfo, void** cameraSlot)
 {
-    // Config live-reload once per second (cheap mtime stat).
     const DWORD now = GetTickCount();
     if (now - _lastConfigPollMs > 1000) {
         _lastConfigPollMs = now;
@@ -199,12 +383,54 @@ void Hook_UpdateCamera(void* scene, void** ctx,
         dag::groundtruth::Poll();
     }
 
+    const auto& cfg = dag::config::Get();
+    const auto  gt  = dag::groundtruth::Get();
+    const bool gtOk = gt.active && !gt.stale;
+
+    // Phase D: install vt[0x58] hook on first call, then set the
+    // thread-shared desired position so the vt[0x58] intercept
+    // overwrites the eye position in flight.
+    //
+    // Source: cam[0xC4] = the engine's look-at TARGET for this frame
+    // (= controlled char + ~1.6 m head offset). It is updated zero-lag
+    // every frame by the engine's follow logic. We use it as the base
+    // because: (a) no lag, (b) no file dependency, (c) baked-in head
+    // offset means debug_lift_m stacks on head height, not feet.
+    //
+    // The eye is normally computed as eye = target - forward * distance
+    // (vanilla ~12 m behind, ~8 m up). vt[0x58] receives the final eye;
+    // our hook substitutes it with (target.x, target.y + h, target.z)
+    // so the camera sits AT the look-at target plus h.
+    TryInstallVt58(scene);
+
+    float* cam_pre = nullptr;
+    if (cameraSlot) {
+        cam_pre = reinterpret_cast<float*>(cameraSlot[6]);
+    }
+    g_desiredSet = false;
+    if (cfg.camera.enabled && gtOk && cam_pre) {
+        float lookAt[3] = {};
+        if (dag::safemem::ReadFloat3(cam_pre, dag::offsets::kCamLookAtTargetPos, lookAt)) {
+            const bool sane = (std::fabs(lookAt[0]) > 0.1f || std::fabs(lookAt[2]) > 0.1f)
+                              && std::fabs(lookAt[1]) < 10000.0f;
+            if (sane) {
+                const float h = (cfg.camera.debug_lift_m > 0.0f)
+                                ? cfg.camera.debug_lift_m
+                                : cfg.camera.eye_height;
+                g_desiredPos[0] = lookAt[0];
+                g_desiredPos[1] = lookAt[1] + h;
+                g_desiredPos[2] = lookAt[2];
+                g_desiredSet    = true;
+            }
+        }
+    }
+
     if (_UpdateCamera) {
         _UpdateCamera(scene, ctx, frameInfo, cameraSlot);
     }
-
-    const auto& cfg = dag::config::Get();
-    const auto  gt  = dag::groundtruth::Get();
+    // Reset after chain so an unrelated call through vt[0x58] (e.g.
+    // dialogue cam flipping in mid-frame) doesn't inherit our value.
+    g_desiredSet = false;
 
     void*  behavior = cameraSlot;  // the 4th arg itself may be the behavior
     float* cam = nullptr;
@@ -219,7 +445,6 @@ void Hook_UpdateCamera(void* scene, void** ctx,
     }
 
     CamStats* stat = cam ? FindOrAdd(cam, behavior) : nullptr;
-    const bool gtOk = gt.active && !gt.stale;
 
     // Calibrate: once per cam while active+non-stale. Also recalibrate
     // if a previous probe diverges by more than 1 m from ground truth.
@@ -257,28 +482,27 @@ void Hook_UpdateCamera(void* scene, void** ctx,
         }
     }
 
-    // Pin: write cam.x = char.x, cam.y = char.y + eye_height, cam.z = char.z
-    // Only for calibrated gameplay cams, only while gt active.
+    // STEP-C-STYLE WRITE (debug): Y += lift on every cam while gameplay
+    // active. Isolates "does cam+0x4c Y write still affect rendering?".
+    // Absolute pin + per-cam gating are temporarily disabled while we
+    // verify the write path.
     bool wrote = false;
     float wx = xEng, wy = yEng, wz = zEng;
-    if (cfg.camera.enabled && gtOk && stat &&
-        (stat->kind == ProbeKind::Behavior || stat->kind == ProbeKind::CamStruct)) {
-        float live[3] = {};
-        if (ReadLiveCharPos(stat, live)) {
-            stat->lastCharX = live[0];
-            stat->lastCharY = live[1];
-            stat->lastCharZ = live[2];
-            const float h = (cfg.camera.debug_lift_m > 0.0f)
-                            ? cfg.camera.debug_lift_m
-                            : cfg.camera.eye_height;
-            wx = live[0];
-            wy = live[1] + h;
-            wz = live[2];
-            if (cam) {
-                std::memcpy(reinterpret_cast<uint8_t*>(cam) + dag::offsets::kCamWorldPosX, &wx, 4);
-                std::memcpy(reinterpret_cast<uint8_t*>(cam) + dag::offsets::kCamWorldPosY, &wy, 4);
-                std::memcpy(reinterpret_cast<uint8_t*>(cam) + dag::offsets::kCamWorldPosZ, &wz, 4);
-                wrote = true;
+    if (cfg.camera.enabled && gtOk && cam) {
+        const float h = (cfg.camera.debug_lift_m > 0.0f)
+                        ? cfg.camera.debug_lift_m
+                        : cfg.camera.eye_height;
+        wy = yEng + h;
+        std::memcpy(reinterpret_cast<uint8_t*>(cam) + dag::offsets::kCamWorldPosY, &wy, 4);
+        wrote = true;
+        if (stat) {
+            // Still track live char pos for diagnostics when latch succeeded.
+            float live[3] = {};
+            if ((stat->kind == ProbeKind::Behavior || stat->kind == ProbeKind::CamStruct) &&
+                ReadLiveCharPos(stat, live)) {
+                stat->lastCharX = live[0];
+                stat->lastCharY = live[1];
+                stat->lastCharZ = live[2];
             }
         }
     }
@@ -315,6 +539,17 @@ void Hook_UpdateCamera(void* scene, void** ctx,
         stat->wroteLast    = wrote;
     }
 
+    // Write the per-write status file for the "best" cam we have —
+    // use the one with the most calls, which is the gameplay cam by
+    // dominant-presence (even if calibration didn't latch it).
+    if (_numCams > 0) {
+        CamStats* best = &_cams[0];
+        for (size_t i = 1; i < _numCams; ++i) {
+            if (_cams[i].count > best->count) best = &_cams[i];
+        }
+        WriteStatusFile(*best);
+    }
+
     if (!_checked5s  && now - _installTickMs > 5000)  { CheckCallSiteStillOurs("5s");  _checked5s  = true; }
     if (!_checked20s && now - _installTickMs > 20000) { CheckCallSiteStillOurs("20s"); _checked20s = true; }
 
@@ -328,16 +563,18 @@ void Hook_UpdateCamera(void* scene, void** ctx,
             "Camera: tick total=%llu cams=%zu pinned=%zu gt=active:%d stale:%d (%.2f,%.2f,%.2f)",
             (unsigned long long)_totalCalls, _numCams, pinned,
             gt.active ? 1 : 0, gt.stale ? 1 : 0, gt.x, gt.y, gt.z);
+        // Dump ALL cams during this debug round — need to see which one
+        // is the actual render target.
         for (size_t i = 0; i < _numCams; ++i) {
             const auto& s = _cams[i];
-            if (s.kind != ProbeKind::Behavior && s.kind != ProbeKind::CamStruct) continue;
             dag::log::Writef(
-                "  cam[%zu]=%p calls=%llu src=%s off=0x%X char=(%.2f,%.2f,%.2f) eng=(%.2f,%.2f,%.2f) wrote=%d",
+                "  cam[%zu]=%p calls=%llu src=%s off=0x%X char=(%.2f,%.2f,%.2f) eng=(%.2f,%.2f,%.2f) wrote=(%.2f,%.2f,%.2f) w=%d",
                 i, s.cam, (unsigned long long)s.count,
                 s.kind == ProbeKind::Behavior ? "beh" : "cam",
                 s.winningOffset,
-                s.lastCharX, s.lastCharY, s.lastCharZ,
-                s.lastEngX,  s.lastEngY,  s.lastEngZ,
+                s.lastCharX,    s.lastCharY,    s.lastCharZ,
+                s.lastEngX,     s.lastEngY,     s.lastEngZ,
+                s.lastWrittenX, s.lastWrittenY, s.lastWrittenZ,
                 s.wroteLast ? 1 : 0);
         }
     }

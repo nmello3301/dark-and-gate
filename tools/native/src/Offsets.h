@@ -69,6 +69,13 @@ constexpr uint32_t kCamActiveCharPtr = 0x110;  // void*
 // look-at target is active. Keep for completeness.
 constexpr uint32_t kCamLookAtTargetPtr = 0x120;  // void*
 
+// Camera's current look-at target (vec3), updated by the engine each
+// frame to track the controlled character. Confirmed 2026-10-08 via
+// dag_camcheck: value == controlled char Translate + (0, ~1.6, 0) —
+// the "head reference" offset the follow algorithm uses. NOT the eye
+// (eye = target - forward * distance; see docs/spikes/m1a-camera-follow.md).
+constexpr uint32_t kCamLookAtTargetPos = 0xC4;  // float[3]
+
 // -----------------------------------------------------------------------
 // Character / Visual offsets — PLACEHOLDERS, confirm at implementation.
 // `.VisualTransform` / `.VisualTransform3D` strings exist in bg3.exe at
