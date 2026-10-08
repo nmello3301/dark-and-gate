@@ -14,6 +14,7 @@
 -- Commands (client console, C >>):
 --   !dag_full_pov [on|off]      toggle first-person POV
 --   !dag_pov_eye <up> <fwd> [look]  eye offset from the head bone, metres
+--   !dag_pov_down <m>           extra forward shift when looking straight down (default 0.20)
 --   !dag_pov_dump               DLL logs every pose candidate to native.log
 --   !dag_pov_status             print the DLL's POV status line
 
@@ -32,6 +33,7 @@ local S = {
     look = 1.0,
     eye_height = 1.65,
     pivot_up = -0.15,
+    down_fwd = 0.20,
     dump = 0,
 }
 
@@ -190,8 +192,8 @@ local function writeState()
     if S.on then refreshCache(e, now) end
 
     local line = string.format(
-        "on=%d active=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
-        S.on and 1 or 0, active and 1 or 0, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up,
+        "on=%d active=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
+        S.on and 1 or 0, active and 1 or 0, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
         S.dump, cache.sock or -1, cache.skel or 0, x, y, z,
         (S.on and #cache.meshes > 0) and table.concat(cache.meshes, ",") or "0",
         now)
@@ -221,6 +223,9 @@ local function setOn(on)
 end
 
 function M.Register()
+    -- POV starts off every session; make sure a hide_head left on by a
+    -- previous session doesn't fire before the character exists.
+    setHideHead(false)
     Ext.Events.Tick:Subscribe(function() pcall(writeState) end)
 
     Ext.RegisterConsoleCommand("dag_full_pov", function(_, arg)
@@ -234,6 +239,11 @@ function M.Register()
         S.eye_fwd = tonumber(fwd) or S.eye_fwd
         S.look    = tonumber(look) or S.look
         Log.Write(string.format("FullPov: eye_up=%.3f eye_fwd=%.3f look=%.2f", S.eye_up, S.eye_fwd, S.look))
+    end)
+
+    Ext.RegisterConsoleCommand("dag_pov_down", function(_, m)
+        S.down_fwd = tonumber(m) or S.down_fwd
+        Log.Write(string.format("FullPov: down_fwd=%.3f (forward shift when looking straight down)", S.down_fwd))
     end)
 
     Ext.RegisterConsoleCommand("dag_pov_dump", function()
@@ -259,7 +269,7 @@ function M.Register()
         Log.Write("FullPov status: " .. (readStatus() or "(no status file -- is DarkAndGate.dll loaded?)"))
     end)
 
-    Log.Write("FullPov: registered !dag_full_pov / !dag_pov_eye / !dag_pov_dump / !dag_pov_status")
+    Log.Write("FullPov: registered !dag_full_pov / !dag_pov_eye / !dag_pov_down / !dag_pov_dump / !dag_pov_status")
 end
 
 return M

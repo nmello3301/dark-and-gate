@@ -138,6 +138,7 @@ struct LuaState {
     float look      = 1.0f;    // distance of the look-at point
     float eyeHeight = 1.65f;   // for the mesh-transform fallback
     float pivotUp   = -0.15f;  // for the engine-pivot fallback
+    float downFwd   = 0.20f;   // extra forward shift when looking straight down
     int   dump      = 0;       // bumped by Lua to request a pose dump
     int   sockBone  = -1;      // head socket bone index (Lua)
     int   skelBones = 0;       // skeleton bone count (Lua)
@@ -180,6 +181,7 @@ void PollLuaFile()
     s.look      = ValF(buf, "look", s.look);
     s.eyeHeight = ValF(buf, "eye_height", s.eyeHeight);
     s.pivotUp   = ValF(buf, "pivot_up", s.pivotUp);
+    s.downFwd   = ValF(buf, "down_fwd", s.downFwd);
     s.dump      = ValI(buf, "dump", 0);
     s.sockBone  = ValI(buf, "sock", -1);
     s.skelBones = ValI(buf, "skel", 0);
@@ -298,12 +300,30 @@ void Select(bool dumpToLog)
         if (dumpToLog) {
             dag::log::Writef("POV dump: mesh[%d]=%p transformOk=%d T=(%.2f,%.2f,%.2f)",
                              mi, reinterpret_cast<void*>(mesh), mtOk ? 1 : 0, mt[12], mt[13], mt[14]);
+            if (mi < 2) {
+                void* obj = nullptr;
+                (void)dag::safemem::ReadPtr(reinterpret_cast<void*>(mesh), 0x28, obj);
+                float wt[10] = {};
+                const bool okW = obj && dag::safemem::ReadBytes(static_cast<uint8_t*>(obj) + 8, wt, sizeof(wt));
+                dag::log::Writef("POV dump:   object=%p ok=%d worldT: q=(%.3f %.3f %.3f %.3f) t=(%.3f %.3f %.3f) s=(%.3f %.3f %.3f)",
+                                 obj, okW ? 1 : 0, wt[0], wt[1], wt[2], wt[3], wt[4], wt[5], wt[6], wt[7], wt[8], wt[9]);
+            }
         }
         for (int slot = 0; slot < 2; ++slot) {
             uintptr_t arr = 0; int count = 0;
             if (!ReadPoseHeader(mesh, slot, arr, count)) {
                 if (dumpToLog) dag::log::Writef("POV dump:   pose%d unreadable", slot + 1);
                 continue;
+            }
+            if (dumpToLog && mi < 2) {
+                for (int b = 0; b < count && b < 6; ++b) {
+                    float m[12] = {};
+                    const bool ok = dag::safemem::ReadBytes(
+                        reinterpret_cast<void*>(arr + static_cast<uintptr_t>(b) * 48), m, sizeof(m));
+                    dag::log::Writef("POV dump:   pose%d raw[%d] ok=%d %.3f %.3f %.3f %.3f | %.3f %.3f %.3f %.3f | %.3f %.3f %.3f %.3f",
+                                     slot + 1, b, ok ? 1 : 0, m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7],
+                                     m[8], m[9], m[10], m[11]);
+                }
             }
             for (int layout = 0; layout < 2; ++layout) {
                 for (int space = 0; space < 2; ++space) {
@@ -642,10 +662,20 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
     if (rl < 0.5f || rl > 1.5f) return false;
     rot[0] /= rl; rot[1] /= rl; rot[2] /= rl;
 
-    // Horizontal forward (the way the camera looks, flattened).
+    // Horizontal forward (the way the camera looks, flattened). Near
+    // straight up/down the flattened vector degenerates, so keep the last
+    // good one instead of letting it jitter.
+    static float s_fx = 0.f, s_fz = 1.f;
     float fx = -rot[0], fz = -rot[2];
     const float fh = std::sqrt(fx * fx + fz * fz);
-    if (fh > 1e-4f) { fx /= fh; fz /= fh; } else { fx = 0; fz = 0; }
+    if (fh > 0.05f) { fx /= fh; fz /= fh; s_fx = fx; s_fz = fz; }
+    else            { fx = s_fx; fz = s_fz; }
+
+    // Looking down: slide the eye forward (up to downFwd metres when
+    // looking straight down) so the view clears the neck/collar.
+    // Forward is -rot, so looking down means rot.y > 0.
+    const float downAmt = rot[1] > 0.f ? (rot[1] > 1.f ? 1.f : rot[1]) : 0.f;
+    const float fwdTotal = g_lua.eyeFwd + g_lua.downFwd * downAmt;
 
     float eye[3];
     float head[3] = {};
@@ -661,9 +691,9 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
             (std::fabs(head[0] - pivot[0]) < 2.0f && std::fabs(head[2] - pivot[2]) < 2.0f &&
              std::fabs(head[1] - pivot[1]) < 2.5f);
         if (sane) {
-            eye[0] = head[0] + fx * g_lua.eyeFwd;
+            eye[0] = head[0] + fx * fwdTotal;
             eye[1] = head[1] + g_lua.eyeUp;
-            eye[2] = head[2] + fz * g_lua.eyeFwd;
+            eye[2] = head[2] + fz * fwdTotal;
             src = "bone"; have = true; g_badFrames = 0;
         } else if (++g_badFrames > 30) {
             g_sel.valid = false;  // reselect next second
@@ -674,18 +704,18 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
         if (ReadMeshTransform(g_sel.mesh, mt)) {
             const float base[3] = { mt[12], mt[13], mt[14] };
             if (!pivotOk || (std::fabs(base[0] - pivot[0]) < 2.0f && std::fabs(base[2] - pivot[2]) < 2.0f)) {
-                eye[0] = base[0] + fx * g_lua.eyeFwd;
+                eye[0] = base[0] + fx * fwdTotal;
                 eye[1] = base[1] + g_lua.eyeHeight;
-                eye[2] = base[2] + fz * g_lua.eyeFwd;
+                eye[2] = base[2] + fz * fwdTotal;
                 src = "mesh"; have = true;
             }
         }
     }
     if (!have) {
         if (!pivotOk) return false;
-        eye[0] = pivot[0] + fx * g_lua.eyeFwd;
+        eye[0] = pivot[0] + fx * fwdTotal;
         eye[1] = pivot[1] + g_lua.pivotUp;
-        eye[2] = pivot[2] + fz * g_lua.eyeFwd;
+        eye[2] = pivot[2] + fz * fwdTotal;
         src = "pivot";
     }
 
