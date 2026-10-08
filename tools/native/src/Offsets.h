@@ -61,8 +61,13 @@ constexpr uint32_t kCamSlerpTgtZ  = 0x84;
 constexpr uint32_t kCamModeFlags  = 0xa8;  // byte flags, bit0 = combat
 
 // Character pointer carried by the camera. From FUN_141e0f110's SLERP
-// branch — the engine's own "camera follows character" state.
-constexpr uint32_t kCamActiveCharPtr = 0x220;  // void*
+// branch (`*(longlong **)(pfVar22 + 0x44)` where pfVar22 is float*,
+// so byte offset = 0x44 * sizeof(float) = 0x110). The engine's own
+// "camera follows this character" state.
+constexpr uint32_t kCamActiveCharPtr = 0x110;  // void*
+// Secondary slot the SLERP branch tries first; usually null unless a
+// look-at target is active. Keep for completeness.
+constexpr uint32_t kCamLookAtTargetPtr = 0x120;  // void*
 
 // -----------------------------------------------------------------------
 // Character / Visual offsets — PLACEHOLDERS, confirm at implementation.

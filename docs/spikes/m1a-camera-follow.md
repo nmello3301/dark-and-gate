@@ -291,11 +291,12 @@ goal; see `docs/spikes/m1a-bone-reads.md` (sibling spike, scheduled
 inside M1a, not after). DECISIONS.md carries the one-liner.
 
 Finding the player character pointer from inside the hook: the camera
-object already carries a character handle. From `FUN_141e0f110`'s body:
-- `*(longlong *)(pfVar22 + 0x44)` (= `cam+0x220`) — "ActiveCharacter"
+object already carries a character handle. From `FUN_141e0f110`'s body
+(remember `pfVar22` is `float*`, so float-index * 4 = byte offset):
+- `*(longlong *)(pfVar22 + 0x44)` (= `cam+0x110`) — "ActiveCharacter"
   (confidence medium, xref'd in SLERP code with char* `[0xf]` and
   `[0x79]` state bytes).
-- `*(longlong *)(pfVar22 + 0x48)` (= `cam+0x240`) — alternate character
+- `*(longlong *)(pfVar22 + 0x48)` (= `cam+0x120`) — alternate character
   ptr (secondary; probably "target of look-at"; ignore for FP).
 
 ## Mouselook

@@ -160,35 +160,53 @@ bool Install()
     }
     _UpdateCamera = reinterpret_cast<UpdateCameraFn>(previous);
 
-    // Report whether we chained through another mod. The CALL target
-    // we captured points into either bg3.exe (direct engine function)
-    // or another loaded module (another mod hooked first). Find out
-    // which by resolving the containing module.
-    HMODULE containing = nullptr;
-    GetModuleHandleExW(
-        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-        reinterpret_cast<LPCWSTR>(previous),
-        &containing);
-    HMODULE mainExe = GetModuleHandleW(nullptr);
-    wchar_t name[MAX_PATH] = L"<unknown>";
-    if (containing) {
-        GetModuleFileNameW(containing, name, MAX_PATH);
-    }
-    // Trim to basename for readability.
-    const wchar_t* base = name;
-    for (const wchar_t* p = name; *p; ++p) {
-        if (*p == L'\\' || *p == L'/') base = p + 1;
-    }
-    char nameAscii[MAX_PATH] = {};
-    WideCharToMultiByte(CP_UTF8, 0, base, -1, nameAscii, MAX_PATH, nullptr, nullptr);
+    // Report whether we chained through another mod. The captured
+    // target is often a VirtualAlloc'd trampoline (NCT uses the same
+    // pattern we do), which won't belong to any module. Follow one
+    // absolute-JMP level (48 B8 <abs64> FF E0, exactly the stub shape
+    // we also emit) if the first lookup lands on a non-module page.
+    auto resolveModuleName = [](uint8_t* addr, char* out, size_t cap) -> HMODULE {
+        HMODULE mod = nullptr;
+        GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(addr),
+            &mod);
+        if (!mod) { out[0] = 0; return nullptr; }
+        wchar_t wname[MAX_PATH] = {};
+        GetModuleFileNameW(mod, wname, MAX_PATH);
+        const wchar_t* base = wname;
+        for (const wchar_t* p = wname; *p; ++p) {
+            if (*p == L'\\' || *p == L'/') base = p + 1;
+        }
+        WideCharToMultiByte(CP_UTF8, 0, base, -1, out, static_cast<int>(cap), nullptr, nullptr);
+        return mod;
+    };
 
-    const bool chained = (containing != nullptr && containing != mainExe);
+    uint8_t*  trampTarget = previous;
+    char      firstName[MAX_PATH]  = {};
+    char      finalName[MAX_PATH]  = {};
+    HMODULE   firstMod  = resolveModuleName(previous, firstName, sizeof(firstName));
+
+    // If first lookup landed on a VirtualAlloc page, try following
+    // the 10-byte trampoline shape to the real target.
+    if (!firstMod && previous[0] == 0x48 && previous[1] == 0xB8 &&
+                     previous[10] == 0xFF && previous[11] == 0xE0) {
+        void* abs = nullptr;
+        std::memcpy(&abs, previous + 2, sizeof(abs));
+        trampTarget = static_cast<uint8_t*>(abs);
+    }
+    HMODULE finalMod = resolveModuleName(trampTarget, finalName, sizeof(finalName));
+
+    HMODULE   mainExe   = GetModuleHandleW(nullptr);
+    const bool chained  = (finalMod && finalMod != mainExe);
+    const char* via     = finalName[0] ? finalName
+                        : (firstName[0] ? firstName : "<trampoline, module unresolved>");
     dag::log::Writef(
         "Camera: hook installed. _UpdateCamera -> %p (%s via %s)",
         _UpdateCamera,
-        chained ? "chained" : "direct engine target",
-        nameAscii);
+        chained ? "chained" : (finalMod ? "direct engine target" : "unresolved"),
+        via);
     return true;
 }
 
