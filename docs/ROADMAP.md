@@ -8,10 +8,10 @@ Estimates assume part-time work (evenings). They are guesses made on 2026-10-07 
 
 | Milestone | What it delivers | Estimate | Started | Done |
 | --- | --- | --- | --- | --- |
-| Setup | Repo, tools, mod scaffold, deploy and log loop working | 1 evening | 2026-10-07 | |
+| Setup | Repo, tools, mod scaffold, deploy and log loop working | 1 evening | 2026-10-07 | 2026-10-07 |
 | M0 Spikes | Answers to the 11 engine questions; fork-Brawl decision | 1–3 weeks | 2026-10-07 | 2026-10-08 |
-| M1a Native plugin | C++ DLL exports: camera follow + mouselook, then bones, anim speed/cancel, hit normals | 3–5 weeks | | |
-| M1b Combat slice | Longsword chain, blade-path hits, Fire Bolt / Fireball / Misty Step, mana, hotbar, goblins on Brawl-adapted real-time AI | 5–8 weeks | | |
+| M1a Native plugin | C++ DLL exports: camera follow + mouselook, then bones, anim speed/cancel, hit normals | 3–5 weeks | 2026-10-07 | 2026-10-08 |
+| M1b Combat slice | Longsword chain, blade-path hits, Fire Bolt / Fireball / Misty Step, mana, hotbar, goblins on Brawl-adapted real-time AI | 5–8 weeks | 2026-10-08 | |
 | **Gate 1** | **Combat feels tight** | | | |
 | M2 Combat breadth | All 10 weapon families, all spell types, blocking, ranged, first MP smoke test (spike 9 answer) | 6–10 weeks | | |
 | M3 Companion AI | Follow / Wait / Camp; archetypes on top of the Brawl adapter | 2–4 weeks | | |
@@ -76,16 +76,37 @@ The DLL that lives in `tools/native/` and loads via Ch4nKyy's Mod Loader.
 Order of exports is "what makes FP look right first", so M1b can start as
 soon as the camera is usable.
 
-- [ ] Build setup: Visual Studio C++ project, Ch4nKyy loader stub, DKUtil hook pattern-scan. Template: Native Camera Tweaks source.
-- [ ] Head-bone-read spike ([m1a-bone-reads.md](spikes/m1a-bone-reads.md)) running in parallel with camera follow — exports `GetBoneWorldPos(entity, bone)` once the Granny node vtable is resolved.
-- [ ] **Camera follow + mouselook** (combined — same hook): read mouse delta, drive camera yaw/pitch, place camera at a Lua-chosen bone/world point each frame. Unblocks true first person.
-- [ ] FP camera values finalized in `BG3NativeCameraTweaks.toml` once mouselook is live.
-- [ ] True first person: local head / hair / beard / headwear hidden (Lua side already works; native covers the follow lag).
-- [ ] `GetBoneWorldPos(entity, boneName) → vec3`. Unblocks the blade-path hit check.
-- [ ] `SetAnimPlaySpeed(entity, mult)` and `CancelAnim(entity)`. Unblocks swing-chain timing + hit stop.
-- [ ] `RaycastHitNormal(from, to) → vec3?`. Unblocks surface-aligned blood / spark effects.
-- [ ] (Stretch, deferred unless M1b feel demands it) `PushRagdoll(entity, vec3, force)`.
-- [ ] Smoke test: FP camera stays on the head, mouse look rotates smoothly, blade-path hits visibly land in the right places.
+### Status (2026-10-08): first-person camera works ✅
+
+Verified in-game on DEV-SAVE: `client` → `!dag_full_pov`.
+
+- Camera sits at Gale's eyes, head / hair / beard hidden on the local client, body visible when looking down.
+- Mouse-look (yaw **and** pitch) is on as soon as POV starts; **MMB toggles** it. WASD walks where you look.
+- No follow lag: the camera is anchored to the engine's own *desired* camera point (pre-smoothing) every frame.
+- Looking down slides the eye forward (up to 20 cm straight down) so the neck opening never shows.
+- Dialogue and cutscenes hand the camera back to the game automatically.
+
+How it works (details in `tools/native/src/Hooks/Pov.cpp`): NCT provides placement and pitch (zoom 0, FOV 90, offset 0.95, pitch unlocked); our DLL hooks the camera commit (`vt[0x58]`), the one call proven to reach the screen, and sets the eye *and* the look-at point together, restoring the camera fields afterwards so nothing persists. Lua (`FullPov.lua`) only tells the DLL on/off, gameplay-active and offsets.
+
+**Kept settings (defaults in code):** `eye_fwd 0.10`, `down_fwd 0.20`, `pivot_up -0.15`, look-at distance 1.0 m. NCT TOML as installed (ZoomMin 0.0, FOV 90, VerticalOffsetMult 0.95, UnlockPitch ±89, MousePitchMult 0.25). Live tuning: `!dag_pov_eye <up> <fwd>`, `!dag_pov_down <m>`, `!dag_pov_status`, `!dag_pov_dump`.
+
+### Checklist
+
+- [x] Build setup: Visual Studio C++ project, Ch4nKyy loader stub, pattern-scan hooks chained with NCT. One-step build: `scripts\pov-build-deploy.ps1` (or `DAG build POV.bat` on the Desktop).
+- [x] **Camera follow + mouselook**: `!dag_full_pov`, zero lag, mouse yaw/pitch, MMB toggle. *(2026-10-08)*
+- [x] FP camera values finalized (NCT TOML + POV defaults above). *(2026-10-08)*
+- [x] True first person: local head / hair / beard hidden, body and arms visible. *(2026-10-08)*
+- [x] Raycast hit normals via `Ext.Level.RaycastClosest` (Lua, native not needed).
+- [x] Smoke test: FP camera stays on the head, mouse-look rotates smoothly. *(2026-10-08)*
+
+See **Archived (future)** below for bone reads, anim speed/cancel and ragdoll push — moved out of M1a.
+
+### Known issues / polish
+
+- Mouse sensitivity comes from NCT's TOML (`MouseCameraRotationMult`, `MousePitchMult`); an in-game slider (MCM) later.
+- Head hiding occasionally needed an off/on toggle; fixed by resetting `hide_head` at session start (verify over a few sessions).
+- The game runs `bg3_dx11.exe`; static analysis should use the `bg3_dx11.exe` Ghidra program (now imported).
+- Old camera-override experiments (vt58 pin, instant_follow, legacy writes) are parked behind default-off switches in `native-config.toml`.
 
 ## M1b — Combat vertical slice
 
@@ -153,3 +174,12 @@ land in parallel with M1b work.
 - [ ] Act 3 fight pass
 - [ ] Install guide and mod page
 - [ ] Public release
+
+## Archived (future)
+
+Native plugin exports that would have gone into M1a but are not blocking M1b. Each line names what was learned and what the next session would start from.
+
+- [ ] **Head-bone anchor for the camera.** M1a reaches the body `Pose` array through the MeshBinding addresses passed from Lua (`Pose1`/`Pose2`, 65 bones body, 83 head). The matrices are 3×4 model-space skinning matrices (`M = ModelSpaceCurrent × inverse(ModelSpaceBind)`), not bone positions — need the bind-pose model-space positions **and** the skeleton→binding bone index map before a bone position falls out as `worldPos = ObjectTransform × (M × bindPos)`. For M1b the engine-anchor camera is tight enough; head bob and leaning are polish, not blockers.
+- [ ] **`GetBoneWorldPos(entity, boneName) → vec3`.** Same groundwork as the head-bone anchor. M1b's hit detection switches to a timed camera-relative swing arc (ray fan from the eye through the arc) which doesn't need a bone position, so this is unblocked but no longer on the critical path.
+- [ ] **`SetAnimPlaySpeed(entity, mult)` and `CancelAnim(entity)`.** No SE Lua exposure of the field, Granny internals not RE'd. Hit stop and chain-timing finesse are deferred (M1b uses fixed timings).
+- [ ] **`PushRagdoll(entity, vec3, force)`.** Directional death animations keyed on hit direction (M1b) cover the feel without a physics impulse.
