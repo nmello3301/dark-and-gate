@@ -38,6 +38,7 @@
 #include "../PatternScan.h"
 #include "../SafeMem.h"
 #include "Mouselook.h"
+#include "Pov.h"
 #include "Stubs.h"
 
 namespace dag::hooks::camera {
@@ -164,6 +165,12 @@ DWORD _lastDriftLogMs   = 0;
 
 void __fastcall HookCommit(void* self, void* slotToken, float* newPos, float* outPos)
 {
+    // Full POV (dag_full_pov) owns the gameplay camera's commit when on.
+    if (dag::pov::HandleCommit(self, slotToken, newPos, outPos,
+                               reinterpret_cast<dag::pov::CommitFn>(_OriginalCommit))) {
+        return;
+    }
+
     // All work happens inside this hook — no cross-frame state. That
     // way nothing we write can persist to the next frame and feed back
     // into our computation. Previous attempts split state across
@@ -549,6 +556,7 @@ void Hook_UpdateCamera(void* scene, void** ctx,
     // Phase D (consolidated): install the vt[0x58] hook once. All pin
     // logic now lives in HookCommit so no state crosses frames here.
     TryInstallVt58(scene);
+    dag::pov::OnFrame(cameraSlot ? cameraSlot[6] : nullptr);
 
     // Instant-follow: write large values to the CameraDefinition's
     // follow-damping fields so the engine's `pos += damp*dt*(target-pos)`
@@ -771,8 +779,8 @@ void Hook_UpdateCamera(void* scene, void** ctx,
             divXZ = std::sqrt(dx * dx + dz * dz);
         }
         const bool divergent = (divXZ > 0.05f);
-        const bool dueByTime = (now - _lastProbeLogMs) >= 50;
-        if (dueByTime || divergent) {
+        const bool dueByTime = (now - _lastProbeLogMs) >= 5000;  // was 50 ms: log spam
+        if (dueByTime) {
             _lastProbeLogMs = now;
             dag::log::Writef(
                 "PhaseProbe cam=%p root=(%.3f,%.3f,%.3f)%s desired=(%.3f,%.3f,%.3f)%s rot=(%.3f,%.3f,%.3f)%s eye[0xC4]=(%.3f,%.3f,%.3f)%s gt=(%.3f,%.3f,%.3f) %s divXZ=%.3f%s",
