@@ -159,12 +159,36 @@ bool Install()
         return false;
     }
     _UpdateCamera = reinterpret_cast<UpdateCameraFn>(previous);
+
+    // Report whether we chained through another mod. The CALL target
+    // we captured points into either bg3.exe (direct engine function)
+    // or another loaded module (another mod hooked first). Find out
+    // which by resolving the containing module.
+    HMODULE containing = nullptr;
+    GetModuleHandleExW(
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        reinterpret_cast<LPCWSTR>(previous),
+        &containing);
+    HMODULE mainExe = GetModuleHandleW(nullptr);
+    wchar_t name[MAX_PATH] = L"<unknown>";
+    if (containing) {
+        GetModuleFileNameW(containing, name, MAX_PATH);
+    }
+    // Trim to basename for readability.
+    const wchar_t* base = name;
+    for (const wchar_t* p = name; *p; ++p) {
+        if (*p == L'\\' || *p == L'/') base = p + 1;
+    }
+    char nameAscii[MAX_PATH] = {};
+    WideCharToMultiByte(CP_UTF8, 0, base, -1, nameAscii, MAX_PATH, nullptr, nullptr);
+
+    const bool chained = (containing != nullptr && containing != mainExe);
     dag::log::Writef(
-        "Camera: hook installed. _UpdateCamera -> %p (%s)",
+        "Camera: hook installed. _UpdateCamera -> %p (%s via %s)",
         _UpdateCamera,
-        current == previous
-            ? "direct engine target"
-            : "chained target (another mod hooked first)");
+        chained ? "chained" : "direct engine target",
+        nameAscii);
     return true;
 }
 
