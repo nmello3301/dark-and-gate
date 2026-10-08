@@ -36,8 +36,23 @@ constexpr std::string_view kUpdateCameraPitchPattern =
     "E8 ?? ?? ?? ?? 48 8B 46 70 4C 8D 45 90 0F 28 46 30";
 constexpr std::string_view kAfterUpdateCameraZoomPattern =
     "E8 ?? ?? ?? ?? 80 BF 54 02 00 00 00";
+// NCT scans this to resolve GetCurrentCameraDefinition and the camera
+// singleton pointer. We only need the function. Signature:
+//   CameraDefinition* GetCurrentCameraDefinition(CameraObject* camObj)
 constexpr std::string_view kGetCurrentCameraDefinitionPattern =
     "48 8B 05 ?? ?? ?? ?? 80 B8 32 13 00 00 00 74 07";
+
+// CameraDefinition damping-field offsets. +0xF0 and +0xF4 are NCT's
+// pitchAdjustSpeedB/C (NCT writes them 100000 during pitch commit).
+// +0xF8..+0x100 are the position / follow damping block the LERP reads
+// as `pos += damp * dt * (target - pos)` (identified via Ghidra decomp
+// of FUN_141e0f110 LERP sequence). We bump them each frame and restore
+// around the chain so NCT and any downstream code see vanilla values.
+constexpr uint32_t kCamDefPitchSpeedB   = 0xF0;  // NCT territory
+constexpr uint32_t kCamDefPitchSpeedC   = 0xF4;  // NCT territory
+constexpr uint32_t kCamDefFollowDamp0   = 0xF8;
+constexpr uint32_t kCamDefFollowDamp1   = 0xFC;
+constexpr uint32_t kCamDefFollowDamp2   = 0x100;
 
 // -----------------------------------------------------------------------
 // Camera object field offsets (bytes from the camera object pointer that

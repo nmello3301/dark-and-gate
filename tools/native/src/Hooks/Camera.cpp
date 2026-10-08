@@ -128,20 +128,187 @@ CommitFn _OriginalCommit = nullptr;
 bool     _vt58Hooked     = false;
 void**   _vt58VtableSlot = nullptr;  // for diagnostics
 
+// Instant-follow: resolved once at install. GetCurrentCameraDefinition
+// is the function NCT uses to find the active CameraDefinition (which
+// toggles between combat/exploration/cutscene variants). We call it
+// each frame to write the follow damping fields.
+using GetCamDefFn = void*(*)(void* /*CameraObject*/);
+GetCamDefFn _GetCurrentCameraDefinition = nullptr;
+
 // Thread-local would be nice but x64 __fastcall imposes no reentrancy
 // here — UpdateCamera is called single-threaded from the render path.
-float g_desiredPos[3] = { 0, 0, 0 };
-bool  g_desiredSet    = false;
+float g_desiredPos[3]     = { 0, 0, 0 };
+float g_desiredForward[3] = { 0, 0, 1 };   // world-space unit vec
+bool  g_desiredSet        = false;
+
+// Diagnostic snapshot shared with WriteStatusFile so dag_camcheck can
+// print cam fields alongside InvViewMatrix for convention ground-truth.
+struct CamDiag {
+    float engEye[3];        // cam[0x48..0x50] — engine pivot
+    float dist;             // cam[0x54]
+    float basis[3];         // cam[0x70..0x78] — pivot->eye direction (= -forward_world)
+    float lookAt[3];        // cam[0xC4..0xD0]
+    bool  present;
+};
+CamDiag _lastDiag = {};
+
+// Gameplay cam identity. Set when cam[0xC4] matches gt within 0.05 m
+// (ONCE at calibration); only commits for this cam get our override.
+// Pointer changes trigger re-identification; every other commit passes
+// through untouched. headOff = cam[0xC4].y - gt.y measured at calibration,
+// so eye.y = cam[0xC4].y - headOff + eye_height — live, zero-lag.
+void* _gameplayCamPtr   = nullptr;
+bool  _gameplayValid    = false;
+float _headOff          = 0.0f;
+DWORD _lastDriftLogMs   = 0;
 
 void __fastcall HookCommit(void* self, void* slotToken, float* newPos, float* outPos)
 {
-    if (g_desiredSet && newPos) {
-        newPos[0] = g_desiredPos[0];
-        newPos[1] = g_desiredPos[1];
-        newPos[2] = g_desiredPos[2];
+    // All work happens inside this hook — no cross-frame state. That
+    // way nothing we write can persist to the next frame and feed back
+    // into our computation. Previous attempts split state across
+    // Hook_UpdateCamera (pre-chain) and HookCommit (per-call) and drifted
+    // because something outside our save/restore window (BG3WASD's
+    // post-chain work is the leading suspect) could re-write cam[0xC4]
+    // after our restore but before next frame's pre-hook read.
+    //
+    // Strategy (2026-10-08): ENGINE owns yaw, WE own pitch and position.
+    // Rationale: writes to cam[0x70..0x78] / cam[0xC4] produced
+    // inconsistent rendered-forward results, suggesting the engine's
+    // ViewMatrix construction doesn't use cam[0xC4] directly or uses
+    // a basis with convention we haven't ground-truthed. The engine
+    // already turns mouse X into camera yaw (visible: minimap rotates).
+    // We leverage that: read the engine's current look direction from
+    // (cam[0xC4] - cam[0x48..0x50]) in XZ, extract yaw, replace pitch
+    // with our accumulated mouse-Y, rebuild lookAt. Eye stays at
+    // char + eye_height.
+
+    const auto& cfg  = dag::config::Get();
+    const auto  gt   = dag::groundtruth::Get();
+    const bool  gtOk = gt.active && !gt.stale;
+
+    uint8_t* cam = outPos ? (reinterpret_cast<uint8_t*>(outPos) - 0x48) : nullptr;
+
+    // Always-on diagnostic snapshot for whichever cam this commit is on,
+    // so dag_camcheck's convention table reflects live engine state.
+    if (cam) {
+        CamDiag d = {};
+        d.present = dag::safemem::ReadFloat3(cam, 0x48, d.engEye);
+        (void)dag::safemem::ReadFloat (cam, 0x54, d.dist);
+        (void)dag::safemem::ReadFloat3(cam, 0x70, d.basis);
+        (void)dag::safemem::ReadFloat3(cam, 0xC4, d.lookAt);
+        _lastDiag = d;
     }
+
+    // Phase A gate: vt[0x58] eye/target substitution is parked. We keep
+    // the hook installed (needed for other diagnostics and for future
+    // activation) but bypass the override block when vt58_override is
+    // false. Everything just passes through.
+    if (!cfg.camera.enabled || !cfg.camera.vt58_override || !cam || !newPos || !outPos) {
+        if (_OriginalCommit) _OriginalCommit(self, slotToken, newPos, outPos);
+        return;
+    }
+
+    float lookAt[3] = {};
+    if (!dag::safemem::ReadFloat3(cam, 0xC4, lookAt)) {
+        if (_OriginalCommit) _OriginalCommit(self, slotToken, newPos, outPos);
+        return;
+    }
+
+    // Identity gate: only override commits for the gameplay cam we've
+    // identified. Everything else (minimap, UI, dialog, cutscene, etc.)
+    // passes through untouched. Re-resolve on pointer change.
+    const bool isOurCam = _gameplayValid && (cam == _gameplayCamPtr);
+    if (!isOurCam) {
+        // Try to (re-)identify: this cam's live cam[0xC4] must match
+        // Lua gt (controlled char Translate) within 5 cm.
+        if (!gtOk) {
+            if (_OriginalCommit) _OriginalCommit(self, slotToken, newPos, outPos);
+            return;
+        }
+        const float dx = lookAt[0] - gt.x;
+        const float dz = lookAt[2] - gt.z;
+        const float distXZ = std::sqrt(dx * dx + dz * dz);
+        if (distXZ > 0.05f) {
+            // Not a plausible match for the controlled char — pass through.
+            if (_OriginalCommit) _OriginalCommit(self, slotToken, newPos, outPos);
+            return;
+        }
+        _gameplayCamPtr = cam;
+        _headOff        = lookAt[1] - gt.y;
+        _gameplayValid  = true;
+        dag::log::Writef(
+            "HookCommit: identified gameplay cam=%p headOff=%.3f (lookAt.y=%.3f gt.y=%.3f)",
+            cam, _headOff, lookAt[1], gt.y);
+        // fall through and override this call
+    }
+
+    // Drift guard on the identified cam: if cam[0xC4] has moved more
+    // than 2 m from gt horizontally (char switched, cam mode changed),
+    // unlatch and pass this call through. Re-identify on next match.
+    if (gtOk) {
+        const float dx = lookAt[0] - gt.x;
+        const float dz = lookAt[2] - gt.z;
+        const float distXZ = std::sqrt(dx * dx + dz * dz);
+        if (distXZ > 2.0f) {
+            const DWORD now = GetTickCount();
+            if (now - _lastDriftLogMs > 2000) {
+                _lastDriftLogMs = now;
+                dag::log::Writef(
+                    "HookCommit: gameplay cam[0xC4] drifted %.2f m -- unlatching",
+                    distXZ);
+            }
+            _gameplayValid = false;
+            if (_OriginalCommit) _OriginalCommit(self, slotToken, newPos, outPos);
+            return;
+        }
+    }
+
+    // Eye: live, zero-lag. cam[0xC4].y - headOff = char feet; add eye_height.
+    const float h = (cfg.camera.debug_lift_m > 0.0f)
+                    ? cfg.camera.debug_lift_m
+                    : cfg.camera.eye_height;
+    const float myEye[3] = {
+        lookAt[0],
+        lookAt[1] - _headOff + h,
+        lookAt[2],
+    };
+
+    // Horizontal forward from the engine's own basis (cam[0x70..0x78]).
+    // Per LERP formula local_508 = cam[0x48] + cam[0x54] * cam[0x70],
+    // basis points pivot -> eye, i.e. away from where the camera looks.
+    // World forward = -basis. Flatten to XZ and renormalize (pitch=0
+    // this build; mouse pitch comes once this horizontal pin confirms).
+    float basis[3] = {};
+    (void)dag::safemem::ReadFloat3(cam, 0x70, basis);
+    float fx = -basis[0], fz = -basis[2];
+    const float fh = std::sqrt(fx * fx + fz * fz);
+    if (fh > 1e-4f) { fx /= fh; fz /= fh; }
+    else            { fx = 0.0f; fz = 1.0f; }
+
+    const float myTarget[3] = {
+        myEye[0] + fx,
+        myEye[1],
+        myEye[2] + fz,
+    };
+
+    // Diagnostics
+    g_desiredPos[0] = myEye[0];
+    g_desiredPos[1] = myEye[1];
+    g_desiredPos[2] = myEye[2];
+    g_desiredForward[0] = fx;
+    g_desiredForward[1] = 0.0f;
+    g_desiredForward[2] = fz;
+    g_desiredSet = true;
+
+    // Pass our OWN local buffers as the eye and target args. No writes
+    // to cam memory. _OriginalCommit builds InvViewMatrix from
+    // lookAt(myEye, myTarget) and publishes it; our buffers are
+    // discarded on return.
+    float eyeBuf[3]    = { myEye[0], myEye[1], myEye[2] };
+    float targetBuf[3] = { myTarget[0], myTarget[1], myTarget[2] };
     if (_OriginalCommit) {
-        _OriginalCommit(self, slotToken, newPos, outPos);
+        _OriginalCommit(self, slotToken, eyeBuf, targetBuf);
     }
 }
 
@@ -207,28 +374,20 @@ void WriteStatusFile(const CamStats& s)
     wchar_t full[MAX_PATH * 2];
     swprintf_s(full, L"%s\\Larian Studios\\Baldur's Gate 3\\Script Extender\\DarkAndGate\\native-cam-status.txt", buf);
 
-    // Also expose the Phase B pre-hook state: which cameraSlot[N] held
-    // the GameCameraBehavior pointer (-1 if not identified), and the
-    // last pre-hook write target.
-    float preWrote[3] = { 0, 0, 0 };
-    if (_behaviorPtr) {
-        (void)dag::safemem::ReadFloat3(_behaviorPtr, 0x30, preWrote);
-    }
-    char line[640];
+    char line[1024];
     const int len = std::snprintf(line, sizeof(line),
-        "cam=%p calls=%llu src=%s off=0x%X "
-        "char=%.3f,%.3f,%.3f eng=%.3f,%.3f,%.3f wrote=%.3f,%.3f,%.3f w=%d "
-        "beh_slot=%d beh_ptr=%p beh_target=%.3f,%.3f,%.3f t=%u\n",
+        "cam=%p calls=%llu "
+        "engEye=%.3f,%.3f,%.3f dist=%.3f basis=%.3f,%.3f,%.3f lookAt=%.3f,%.3f,%.3f "
+        "ourEye=%.3f,%.3f,%.3f ourFwd=%.3f,%.3f,%.3f "
+        "pitch=%.3f t=%u\n",
         s.cam, (unsigned long long)s.count,
-        s.kind == ProbeKind::Behavior ? "beh" :
-        (s.kind == ProbeKind::CamStruct ? "cam" : "unprobed"),
-        s.winningOffset,
-        s.lastCharX, s.lastCharY, s.lastCharZ,
-        s.lastEngX,  s.lastEngY,  s.lastEngZ,
-        s.lastWrittenX, s.lastWrittenY, s.lastWrittenZ,
-        s.wroteLast ? 1 : 0,
-        _behaviorSlotIdx, _behaviorPtr,
-        preWrote[0], preWrote[1], preWrote[2],
+        _lastDiag.engEye[0], _lastDiag.engEye[1], _lastDiag.engEye[2],
+        _lastDiag.dist,
+        _lastDiag.basis[0],  _lastDiag.basis[1],  _lastDiag.basis[2],
+        _lastDiag.lookAt[0], _lastDiag.lookAt[1], _lastDiag.lookAt[2],
+        g_desiredPos[0], g_desiredPos[1], g_desiredPos[2],
+        g_desiredForward[0], g_desiredForward[1], g_desiredForward[2],
+        dag::hooks::mouselook::GetPitchRad(),
         (unsigned)now);
 
     HANDLE h = CreateFileW(full, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
@@ -387,50 +546,48 @@ void Hook_UpdateCamera(void* scene, void** ctx,
     const auto  gt  = dag::groundtruth::Get();
     const bool gtOk = gt.active && !gt.stale;
 
-    // Phase D: install vt[0x58] hook on first call, then set the
-    // thread-shared desired position so the vt[0x58] intercept
-    // overwrites the eye position in flight.
-    //
-    // Source: cam[0xC4] = the engine's look-at TARGET for this frame
-    // (= controlled char + ~1.6 m head offset). It is updated zero-lag
-    // every frame by the engine's follow logic. We use it as the base
-    // because: (a) no lag, (b) no file dependency, (c) baked-in head
-    // offset means debug_lift_m stacks on head height, not feet.
-    //
-    // The eye is normally computed as eye = target - forward * distance
-    // (vanilla ~12 m behind, ~8 m up). vt[0x58] receives the final eye;
-    // our hook substitutes it with (target.x, target.y + h, target.z)
-    // so the camera sits AT the look-at target plus h.
+    // Phase D (consolidated): install the vt[0x58] hook once. All pin
+    // logic now lives in HookCommit so no state crosses frames here.
     TryInstallVt58(scene);
 
-    float* cam_pre = nullptr;
-    if (cameraSlot) {
-        cam_pre = reinterpret_cast<float*>(cameraSlot[6]);
+    // Instant-follow: write large values to the CameraDefinition's
+    // follow-damping fields so the engine's `pos += damp*dt*(target-pos)`
+    // lerp converges in one frame. Save/restore around the chain so
+    // NCT and anything else downstream sees vanilla values.
+    const auto&  cfg_pre      = dag::config::Get();
+    float        origDamp[3]  = { 0, 0, 0 };
+    void*        camDef       = nullptr;
+    const bool   doInstantFollow =
+        cfg_pre.camera.enabled && cfg_pre.camera.instant_follow &&
+        _GetCurrentCameraDefinition && cameraSlot && cameraSlot[6];
+    if (doInstantFollow) {
+        __try {
+            camDef = _GetCurrentCameraDefinition(cameraSlot[6]);
+        } __except (EXCEPTION_EXECUTE_HANDLER) { camDef = nullptr; }
     }
-    g_desiredSet = false;
-    if (cfg.camera.enabled && gtOk && cam_pre) {
-        float lookAt[3] = {};
-        if (dag::safemem::ReadFloat3(cam_pre, dag::offsets::kCamLookAtTargetPos, lookAt)) {
-            const bool sane = (std::fabs(lookAt[0]) > 0.1f || std::fabs(lookAt[2]) > 0.1f)
-                              && std::fabs(lookAt[1]) < 10000.0f;
-            if (sane) {
-                const float h = (cfg.camera.debug_lift_m > 0.0f)
-                                ? cfg.camera.debug_lift_m
-                                : cfg.camera.eye_height;
-                g_desiredPos[0] = lookAt[0];
-                g_desiredPos[1] = lookAt[1] + h;
-                g_desiredPos[2] = lookAt[2];
-                g_desiredSet    = true;
-            }
-        }
+    if (camDef) {
+        auto* d = reinterpret_cast<uint8_t*>(camDef);
+        std::memcpy(&origDamp[0], d + dag::offsets::kCamDefFollowDamp0, 4);
+        std::memcpy(&origDamp[1], d + dag::offsets::kCamDefFollowDamp1, 4);
+        std::memcpy(&origDamp[2], d + dag::offsets::kCamDefFollowDamp2, 4);
+        const float big = 100000.f;
+        std::memcpy(d + dag::offsets::kCamDefFollowDamp0, &big, 4);
+        std::memcpy(d + dag::offsets::kCamDefFollowDamp1, &big, 4);
+        std::memcpy(d + dag::offsets::kCamDefFollowDamp2, &big, 4);
     }
 
     if (_UpdateCamera) {
         _UpdateCamera(scene, ctx, frameInfo, cameraSlot);
     }
-    // Reset after chain so an unrelated call through vt[0x58] (e.g.
-    // dialogue cam flipping in mid-frame) doesn't inherit our value.
-    g_desiredSet = false;
+
+    // Restore damping values so NCT's own hooks (and the next frame's
+    // vanilla state) see unchanged CameraDefinition.
+    if (camDef) {
+        auto* d = reinterpret_cast<uint8_t*>(camDef);
+        std::memcpy(d + dag::offsets::kCamDefFollowDamp0, &origDamp[0], 4);
+        std::memcpy(d + dag::offsets::kCamDefFollowDamp1, &origDamp[1], 4);
+        std::memcpy(d + dag::offsets::kCamDefFollowDamp2, &origDamp[2], 4);
+    }
 
     void*  behavior = cameraSlot;  // the 4th arg itself may be the behavior
     float* cam = nullptr;
@@ -482,13 +639,18 @@ void Hook_UpdateCamera(void* scene, void** ctx,
         }
     }
 
-    // STEP-C-STYLE WRITE (debug): Y += lift on every cam while gameplay
-    // active. Isolates "does cam+0x4c Y write still affect rendering?".
-    // Absolute pin + per-cam gating are temporarily disabled while we
-    // verify the write path.
+    // LEGACY STEP-C-STYLE WRITE — parked (Phase 0).
+    //
+    // Writes Y + eye_height into kCamWorldPosY = 0x4c. Per NCT's
+    // CameraObject layout (reference/BG3_NativeCameraTweaks/src/RE/
+    // Camera.h), offset 0x4c is `currentZoomB` (a zoom scalar), NOT the
+    // Y of the camera world position. This write modifies zoom, which
+    // is why the previous session's "wrote=(x, char.y+4, z)" never
+    // moved InvViewMatrix. Gated behind cfg.camera.legacy_y_write
+    // (default false) so a stale TOML can't silently turn it back on.
     bool wrote = false;
     float wx = xEng, wy = yEng, wz = zEng;
-    if (cfg.camera.enabled && gtOk && cam) {
+    if (cfg.camera.enabled && cfg.camera.legacy_y_write && gtOk && cam) {
         const float h = (cfg.camera.debug_lift_m > 0.0f)
                         ? cfg.camera.debug_lift_m
                         : cfg.camera.eye_height;
@@ -496,7 +658,6 @@ void Hook_UpdateCamera(void* scene, void** ctx,
         std::memcpy(reinterpret_cast<uint8_t*>(cam) + dag::offsets::kCamWorldPosY, &wy, 4);
         wrote = true;
         if (stat) {
-            // Still track live char pos for diagnostics when latch succeeded.
             float live[3] = {};
             if ((stat->kind == ProbeKind::Behavior || stat->kind == ProbeKind::CamStruct) &&
                 ReadLiveCharPos(stat, live)) {
@@ -513,12 +674,19 @@ void Hook_UpdateCamera(void* scene, void** ctx,
     dag::hooks::mouselook::MaybeWriteYawForLua();
     dag::hooks::stubs::Tick();
 
-    // Rotate cam forward vector per accumulated deltas.
-    // Only when gameplay cam is pinned and mouselook enabled + unpaused.
-    if (cfg.mouselook.enabled && gtOk && wrote && cam) {
+    // LEGACY MOUSELOOK FORWARD WRITE — parked (Phase 0).
+    //
+    // Writes to kCamForward{X,Y,Z} = 0x70/0x74/0x78. Per NCT's layout,
+    // 0x70 is `fltmax_70` (a sentinel float) and `cameraRotation` is a
+    // Vector3 starting at 0x74. So this write puts fx into the sentinel,
+    // fy into cameraRotation.x, fz into cameraRotation.y — the Z of the
+    // rotation never gets touched. Mouselook via this path can't aim
+    // correctly. Gated behind cfg.camera.legacy_forward_write (default
+    // false). Phase 1 picks fresh offsets.
+    if (cfg.mouselook.enabled && cfg.camera.legacy_forward_write &&
+        gtOk && wrote && cam) {
         float yaw   = dag::hooks::mouselook::GetYawRad();
         float pitch = dag::hooks::mouselook::GetPitchRad();
-        // Build forward from yaw/pitch (Y-up, right-handed).
         float cp = std::cos(pitch), sp = std::sin(pitch);
         float cy = std::cos(yaw),   sy = std::sin(yaw);
         float fx = sy * cp;
@@ -552,6 +720,70 @@ void Hook_UpdateCamera(void* scene, void** ctx,
 
     if (!_checked5s  && now - _installTickMs > 5000)  { CheckCallSiteStillOurs("5s");  _checked5s  = true; }
     if (!_checked20s && now - _installTickMs > 20000) { CheckCallSiteStillOurs("20s"); _checked20s = true; }
+
+    // ---------------- Phase 1 read-only probe (2026-10-08) ----------------
+    //
+    // Logs cam[0x18], cam[0x24] and cam[0xC4] alongside Lua's ground-truth
+    // character Translate once per 500 ms. Read-only — no writes to cam.
+    //
+    // Hypotheses from NCT's RE/Camera.h:
+    //   - cam[0x18] = cameraRootPos         (the LERPED pivot)
+    //   - cam[0x24] = desiredCameraRootPos  (pre-lerp target)
+    //   - cam[0xC4] = cameraPos             (final rendered eye after geometry adjust)
+    //
+    // What this measures:
+    //   - While standing: all three should match (lerp has converged).
+    //   - Walking: cam[0x24] should lead gt-char-pos tightly (same-frame),
+    //     cam[0x18] should trail it by the follow lag we see on screen,
+    //     and cam[0xC4] should trail or match cam[0x18] (zoom=0 base).
+    //   - Running: the gap between cam[0x18] and cam[0x24] widens; delta
+    //     magnitude = the lag we need to kill.
+    //
+    // If this prediction holds, Phase 1's injection point is "after root
+    // lerp, before eye recomputation" — which is NCT's AfterUpdateCameraZoom
+    // call-site, not post-UpdateCamera return.
+    static DWORD _lastProbeLogMs = 0;
+    if (cam && (now - _lastProbeLogMs) >= 500) {
+        _lastProbeLogMs = now;
+        float root[3]    = {};
+        float desired[3] = {};
+        float eye[3]     = {};
+        const bool rOk = dag::safemem::ReadFloat3(cam, 0x18, root);
+        const bool dOk = dag::safemem::ReadFloat3(cam, 0x24, desired);
+        const bool eOk = dag::safemem::ReadFloat3(cam, 0xC4, eye);
+        dag::log::Writef(
+            "PhaseProbe cam=%p root[0x18]=(%.3f,%.3f,%.3f)%s desired[0x24]=(%.3f,%.3f,%.3f)%s eye[0xC4]=(%.3f,%.3f,%.3f)%s gt=(%.3f,%.3f,%.3f) %s",
+            cam,
+            root[0], root[1], root[2],         rOk ? "" : "?",
+            desired[0], desired[1], desired[2], dOk ? "" : "?",
+            eye[0], eye[1], eye[2],             eOk ? "" : "?",
+            gt.x, gt.y, gt.z,
+            gtOk ? "gtOK" : "gtSTALE");
+        // Also write to a dedicated status file so Lua can pull it live
+        // via !dag_camcheck without parsing native.log.
+        wchar_t base[MAX_PATH];
+        const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", base, MAX_PATH);
+        if (n > 0 && n < MAX_PATH) {
+            wchar_t full[MAX_PATH * 2];
+            swprintf_s(full, L"%s\\Larian Studios\\Baldur's Gate 3\\Script Extender\\DarkAndGate\\native-phase-probe.txt", base);
+            char line[512];
+            const int len = std::snprintf(line, sizeof(line),
+                "cam=%p root=%.3f,%.3f,%.3f desired=%.3f,%.3f,%.3f eye=%.3f,%.3f,%.3f gt=%.3f,%.3f,%.3f gtOk=%d t=%u\n",
+                cam, root[0], root[1], root[2],
+                desired[0], desired[1], desired[2],
+                eye[0], eye[1], eye[2],
+                gt.x, gt.y, gt.z,
+                gtOk ? 1 : 0, (unsigned)now);
+            HANDLE h = CreateFileW(full, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                                   CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (h != INVALID_HANDLE_VALUE) {
+                DWORD written = 0;
+                WriteFile(h, line, len, &written, nullptr);
+                CloseHandle(h);
+            }
+        }
+    }
+    // ---------------- end Phase 1 read-only probe ----------------
 
     if (now - _lastTickLogMs > 5000) {
         _lastTickLogMs = now;
@@ -621,6 +853,16 @@ bool Install()
     _callSite      = callSite;
     _ourHookAddr   = reinterpret_cast<void*>(&Hook_UpdateCamera);
     _installTickMs = GetTickCount();
+
+    // Resolve GetCurrentCameraDefinition for instant_follow (NCT's path).
+    if (uint8_t* gcd = dag::patternscan::Find(nullptr,
+            dag::offsets::kGetCurrentCameraDefinitionPattern)) {
+        _GetCurrentCameraDefinition = reinterpret_cast<GetCamDefFn>(gcd);
+        dag::log::Writef("InstantFollow: GetCurrentCameraDefinition at %p", gcd);
+    } else {
+        dag::log::Writef(
+            "InstantFollow: GetCurrentCameraDefinition pattern not found -- feature disabled");
+    }
 
     auto resolveModuleName = [](uint8_t* addr, char* out, size_t cap) -> HMODULE {
         HMODULE mod = nullptr;

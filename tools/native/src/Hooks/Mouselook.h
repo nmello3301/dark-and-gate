@@ -18,6 +18,15 @@ bool Install();
 // mode toggling + delta accumulation.
 void Tick();
 
+// Snapshot engine's current forward direction and convert to yaw/pitch,
+// but only if we haven't initialised since last disable. Called from
+// Camera.cpp pre-chain to avoid camera snap when mouselook turns on.
+void MaybeInitFromForward(float fx, float fy, float fz);
+
+// True once MaybeInitFromForward has run since last disable. Used by
+// Camera.cpp to decide whether to override look-at target.
+bool IsInitialised();
+
 // If character_facing enabled, writes current yaw to a file that Lua
 // polls to call Ext.Entity.SetRotation. Throttled internally.
 void MaybeWriteYawForLua();

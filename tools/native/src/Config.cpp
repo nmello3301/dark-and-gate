@@ -70,11 +70,16 @@ void Assign(AllConfig& cfg, const std::string& section,
             const std::string& key,     const std::string& value)
 {
     if (section == "dag.camera") {
-        if      (key == "enabled")        ParseBool(value, cfg.camera.enabled);
-        else if (key == "recommit_vt58")  ParseBool(value, cfg.camera.recommit_vt58);
-        else if (key == "eye_height")     ParseFloat(value, cfg.camera.eye_height);
-        else if (key == "debug_lift_m")   ParseFloat(value, cfg.camera.debug_lift_m);
-        else if (key == "head_bone")      ParseBool(value, cfg.camera.head_bone);
+        if      (key == "enabled")              ParseBool(value, cfg.camera.enabled);
+        else if (key == "recommit_vt58")        ParseBool(value, cfg.camera.recommit_vt58);
+        else if (key == "eye_height")           ParseFloat(value, cfg.camera.eye_height);
+        else if (key == "debug_lift_m")         ParseFloat(value, cfg.camera.debug_lift_m);
+        else if (key == "head_bone")            ParseBool(value, cfg.camera.head_bone);
+        else if (key == "hide_head")            ParseBool(value, cfg.camera.hide_head);
+        else if (key == "vt58_override")        ParseBool(value, cfg.camera.vt58_override);
+        else if (key == "instant_follow")       ParseBool(value, cfg.camera.instant_follow);
+        else if (key == "legacy_y_write")       ParseBool(value, cfg.camera.legacy_y_write);
+        else if (key == "legacy_forward_write") ParseBool(value, cfg.camera.legacy_forward_write);
     } else if (section == "dag.mouselook") {
         if      (key == "enabled")             ParseBool(value, cfg.mouselook.enabled);
         else if (key == "sensitivity_yaw")     ParseFloat(value, cfg.mouselook.sensitivity_yaw);
@@ -145,9 +150,27 @@ AllConfig LoadFromDisk()
         Assign(cfg, section, key, val);
     }
 
+    // Dump every effective switch so stale TOML keys can't silently
+    // leave old behaviour on. If a key is missing from the file, the
+    // struct default (declared in Config.h) wins and prints here.
     dag::log::Writef(
-        "Config: loaded. camera=%d mouselook=%d anim=%d bone=%d raycast=%d",
-        cfg.camera.enabled, cfg.mouselook.enabled, cfg.anim.enabled,
+        "Config: effective. camera.enabled=%d vt58_override=%d instant_follow=%d "
+        "legacy_y_write=%d legacy_forward_write=%d "
+        "eye_height=%.3f debug_lift_m=%.3f head_bone=%d hide_head=%d recommit_vt58=%d",
+        cfg.camera.enabled, cfg.camera.vt58_override, cfg.camera.instant_follow,
+        cfg.camera.legacy_y_write, cfg.camera.legacy_forward_write,
+        cfg.camera.eye_height, cfg.camera.debug_lift_m,
+        cfg.camera.head_bone, cfg.camera.hide_head, cfg.camera.recommit_vt58);
+    dag::log::Writef(
+        "Config: effective. mouselook.enabled=%d sens_yaw=%.3f sens_pitch=%.3f "
+        "invert_pitch=%d pause_in_ui=%d char_facing=%d",
+        cfg.mouselook.enabled, cfg.mouselook.sensitivity_yaw,
+        cfg.mouselook.sensitivity_pitch, cfg.mouselook.invert_pitch,
+        cfg.mouselook.pause_in_ui, cfg.mouselook.character_facing);
+    dag::log::Writef(
+        "Config: effective. anim.enabled=%d hit_stop=%d hit_stop_ms=%d "
+        "bone.enabled=%d raycast.enabled=%d",
+        cfg.anim.enabled, cfg.anim.hit_stop, cfg.anim.hit_stop_ms,
         cfg.bone.enabled, cfg.raycast.enabled);
     return cfg;
 }

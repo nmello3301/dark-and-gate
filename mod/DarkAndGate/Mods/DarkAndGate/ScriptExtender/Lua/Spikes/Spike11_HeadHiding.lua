@@ -187,6 +187,10 @@ local function apply(hide)
     Log.Write("Spike11: " .. tag .. " v5 end")
 end
 
+-- Exposed so NativeBridge.tickHeadHide can drive it from the hide_head
+-- config flag. apply() is otherwise private.
+M.Apply = apply
+
 function M.Register()
     Ext.RegisterConsoleCommand("dag11_dump", function() dump() end)
     Ext.RegisterConsoleCommand("dag11_hide", function() apply(true) end)

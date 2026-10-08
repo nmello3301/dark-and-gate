@@ -9,22 +9,31 @@
 #
 # Every feature has its own switch, OFF by default. Flip one at a time.
 # A crash or bad behaviour must be attributable to one switch.
+#
+# Phase 0 (2026-10-08): all camera overrides parked. NCT alone owns the
+# baseline camera. This file sets every parked switch to false
+# explicitly so a stale key doesn't silently re-enable broken writes.
 
 # ---------------------------------------------------------------------
-# Camera position pin: writes gameplay cam XYZ to (char.x, char.y+h, char.z)
-# every frame. Non-gameplay cams (dialog, cutscene, menu) are untouched.
+# Camera position pin: Phase 0 state = all overrides off, nothing written.
+# NCT provides the baseline (zoom, FOV, offset, pitch unlock).
 # ---------------------------------------------------------------------
 [dag.camera]
-enabled           = false
-recommit_vt58     = true
-eye_height        = 1.65    # metres; Lua overwrites per race on load
-debug_lift_m      = 0.0     # if >0, used in place of eye_height for A/B tests
-head_bone         = false   # pin to head bone instead of char.y+h (STUB)
+enabled              = false
+recommit_vt58        = false
+eye_height           = 1.65   # metres; used by Phase 3 head anchor
+debug_lift_m         = 0.0    # if >0, used in place of eye_height for A/B
+head_bone            = false  # pin to head bone (needs bone-read spike)
+hide_head            = false  # Spike11 RenderPasses zero (Lua-side)
+vt58_override        = false  # parked: vt[0x58] eye+target substitution
+instant_follow       = false  # parked: writes CameraDefinition damp fields
+legacy_y_write       = false  # parked: wrote to currentZoomB, not cam Y
+legacy_forward_write = false  # parked: forward offsets off by one float
 
 # ---------------------------------------------------------------------
 # Mouselook: SDL relative-mouse delta -> yaw/pitch -> cam forward vector.
-# Toggles cursor-lock on/off automatically. Pauses while gameplay is
-# inactive (dialog, cutscene, UI) -- that signal comes from Lua.
+# Phase 0 state = off. Re-enabled with a correct forward offset in a
+# later phase.
 # ---------------------------------------------------------------------
 [dag.mouselook]
 enabled            = false
@@ -35,9 +44,7 @@ pause_in_ui        = true
 character_facing   = false  # DLL writes yaw to file; Lua rotates char
 
 # ---------------------------------------------------------------------
-# Animation speed + hit-stop. STUB in M1a: SE exposes no anim-speed API
-# and Granny internals aren't RE'd. The DLL will log a line each 5s
-# describing what it WOULD do.
+# Animation speed + hit-stop. STUB in M1a.
 # ---------------------------------------------------------------------
 [dag.anim]
 enabled      = false
@@ -45,17 +52,13 @@ hit_stop     = false
 hit_stop_ms  = 100
 
 # ---------------------------------------------------------------------
-# Bone-position reads. STUB: no clean hook. Head-bone-accurate FP cam
-# depends on this; the switch exists so the user can see it ship real
-# in a future pass.
+# Bone-position reads. STUB.
 # ---------------------------------------------------------------------
 [dag.bone]
 enabled = false
 
 # ---------------------------------------------------------------------
-# Raycast with hit normal. NATIVE NOT NEEDED -- Ext.Level.RaycastClosest
-# returns PhysicsHit with Normal. Switch here is informational; use
-# the !dag_raynormal console command (Lua-only).
+# Raycast with hit normal. Native not needed — Lua works.
 # ---------------------------------------------------------------------
 [dag.raycast]
 enabled = false

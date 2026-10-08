@@ -29,6 +29,7 @@ local CONFIG_PATH   = "DarkAndGate/native-config.toml"
 local CHARPOS_PATH  = "DarkAndGate/native-char-pos.txt"
 local CAMYAW_PATH   = "DarkAndGate/native-cam-yaw.txt"
 local STATUS_PATH   = "DarkAndGate/native-cam-status.txt"  -- DLL writes
+local PROBE_PATH    = "DarkAndGate/native-phase-probe.txt" -- Phase 1 read-only probe
 
 -- --- Native-version readback -------------------------------------------
 local function readVersion()
@@ -144,7 +145,11 @@ M.TickWriteGroundTruth = tickWriteGroundTruth
 
 -- --- Char-facing follow (reads yaw written by DLL) ---------------------
 local lastYawApplied = nil
+local lastCamYawReadMs = 0
 local function tickApplyCamYaw()
+    local now = Ext.Utils.MonotonicTime()
+    if now - lastCamYawReadMs < 500 then return end
+    lastCamYawReadMs = now
     local ok, c = pcall(Ext.IO.LoadFile, CAMYAW_PATH)
     if not ok or not c or c == "" then return end
     local yaw = tonumber(c:match("yaw=([%-%d%.e]+)"))
@@ -251,9 +256,46 @@ function M.Register(side)
     --       which the camera hook writes once per second.
     --   (C) Live character position via SE Transform component.
     -- "Our write reaches the screen" iff |A - DLL.wrote| <= 0.05 m.
+    -- Head hide driver: reads [dag.camera] hide_head from the TOML (via
+    -- a fresh file read, cheap); calls Spike11's apply(true/false) on
+    -- state change. Spike11 handles the per-player RenderPasses zero.
+    local Spike11 = Ext.Require("Spikes/Spike11_HeadHiding.lua")
+    local lastHideHead = false
+    local lastHideHeadPollMs = 0
+    local function readHideHeadFlag()
+        local okC, c = pcall(Ext.IO.LoadFile, CONFIG_PATH)
+        if not okC or not c then return false end
+        local v = c:match("%[dag%.camera%][^%[]-hide_head%s*=%s*(%w+)")
+        return v == "true" or v == "True" or v == "1"
+    end
+    local function tickHeadHide()
+        local now = Ext.Utils.MonotonicTime()
+        if now - lastHideHeadPollMs < 500 then return end
+        lastHideHeadPollMs = now
+        local want = readHideHeadFlag()
+        if want ~= lastHideHead then
+            lastHideHead = want
+            Log.Write("Native: hide_head -> " .. tostring(want))
+            if Spike11 and Spike11.Apply then
+                pcall(Spike11.Apply, want)
+            end
+        end
+    end
+    Ext.Events.Tick:Subscribe(function() pcall(tickHeadHide) end)
+    Ext.RegisterConsoleCommand("dag_hidehead", function(_, arg)
+        local on = (arg == "on" or arg == "1" or arg == "true")
+        updateConfigLine("^%s*hide_head%s*=",
+            string.format("hide_head         = %s", on and "true" or "false"))
+        Log.Write("dag.camera.hide_head -> " .. tostring(on))
+    end)
+
     Ext.RegisterConsoleCommand("dag_camcheck", function()
-        -- (A) Rendered position.
-        local renderedX, renderedY, renderedZ
+        -- (A) Rendered position + forward from active camera's InvViewMatrix.
+        -- Column-major mat4 (1-indexed in SE Lua):
+        --   [1..4]=right col, [5..8]=up col, [9..11..12]=forward col (negated
+        --   or not depending on handedness; empirically matches our write),
+        --   [13..15]=translation.
+        local renderedX, renderedY, renderedZ, renderedFx, renderedFy, renderedFz
         local activeTag = "none"
         local cams = Ext.Entity.GetAllEntitiesWithComponent("Camera") or {}
         for _, eh in ipairs(cams) do
@@ -265,13 +307,14 @@ function M.Register(side)
                 local _, inner  = pcall(function() return ctl and ctl.Camera end)
                 local _, m      = pcall(function() return inner and inner.InvViewMatrix end)
                 if m and (active or not renderedX) then
-                    renderedX = m[13]; renderedY = m[14]; renderedZ = m[15]
+                    renderedX  = m[13]; renderedY  = m[14]; renderedZ  = m[15]
+                    renderedFx = m[9];  renderedFy = m[10]; renderedFz = m[11]
                     if active then activeTag = "active"; break else activeTag = "fallback" end
                 end
             end
         end
 
-        -- (B) DLL last-wrote line.
+        -- (B) DLL status line.
         local statusLine = ""
         local okS, s = pcall(Ext.IO.LoadFile, STATUS_PATH)
         if okS and s then statusLine = s:match("[^\r\n]+") or "" end
@@ -281,25 +324,107 @@ function M.Register(side)
         local e = getControlledEntity()
         if e then charX, charY, charZ = readTranslate(e) end
 
+        -- Convention probe: read all three InvViewMatrix columns + translation.
+        local mCol0X, mCol0Y, mCol0Z    -- col 0 = right-ish
+        local mCol1X, mCol1Y, mCol1Z    -- col 1 = up-ish
+        local mCol2X, mCol2Y, mCol2Z    -- col 2 = forward or -forward
+        local mTrX,  mTrY,  mTrZ        -- col 3 = translation = eye
+        for _, eh in ipairs(cams) do
+            local ent = Ext.Entity.Get(eh)
+            local _, cam = pcall(function() return ent.Camera end)
+            if cam then
+                local _, active = pcall(function() return cam.Active end)
+                local _, ctl    = pcall(function() return cam.Controller end)
+                local _, inner  = pcall(function() return ctl and ctl.Camera end)
+                local _, m      = pcall(function() return inner and inner.InvViewMatrix end)
+                if m and active then
+                    mCol0X, mCol0Y, mCol0Z = m[1],  m[2],  m[3]
+                    mCol1X, mCol1Y, mCol1Z = m[5],  m[6],  m[7]
+                    mCol2X, mCol2Y, mCol2Z = m[9],  m[10], m[11]
+                    mTrX,  mTrY,  mTrZ    = m[13], m[14], m[15]
+                    break
+                end
+            end
+        end
+
         Log.Write("--- dag_camcheck ---")
-        Log.Write(string.format("A rendered   (%s): (%.3f, %.3f, %.3f)",
+        Log.Write(string.format("A rendered eye (%s): (%.3f, %.3f, %.3f)",
             activeTag,
             renderedX or 0/0, renderedY or 0/0, renderedZ or 0/0))
+        Log.Write(string.format("A rendered fwd (col2): (%.3f, %.3f, %.3f)",
+            renderedFx or 0/0, renderedFy or 0/0, renderedFz or 0/0))
+        if mCol0X then
+            Log.Write(string.format("A InvView col0 (right): (%.3f, %.3f, %.3f)", mCol0X, mCol0Y, mCol0Z))
+            Log.Write(string.format("A InvView col1 (up)   : (%.3f, %.3f, %.3f)", mCol1X, mCol1Y, mCol1Z))
+            Log.Write(string.format("A InvView col2 (fwd?) : (%.3f, %.3f, %.3f)", mCol2X, mCol2Y, mCol2Z))
+            Log.Write(string.format("A InvView trans (eye) : (%.3f, %.3f, %.3f)", mTrX, mTrY, mTrZ))
+        end
         Log.Write("B DLL status : " .. (statusLine == "" and "(no status file yet)" or statusLine))
         Log.Write(string.format("C char live  : (%.3f, %.3f, %.3f)",
             charX or 0/0, charY or 0/0, charZ or 0/0))
-        -- Parse wrote=x,y,z from statusLine to compute diff.
-        local wx, wy, wz = statusLine:match("wrote=([%-%d%.e]+),([%-%d%.e]+),([%-%d%.e]+)")
-        if wx and renderedX then
-            local dx = renderedX - tonumber(wx)
-            local dy = renderedY - tonumber(wy)
-            local dz = renderedZ - tonumber(wz)
-            Log.Write(string.format(
-                "diff rendered - DLL wrote = (%.3f, %.3f, %.3f); |dy|=%.3f -> %s",
-                dx, dy, dz, math.abs(dy),
-                (math.abs(dx) <= 0.05 and math.abs(dy) <= 0.05 and math.abs(dz) <= 0.05)
-                    and "MATCH (write reaches screen)"
-                    or  "MISS (write does NOT reach screen)"))
+
+        -- Phase 1 read-only probe: cam[0x18] vs cam[0x24] vs cam[0xC4]
+        -- vs Lua char Translate. Lets us see which offset is the LERPED
+        -- pivot (lags behind the character on fast motion) and which is
+        -- the pre-lerp target (same-frame-correct).
+        local probeLine = ""
+        local okP, p = pcall(Ext.IO.LoadFile, PROBE_PATH)
+        if okP and p then probeLine = p:match("[^\r\n]+") or "" end
+        if probeLine ~= "" then
+            Log.Write("D phase probe: " .. probeLine)
+            local function parseVec(s, key)
+                local x,y,z = s:match(key .. "=([%-%d%.e]+),([%-%d%.e]+),([%-%d%.e]+)")
+                if x then return tonumber(x), tonumber(y), tonumber(z) end
+            end
+            local rx, ry, rz = parseVec(probeLine, "root")
+            local dx, dy, dz = parseVec(probeLine, "desired")
+            if rx and dx and charX then
+                local rChX = rx - charX; local rChZ = rz - charZ
+                local dChX = dx - charX; local dChZ = dz - charZ
+                Log.Write(string.format(
+                    "   root-char   XZ=(%.3f,%.3f)  |XZ|=%.3f",
+                    rChX, rChZ, math.sqrt(rChX*rChX + rChZ*rChZ)))
+                Log.Write(string.format(
+                    "   desired-char XZ=(%.3f,%.3f)  |XZ|=%.3f",
+                    dChX, dChZ, math.sqrt(dChX*dChX + dChZ*dChZ)))
+                Log.Write("   (smaller XZ gap = less lag; the field that stays near 0 on motion is the pre-lerp target)")
+            end
+        else
+            Log.Write("D phase probe: (no probe file yet — rebuild + redeploy DLL)")
+        end
+
+        -- Convention probe: which column equals normalize(lookAt - engEye)?
+        local lx, ly, lz = statusLine:match("lookAt=([%-%d%.e]+),([%-%d%.e]+),([%-%d%.e]+)")
+        local ex, ey, ez = statusLine:match("engEye=([%-%d%.e]+),([%-%d%.e]+),([%-%d%.e]+)")
+        if lx and ex and mCol0X then
+            local dx = tonumber(lx) - tonumber(ex)
+            local dy = tonumber(ly) - tonumber(ey)
+            local dz = tonumber(lz) - tonumber(ez)
+            local len = math.sqrt(dx*dx + dy*dy + dz*dz)
+            if len > 0.01 then
+                dx = dx / len; dy = dy / len; dz = dz / len
+                Log.Write(string.format(
+                    "   norm(lookAt - engEye) = (%.3f, %.3f, %.3f)",
+                    dx, dy, dz))
+                local function dot(ax,ay,az,bx,by,bz) return ax*bx+ay*by+az*bz end
+                Log.Write(string.format("   dot vs col0=%.3f col1=%.3f col2=%.3f -col2=%.3f",
+                    dot(dx,dy,dz, mCol0X,mCol0Y,mCol0Z),
+                    dot(dx,dy,dz, mCol1X,mCol1Y,mCol1Z),
+                    dot(dx,dy,dz, mCol2X,mCol2Y,mCol2Z),
+                    dot(dx,dy,dz, -mCol2X,-mCol2Y,-mCol2Z)))
+            end
+        end
+
+        -- Rendered eye vs ourEye (what the DLL wrote).
+        local oex, oey, oez = statusLine:match("ourEye=([%-%d%.e]+),([%-%d%.e]+),([%-%d%.e]+)")
+        if oex and renderedX then
+            local dx = renderedX - tonumber(oex)
+            local dy = renderedY - tonumber(oey)
+            local dz = renderedZ - tonumber(oez)
+            Log.Write(string.format("eye   rendered - ourEye = (%.3f, %.3f, %.3f) %s",
+                dx, dy, dz,
+                (math.abs(dx)<=0.05 and math.abs(dy)<=0.05 and math.abs(dz)<=0.05)
+                    and "MATCH" or "MISS"))
         end
     end)
 
