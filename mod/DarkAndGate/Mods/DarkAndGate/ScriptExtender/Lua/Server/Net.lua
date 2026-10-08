@@ -93,6 +93,10 @@ local function nearestHostile(casterUuid)
 end
 
 handlers[Net.Channels.CastSpellRequest] = function(payload, userId)
+    -- M1b casts (withMana) belong to Server/Combat/SpellCast.lua. Without
+    -- this guard both handlers fired: a free duplicate cast, and point
+    -- spells (Fireball) landing on the caster because targetUuid is nil.
+    if payload.withMana then return end
     enqueueOsi(function()
         local caster = userToCharacter(userId)
         if not caster then Log.Write("Net: CastSpell no character for user " .. userId); return end

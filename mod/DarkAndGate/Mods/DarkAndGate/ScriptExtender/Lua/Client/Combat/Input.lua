@@ -1,8 +1,8 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Client input capture for combat.
 --
--- Gate: POV on + no modal UI (see State:IsCombatActive). realTime and
--- inFight are deliberately NOT gated here — the user wants LMB / RMB /
+-- Gate: POV on + no modal UI (see State.IsCombatActive). realTime and
+-- inFight are deliberately NOT gated here -- the user wants LMB / RMB /
 -- 1-0 to work in exploration first-person for training-dummy tests.
 --
 -- Arm-then-cast HARD mode (user requirement):
@@ -17,26 +17,37 @@
 --   Pressing the same number again -> disarm.
 --   Pressing a different number -> re-arm.
 --   Esc is NOT used (BG3 opens its own menu).
+--
+-- UI mode: when mouse-look is OFF (MMB toggled it off, cursor visible),
+-- LMB / RMB pass straight through to the vanilla game so the normal UI,
+-- looting, dialogue and context menus work. Number keys still arm.
+--
+-- fix1 (2026-10-08):
+--   * Swing / Hotbar / Spells are required at load time. The old lazy
+--     Ext.Require from inside the input handler threw (SE only allows
+--     Require while the bootstrap is loading) and the pcall swallowed it,
+--     so LMB and 1-0 were logged but did nothing.
+--   * Handler errors are now logged ("Combat Input: ERROR ...") instead of
+--     being swallowed silently.
+--   * !dag_input_log on|off logs every raw mouse/key event (RMB diagnosis).
 
-local Log   = Ext.Require("Shared/Log.lua")
-local State = Ext.Require("Client/Combat/State.lua")
+local Log    = Ext.Require("Shared/Log.lua")
+local State  = Ext.Require("Client/Combat/State.lua")
+local Swing  = Ext.Require("Client/Combat/Swing.lua")
+local Hotbar = Ext.Require("Client/Combat/Hotbar.lua")
+local Spells = Ext.Require("Client/Combat/Spells.lua")
 
 local M = {}
 
-local Swing, Hotbar, Spells  -- Resolved lazily to break require cycles.
+local rawLog = false
 
-local function requireLazy()
-    if not Swing  then Swing  = Ext.Require("Client/Combat/Swing.lua") end
-    if not Hotbar then Hotbar = Ext.Require("Client/Combat/Hotbar.lua") end
-    if not Spells then Spells = Ext.Require("Client/Combat/Spells.lua") end
-end
+local function nowMs() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
 
 local function recordEvent(kind, button, pressed)
     State.lastInputEvent = string.format(
         "%s %s %s@%dms gateActive=%s",
         kind, tostring(button), pressed and "down" or "up",
-        tonumber(Ext.Timer.MonotonicTime()),
-        tostring(State:IsCombatActive()))
+        nowMs(), tostring(State.IsCombatActive()))
 end
 
 -- MouseButtonInput: event.Button is an SDL button index. Spike 1 verified
@@ -44,36 +55,54 @@ end
 local function isLMB(button) return tonumber(button) == 1 end
 local function isRMB(button) return tonumber(button) == 3 end
 
+local function prevent(event)
+    if event.CanPreventAction then
+        pcall(function() event:PreventAction() end)
+    end
+end
+
 local function onMouse(event)
     local button  = event.Button
     local pressed = event.Pressed and true or false
     recordEvent("Mouse", button, pressed)
 
-    -- Log every mouse DOWN event. Low volume, high value: if LMB clicks
-    -- never show up here, SE isn't delivering MouseButtonInput for us
-    -- (dialogue / UI capture) and we need to look at a different hook.
-    if pressed then
-        Log.Write(string.format("Combat Input: mouse down button=%s gateActive=%s",
-            tostring(button), tostring(State:IsCombatActive())))
+    if rawLog then
+        Log.Write(string.format("Combat Input RAW: mouse button=%s (num=%s) pressed=%s canPrevent=%s",
+            tostring(button), tostring(tonumber(button)), tostring(pressed),
+            tostring(event.CanPreventAction)))
     end
 
-    if not State:IsCombatActive() then return end
+    if not State.IsCombatActive() then return end
 
-    if isLMB(button) then
+    local lmb, rmb = isLMB(button), isRMB(button)
+    if not lmb and not rmb then return end
+
+    -- UI mode: cursor visible -> leave mouse buttons to the vanilla game.
+    if not State.MouseLookOn() then
         if pressed then
-            requireLazy()
+            Log.Write(string.format("Combat Input: button=%s passed to vanilla UI (mouse-look off)",
+                tostring(button)))
+        end
+        return
+    end
+
+    if pressed then
+        Log.Write(string.format("Combat Input: %s down", lmb and "LMB" or "RMB"))
+    end
+
+    if lmb then
+        if pressed then
             if State.armedSpell then
                 local armed = State.armedSpell
                 State.armedSpell = nil
+                Log.Write("Combat: LMB casts armed spell " .. tostring(armed))
                 Spells.Cast(armed)
             else
                 Swing.OnLMB()
             end
         end
-        if event.CanPreventAction then
-            pcall(function() event:PreventAction() end)
-        end
-    elseif isRMB(button) then
+        prevent(event)
+    else
         if pressed then
             if State.armedSpell then
                 Log.Write("Combat: canceled armed spell (RMB) was=" .. tostring(State.armedSpell))
@@ -88,14 +117,12 @@ local function onMouse(event)
                 Log.Write("Combat: block OFF")
             end
         end
-        if event.CanPreventAction then
-            pcall(function() event:PreventAction() end)
-        end
+        prevent(event)
     end
 end
 
 -- KeyInput: tostring(event.Key) is an SDL scancode name. The digit row
--- comes through as NUM_1..NUM_0 (verified by Spike 1 — NOT the "Key1"
+-- comes through as NUM_1..NUM_0 (verified by Spike 1 -- NOT the "Key1"
 -- the IDE helpers suggest). event.Event is "KeyDown"/"KeyUp".
 local KEY_TO_SLOT = {
     NUM_1 = 1, NUM_2 = 2, NUM_3 = 3, NUM_4 = 4, NUM_5 = 5,
@@ -108,30 +135,54 @@ local function onKey(event)
     local evt   = tostring(event.Event or "")
     recordEvent("Key[" .. evt .. "]", key, evt == "KeyDown")
 
+    if rawLog and evt == "KeyDown" then
+        Log.Write(string.format("Combat Input RAW: key=%s event=%s repeat=%s",
+            key, evt, tostring(event.Repeat)))
+    end
+
     -- H toggles the hotbar window regardless of gate.
     if key == HOTBAR_TOGGLE_KEY and evt == "KeyDown" then
-        requireLazy()
         Hotbar.ToggleWindow()
         return
     end
 
-    if not State:IsCombatActive() then return end
+    if not State.IsCombatActive() then return end
 
     local slot = KEY_TO_SLOT[key]
-    if slot and evt == "KeyDown" then
-        Log.Write(string.format("Combat Input: hotbar key %s -> slot %d", key, slot))
-        requireLazy()
-        Hotbar.PressSlot(slot)
-        if event.CanPreventAction then
-            pcall(function() event:PreventAction() end)
+    if slot then
+        if evt == "KeyDown" and not event.Repeat then
+            Log.Write(string.format("Combat Input: hotbar key %s -> slot %d", key, slot))
+            Hotbar.PressSlot(slot)
+        end
+        -- Block the vanilla hotbar on both down and up.
+        prevent(event)
+    end
+end
+
+-- Log handler errors, at most one line per 2 s per handler, so a broken
+-- path is visible in client.log instead of failing silently.
+local lastErrAt = {}
+local function guarded(name, fn)
+    return function(e)
+        local ok, err = pcall(fn, e)
+        if not ok then
+            local now = nowMs()
+            if not lastErrAt[name] or now - lastErrAt[name] > 2000 then
+                lastErrAt[name] = now
+                Log.Write("Combat Input: ERROR in " .. name .. ": " .. tostring(err))
+            end
         end
     end
 end
 
 function M.Register()
-    Ext.Events.MouseButtonInput:Subscribe(function(e) pcall(onMouse, e) end)
-    Ext.Events.KeyInput:Subscribe(function(e) pcall(onKey, e) end)
-    Log.Write("Combat Input: registered (LMB/RMB/1-0 + H hotbar)")
+    Ext.Events.MouseButtonInput:Subscribe(guarded("mouse", onMouse))
+    Ext.Events.KeyInput:Subscribe(guarded("key", onKey))
+    Ext.RegisterConsoleCommand("dag_input_log", function(_, arg)
+        rawLog = (arg == "on" or arg == "1")
+        Log.Write("Combat Input: raw input log " .. (rawLog and "ON" or "OFF"))
+    end)
+    Log.Write("Combat Input: registered fix1 (LMB/RMB/1-0 + H hotbar; MMB off = UI mode)")
 end
 
 return M

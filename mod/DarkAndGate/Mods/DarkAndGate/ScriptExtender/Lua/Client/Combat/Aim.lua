@@ -14,11 +14,55 @@ local COLLIDES_WITH_WORLD    = { "Terrain", "Scenery", "Item", "Door" }
 local COLLIDES_WITH_ANYTHING = { "Terrain", "Scenery", "Item", "Door", "Character" }
 local IGNORED = {}
 
+-- The local player's UUID, so rays that start inside or next to our own
+-- body (first-person eye) never report ourselves as the target.
+local function selfUuid()
+    local ok, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    if not ok or not ents or not ents[1] then return nil end
+    local okU, u = pcall(function() return ents[1].Uuid.EntityUuid end)
+    if okU then return u end
+    return nil
+end
+M.SelfUuid = selfUuid
+
+local function hitUuid(hit)
+    local okU, u = pcall(function()
+        return hit.HitEntity and hit.HitEntity.Uuid and hit.HitEntity.Uuid.EntityUuid
+    end)
+    if okU then return u end
+    return nil
+end
+
+-- RaycastClosest from `from` along unit `dir` for `len` metres. If the
+-- closest hit is our own character, restart just past it (max 4 times).
+-- Returns distance-from-`from`, uuid (or nil), or nil when nothing is hit.
+local function rayIgnoringSelf(from, dir, len, flags, me)
+    local travelled = 0
+    for _ = 1, 4 do
+        local f = { from[1] + dir[1] * travelled, from[2] + dir[2] * travelled, from[3] + dir[3] * travelled }
+        local t = { from[1] + dir[1] * len, from[2] + dir[2] * len, from[3] + dir[3] * len }
+        if travelled >= len then return nil end
+        local okR, hit = pcall(function()
+            return Ext.Level.RaycastClosest(f, t, "Static", flags, IGNORED, 1)
+        end)
+        if not okR or not hit then return nil end
+        local d = tonumber(hit.Distance) or (len - travelled)
+        local u = hitUuid(hit)
+        if u and me and u == me then
+            travelled = travelled + d + 0.05
+        else
+            return travelled + d, u
+        end
+    end
+    return nil
+end
+
 local function activeCameraController()
     local cams = Ext.Entity.GetAllEntitiesWithComponent("Camera") or {}
     local fallback
     for _, eh in ipairs(cams) do
-        local ent = Ext.Entity.Get(eh)
+        local okE, ent = pcall(Ext.Entity.Get, eh)
+        if not okE or not ent then ent = eh end
         local _, cam = pcall(function() return ent.Camera end)
         if cam then
             local _, ctl = pcall(function() return cam.Controller end)
@@ -62,24 +106,17 @@ function M.CrosshairRay(maxDist, includeChars)
     if not eye then return nil end
     local nudge = 0.4
     local from = { eye[1] + fwd[1] * nudge, eye[2] + fwd[2] * nudge, eye[3] + fwd[3] * nudge }
-    local to   = { eye[1] + fwd[1] * maxDist, eye[2] + fwd[2] * maxDist, eye[3] + fwd[3] * maxDist }
     local flags = includeChars and COLLIDES_WITH_ANYTHING or COLLIDES_WITH_WORLD
-    local okR, hit = pcall(function()
-        return Ext.Level.RaycastClosest(from, to, "Static", flags, IGNORED, 1)
-    end)
-    if not okR or not hit then
+    -- hit.Distance is reliable; hit.Position bugged per DECISIONS 2026-10-08.
+    local dist, uuid = rayIgnoringSelf(from, fwd, maxDist - nudge, flags, selfUuid())
+    if not dist then
         return { eye = eye, forward = fwd }
     end
-    -- hit.Distance is reliable; hit.Position bugged per DECISIONS 2026-10-08.
-    local dist = tonumber(hit.Distance) or maxDist
     local pos = {
         from[1] + fwd[1] * dist,
         from[2] + fwd[2] * dist,
         from[3] + fwd[3] * dist,
     }
-    local uuid
-    local okU, u = pcall(function() return hit.HitEntity and hit.HitEntity.Uuid and hit.HitEntity.Uuid.EntityUuid end)
-    if okU and u then uuid = u end
     return { eye = eye, forward = fwd, hit = { pos = pos, target = uuid, distance = dist } }
 end
 
@@ -136,20 +173,12 @@ function M.FanClosestCharacter(eye, forward, reach, yawDeg, pitchDeg, rays, nudg
     nudge = nudge or 0.3
     local dirs = M.FanDirections(eye, forward, yawDeg, pitchDeg, rays)
     local best
+    local me = selfUuid()
     for _, d in ipairs(dirs) do
         local from = { eye[1] + d[1] * nudge, eye[2] + d[2] * nudge, eye[3] + d[3] * nudge }
-        local to   = { eye[1] + d[1] * reach, eye[2] + d[2] * reach, eye[3] + d[3] * reach }
-        local okR, hit = pcall(function()
-            return Ext.Level.RaycastClosest(from, to, "Static", COLLIDES_WITH_ANYTHING, IGNORED, 1)
-        end)
-        if okR and hit then
-            local u
-            local okU, uuid = pcall(function()
-                return hit.HitEntity and hit.HitEntity.Uuid and hit.HitEntity.Uuid.EntityUuid
-            end)
-            if okU and uuid then u = uuid end
+        local dist, u = rayIgnoringSelf(from, d, reach - nudge, COLLIDES_WITH_ANYTHING, me)
+        if dist then
             if u then
-                local dist = tonumber(hit.Distance) or reach
                 if not best or dist < best.distance then
                     best = {
                         targetUuid = u,
