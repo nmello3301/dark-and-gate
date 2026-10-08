@@ -215,6 +215,12 @@ local function setOn(on)
     setHideHead(on)
     lastWrite = 0
     writeState()
+    -- Propagate directly to the combat state module so Input / HUD /
+    -- !dag_combat_status see the change on the same frame. (Previous
+    -- design polled a DLL status file; it never flipped true, so every
+    -- key 1-0 / RMB / LMB was swallowed by the input gate.)
+    local okS, CombatState = pcall(Ext.Require, "Client/Combat/State.lua")
+    if okS and CombatState then CombatState.povOn = on end
     if on then
         Log.Write("FullPov: ON. Mouse-look is on; press MMB to toggle it. !dag_full_pov again to exit.")
     else

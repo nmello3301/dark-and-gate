@@ -1,41 +1,90 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Client input capture for combat.
 --
--- While POV + real-time combat active:
---   LMB  -> swing (and PreventAction so BG3 doesn't select).
---   RMB  -> block (hold; stub this pass — raises a flag only).
---   1..0 -> hotbar slot. PreventAction so BG3 doesn't pick/select.
+-- Gate: POV on + no modal UI (see State:IsCombatActive). realTime and
+-- inFight are deliberately NOT gated here — the user wants LMB / RMB /
+-- 1-0 to work in exploration first-person for training-dummy tests.
 --
--- Outside POV / combat the handlers early-exit and the event propagates
--- vanilla.
+-- Arm-then-cast HARD mode (user requirement):
+--   number key -> armedSpell = <id>
+--   LMB:
+--     if armedSpell -> Spells.Cast(armedSpell) at crosshair; disarm.
+--                      (Never swings while armed.)
+--     else          -> Swing.OnLMB() (vanilla melee).
+--   RMB tap:
+--     if armedSpell -> disarm (no block that press).
+--     else          -> block flag ON (stub, no DR applied).
+--   Pressing the same number again -> disarm.
+--   Pressing a different number -> re-arm.
+--   Esc is NOT used (BG3 opens its own menu).
 
 local Log   = Ext.Require("Shared/Log.lua")
 local State = Ext.Require("Client/Combat/State.lua")
 
 local M = {}
 
-local Swing, Hotbar  -- Resolved lazily to avoid Ext.Require cycles.
+local Swing, Hotbar, Spells  -- Resolved lazily to break require cycles.
 
 local function requireLazy()
     if not Swing  then Swing  = Ext.Require("Client/Combat/Swing.lua") end
     if not Hotbar then Hotbar = Ext.Require("Client/Combat/Hotbar.lua") end
+    if not Spells then Spells = Ext.Require("Client/Combat/Spells.lua") end
 end
 
--- SE's MouseButtonInput event: event.Button ("LeftButton" / "RightButton" /
--- "MiddleButton"), event.Pressed (true on down, false on up).
+local function recordEvent(kind, button, pressed)
+    State.lastInputEvent = string.format(
+        "%s %s %s@%dms gateActive=%s",
+        kind, tostring(button), pressed and "down" or "up",
+        tonumber(Ext.Timer.MonotonicTime()),
+        tostring(State:IsCombatActive()))
+end
+
+-- MouseButtonInput: event.Button is an int (SDL button index). SE binds
+-- some names like "Left1" / "Right1" / "Middle" as the string form of
+-- the enum. We match both the string form AND the raw int code so we
+-- don't rely on an exact SE build.
+local function isLMB(button)
+    local s = tostring(button or "")
+    return s == "Left1" or s == "LeftButton" or s == "1" or button == 1
+end
+local function isRMB(button)
+    local s = tostring(button or "")
+    return s == "Right1" or s == "RightButton" or s == "3" or button == 3
+end
+
 local function onMouse(event)
+    local button  = event.Button
+    local pressed = event.Pressed and true or false
+    recordEvent("Mouse", button, pressed)
+
     if not State:IsCombatActive() then return end
-    local b = tostring(event.Button or "")
-    if b == "Left1" or b == "LeftButton" then
-        requireLazy()
-        if event.Pressed then
-            Swing.OnLMB()
+
+    if isLMB(button) then
+        if pressed then
+            requireLazy()
+            if State.armedSpell then
+                local armed = State.armedSpell
+                State.armedSpell = nil
+                Spells.Cast(armed)
+            else
+                Swing.OnLMB()
+            end
         end
         pcall(function() event:PreventAction() end)
-    elseif b == "Right1" or b == "RightButton" then
-        State.blocking = event.Pressed and true or false
-        if event.Pressed then
-            Log.Write("Combat: block ON (stub, no DR applied yet)")
+    elseif isRMB(button) then
+        if pressed then
+            if State.armedSpell then
+                Log.Write("Combat: canceled armed spell (RMB) was=" .. tostring(State.armedSpell))
+                State.armedSpell = nil
+            else
+                State.blocking = true
+                Log.Write("Combat: block ON (stub, no DR applied)")
+            end
+        else
+            if State.blocking then
+                State.blocking = false
+                Log.Write("Combat: block OFF")
+            end
         end
         pcall(function() event:PreventAction() end)
     end
@@ -48,22 +97,21 @@ local KEY_TO_SLOT = {
 }
 
 local function onKey(event)
-    if not State:IsCombatActive() then
-        -- H toggles the hotbar window even outside combat.
-        if tostring(event.Key or "") == "H" and event.Event == "KeyDown" then
-            requireLazy()
-            Hotbar.ToggleWindow()
-        end
-        return
-    end
-    local key = tostring(event.Key or "")
-    if key == "H" and event.Event == "KeyDown" then
+    local key   = tostring(event.Key or "")
+    local evt   = tostring(event.Event or "")
+    recordEvent("Key[" .. evt .. "]", key, evt == "KeyDown")
+
+    -- H toggles the hotbar window regardless of gate.
+    if key == "H" and evt == "KeyDown" then
         requireLazy()
         Hotbar.ToggleWindow()
         return
     end
+
+    if not State:IsCombatActive() then return end
+
     local slot = KEY_TO_SLOT[key]
-    if slot and event.Event == "KeyDown" then
+    if slot and evt == "KeyDown" then
         requireLazy()
         Hotbar.PressSlot(slot)
         pcall(function() event:PreventAction() end)

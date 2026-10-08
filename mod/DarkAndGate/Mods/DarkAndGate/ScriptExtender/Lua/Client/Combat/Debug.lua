@@ -44,14 +44,18 @@ function M.Register()
         Log.Write("SpawnDummy: requested")
     end)
 
-    -- Follow !dag_full_pov to keep State.povOn consistent — Input/HUD
-    -- gate on it. We can't peek inside FullPov, so poll the file.
-    local STATUS_PATH = "DarkAndGate/native-pov-status.txt"
-    Ext.Events.Tick:Subscribe(function()
-        local ok, s = pcall(Ext.IO.LoadFile, STATUS_PATH)
-        if not ok or not s then return end
-        local on = s:match("on=(%d)")
-        State.povOn = on == "1"
+    -- Fast diagnostic: dumps every input gate + spell state at once.
+    -- Fires without needing a playtest, so a silent input gate shows up
+    -- immediately instead of after someone has swung at a dummy.
+    Ext.RegisterConsoleCommand("dag_combat_status", function()
+        local active = State:IsCombatActive()
+        Log.Write(string.format(
+            "Combat status: povOn=%s realTime=%s inFight=%s armedSpell=%s mana=%d/%d IsCombatActive=%s lastInput=%s",
+            tostring(State.povOn), tostring(State.realTime), tostring(State.inFight),
+            tostring(State.armedSpell),
+            math.floor(State.mana.current), math.floor(State.mana.max),
+            tostring(active),
+            tostring(State.lastInputEvent)))
     end)
 
     Log.Write("Combat Debug: registered")

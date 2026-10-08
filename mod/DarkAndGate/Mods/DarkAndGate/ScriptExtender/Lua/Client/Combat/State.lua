@@ -10,7 +10,12 @@
 local M = {
     povOn = false,
     swingDebug = false,
+    -- realTime and inFight are tracked for !dag_combat_status, but
+    -- are NOT part of IsCombatActive() — the user wants LMB swing /
+    -- RMB block / 1-0 hotbar to work in first person outside combat
+    -- too, so training-dummy tests work before the goblin fight.
     realTime = true,
+    inFight  = false,
 
     mana = { max = 60, current = 60, regen = 1.0 },
 
@@ -24,6 +29,18 @@ local M = {
     -- Current swing data (set by Swing.lua while a chain is live).
     currentSwing = nil,
     swingNonceCounter = 0,
+
+    -- Arm-then-cast (HARD mode): number key -> armedSpell = id.
+    -- LMB casts the armed spell (no swing while armed). RMB tap or
+    -- re-pressing the same number cancels.
+    armedSpell = nil,
+
+    -- RMB block (stub).
+    blocking = false,
+
+    -- One-line "last input seen" string for !dag_combat_status, so a
+    -- silent input gate is debuggable without a playtest.
+    lastInputEvent = "(none)",
 }
 
 function M.NextSwingNonce()
@@ -31,11 +48,10 @@ function M.NextSwingNonce()
     return M.swingNonceCounter
 end
 
+-- Input gate: POV on AND no modal UI. Does NOT depend on realTime or
+-- inFight (see above — needed for dummy tests before the goblin fight).
 function M.IsCombatActive()
-    -- Combat gameplay = POV on AND real-time combat enabled AND no modal UI.
     if not M.povOn then return false end
-    if not M.realTime then return false end
-    -- Modal UI check: Dialog / Cinematic entities exist iff a scene is up.
     for _, c in ipairs({ "Dialog", "Cinematic", "Cutscene" }) do
         local ok, es = pcall(Ext.Entity.GetAllEntitiesWithComponent, c)
         if ok and es and #es > 0 then return false end
