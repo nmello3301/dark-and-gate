@@ -44,6 +44,35 @@ function M.Register()
         Log.Write("SpawnDummy: requested")
     end)
 
+    -- Server echoes result so a client.log paste shows what happened —
+    -- the user's first playtest reported "nothing printed" because the
+    -- only outcome log was in server.log.
+    Ext.RegisterNetListener(Net.Channels.SpawnDummyReply, function(_, payload)
+        local ok, parsed = pcall(Ext.Json.Parse, payload)
+        if not ok then
+            Log.Write("SpawnDummy reply: bad JSON")
+            return
+        end
+        if parsed.ok then
+            local t = parsed.template or {}
+            local p = parsed.pos      or {}
+            Log.Write(string.format(
+                "SpawnDummy reply: OK uuid=%s template=%s tier=%s at (%.2f, %.2f, %.2f)",
+                tostring(parsed.uuid), tostring(t.name), tostring(t.tier),
+                p.x or 0, p.y or 0, p.z or 0))
+        else
+            Log.Write("SpawnDummy reply: FAIL reason=" .. tostring(parsed.reason))
+            if parsed.template then
+                Log.Write(string.format("  tried: name=%s uuid=%s",
+                    tostring(parsed.template.name), tostring(parsed.template.uuid)))
+            end
+            for i, c in ipairs(parsed.top or {}) do
+                Log.Write(string.format("  cand[%d] name=%s uuid=%s",
+                    i, tostring(c.name), tostring(c.uuid)))
+            end
+        end
+    end)
+
     -- Fast diagnostic: dumps every input gate + spell state at once.
     -- Fires without needing a playtest, so a silent input gate shows up
     -- immediately instead of after someone has swung at a dummy.

@@ -62,6 +62,9 @@ Net.Channels = {
 
     -- M1b debug: spawn a training dummy in front of the user.
     SpawnDummy        = "DAG_SpawnDummy",
+    -- Server echoes the result so client.log shows "Dummy: spawned ..." or
+    -- "Dummy: no template matched; top candidates ...".
+    SpawnDummyReply   = "DAG_SpawnDummyReply",
 }
 
 -- Every channel both sides care about. Both server and client must register
@@ -80,6 +83,7 @@ Net.AllChannels = {
     Net.Channels.ManaRefill,
     Net.Channels.CombatIntent,
     Net.Channels.SpawnDummy,
+    Net.Channels.SpawnDummyReply,
 }
 
 return Net
