@@ -66,6 +66,17 @@ local function sampleHit()
         local zone = Aim.ClassifyZone(hit.targetUuid, hit.pos[2])
         sendHitClaim(s.def, hit.targetUuid, hit.pos, zone)
     end
+    -- First-sample summary (one line per swing even when swingDebug is off),
+    -- so a swing that doesn't connect is visible in client.log instead of
+    -- just the "Swing: start" line with no follow-up.
+    if not s.firstSampleLogged then
+        s.firstSampleLogged = true
+        Log.Write(string.format(
+            "Swing: first sample fwd=(%.2f,%.2f,%.2f) hit=%s%s",
+            fwd[1], fwd[2], fwd[3],
+            hit and hit.targetUuid or "NONE",
+            hit and string.format(" dist=%.2f", hit.distance or 0) or ""))
+    end
 end
 
 local function startSwing(index)

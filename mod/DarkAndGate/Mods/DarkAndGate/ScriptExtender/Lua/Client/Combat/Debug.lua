@@ -44,6 +44,33 @@ function M.Register()
         Log.Write("SpawnDummy: requested")
     end)
 
+    -- Short-circuit the arm-then-LMB UX: fire the current slot-1 spell
+    -- (default Target_FireBolt) at the crosshair target right now. Lets
+    -- the user confirm the full cast pipeline works without needing the
+    -- hotkey arming to be running correctly first.
+    Ext.RegisterConsoleCommand("dag_fire_test", function()
+        local Spells = Ext.Require("Client/Combat/Spells.lua")
+        Spells.Cast("Target_FireBolt")
+        Log.Write("fire_test: Target_FireBolt cast attempt (see client.log for NO TARGET IN SIGHT or Spells: request)")
+    end)
+
+    -- Fire any spell id at the crosshair.
+    Ext.RegisterConsoleCommand("dag_cast", function(_, id)
+        if not id or id == "" then
+            Log.Write("usage: !dag_cast <spellId>"); return
+        end
+        local Spells = Ext.Require("Client/Combat/Spells.lua")
+        Spells.Cast(id)
+    end)
+
+    -- Fire one swing on command (bypasses mouse-look gate so the user can
+    -- test the swing path when stuck in UI mode).
+    Ext.RegisterConsoleCommand("dag_swing_test", function()
+        local Swing = Ext.Require("Client/Combat/Swing.lua")
+        Swing.OnLMB()
+        Log.Write("swing_test: swing fired (see Swing: start + first sample)")
+    end)
+
     -- Server echoes result so a client.log paste shows what happened —
     -- the user's first playtest reported "nothing printed" because the
     -- only outcome log was in server.log.

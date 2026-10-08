@@ -225,6 +225,20 @@ function M.Register()
             end
 
             Log.Write(string.format("Dummy: spawned %s at (%.2f, %.2f, %.2f)", spawned, x, y, z))
+
+            -- Try to force the dummy hostile. BG3 Osi exposes several
+            -- hostility knobs with different signatures across patches;
+            -- we attempt the common ones and log which (if any) took.
+            local function try(name, ...)
+                local args = { ... }
+                local okCall, err = pcall(function() return Osi[name](table.unpack(args)) end)
+                Log.Write(string.format("  Osi.%s ok=%s err=%s",
+                    name, tostring(okCall), tostring(err)))
+            end
+            try("SetFaction", spawned, "Evil_NPC")
+            try("SetHostileAndEnterCombat", caster, spawned)
+            try("AttackObject", spawned, caster, 1)
+
             sendReply(userId, {
                 ok       = true,
                 uuid     = tostring(spawned),

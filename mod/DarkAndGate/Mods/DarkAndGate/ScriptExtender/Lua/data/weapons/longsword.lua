@@ -23,13 +23,24 @@
 -- time-stretch animations here. If a swing's active window ends before the
 -- animation would land visually, the user sees a hit "early" — tune the
 -- active_ms against the animation.
+--
+-- 2026-10-08: Osi.PlayAnimation takes a GUID, not a template-name string.
+-- Round 2 used "GSB_Melee_1H_Base_Chain1" etc. and Osi silently rejected
+-- them — swings logged but no visible animation. Spike 4 verified this
+-- combat anim GUID plays end-to-end:
+--   01932f4d-a39b-4ea8-96ba-aef3e6b4c2d8  (Brawl's LOOPING_COMBAT_ANIMATION_ID)
+-- For now ALL three swings in the chain use that same anim so the user
+-- sees Gale swing on LMB. Per-swing R2L / L2R / Overhead anim GUIDs are
+-- a separate asset lookup; the hit-detection and chain-timing systems are
+-- what matters for M1b feel.
+local PROBE_SWING_ANIM = "01932f4d-a39b-4ea8-96ba-aef3e6b4c2d8"
 
 return {
     name = "longsword",
     chain = {
         {
             name       = "swing1_R2L",
-            anim       = "GSB_Melee_1H_Base_Chain1",  -- Osi template; may fallback via Spike 4
+            anim       = PROBE_SWING_ANIM,
             windup_ms   = 120,
             active_ms   = 180,
             recovery_ms = 120,
@@ -43,7 +54,7 @@ return {
         },
         {
             name       = "swing2_L2R",
-            anim       = "GSB_Melee_1H_Base_Chain2",
+            anim       = PROBE_SWING_ANIM,
             windup_ms   = 100,
             active_ms   = 180,
             recovery_ms = 120,
@@ -57,7 +68,7 @@ return {
         },
         {
             name       = "swing3_overhead",
-            anim       = "GSB_Melee_1H_Base_Chain3",
+            anim       = PROBE_SWING_ANIM,
             windup_ms   = 160,
             active_ms   = 200,
             recovery_ms = 220,
