@@ -76,7 +76,8 @@ The DLL that lives in `tools/native/` and loads via Ch4nKyy's Mod Loader.
 Order of exports is "what makes FP look right first", so M1b can start as
 soon as the camera is usable.
 
-- [ ] Build setup: Visual Studio C++ project, Ch4nKyy loader stub, MinHook or similar for engine hooks. Template: Native Camera Tweaks source.
+- [ ] Build setup: Visual Studio C++ project, Ch4nKyy loader stub, DKUtil hook pattern-scan. Template: Native Camera Tweaks source.
+- [ ] Head-bone-read spike ([m1a-bone-reads.md](spikes/m1a-bone-reads.md)) running in parallel with camera follow — exports `GetBoneWorldPos(entity, bone)` once the Granny node vtable is resolved.
 - [ ] **Camera follow + mouselook** (combined — same hook): read mouse delta, drive camera yaw/pitch, place camera at a Lua-chosen bone/world point each frame. Unblocks true first person.
 - [ ] FP camera values finalized in `BG3NativeCameraTweaks.toml` once mouselook is live.
 - [ ] True first person: local head / hair / beard / headwear hidden (Lua side already works; native covers the follow lag).

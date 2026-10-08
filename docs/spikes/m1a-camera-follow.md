@@ -1,9 +1,27 @@
 # M1a — Camera follow (and mouselook): static analysis
 
-**Date:** 2026-10-08 · **BG3:** Patch 8 (bg3.exe, image base `0x140000000`)
+**Date:** 2026-10-08 (initial pass) · 2026-10-08 (dev-review pass)
+**BG3:** Patch 8 (bg3.exe, image base `0x140000000`)
 **Method:** Ghidra static analysis via ghidra-mcp, cross-referenced with
 `reference/BG3_NativeCameraTweaks` and `reference/BG3WASD`.
 **Rule for this spike:** static only. No debugger, no attach, no game launch.
+
+## Dev-review corrections (2026-10-08)
+
+Six corrections / open questions from the dev review, resolved in-doc below:
+
+1. **Up axis = Y**. BG3 world is Y-up (Osi.GetPosition returns `x, y, z` with
+   `y` = height). Fixed in the pseudocode and the camera-field table.
+2. **vt[0x58] commit semantics.** Analysed. See "Commit timing" section.
+3. **Visual vs. simulation character position.** We read the Visual-side
+   transform. See "Character position source" section.
+4. **NCT conflict.** Analysed. See "NCT coexistence" section. Verdict:
+   keep NCT installed, zero its offsets.
+5. **Eye height as stopgap.** Per-race defaults table added. Separate
+   spike doc `m1a-bone-reads.md` is planned under M1a, not deferred.
+   DECISIONS line added.
+6. **Mouselook scope.** SDL relative mode, pause-on-UI, character facing.
+   BG3WASD composes for free. See "Mouselook" section.
 
 ## Short version
 
@@ -85,6 +103,147 @@ This is the classic exponential-decay smoothing applied to the camera
 **zero smoothing**: our post-hook writes the character's eye position
 directly, which replaces the lerp's output for that frame.
 
+## Commit timing — zero-frame lag reasoning
+
+The last meaningful write in `FUN_141e0f110` is a virtual call:
+
+```c
+local_3c8 = param_4[0xe];        // slot token (name/id)
+local_3c0 = param_1[1];          // scene ptr
+(**(code **)(*param_1 + 0x58))(  // param_1 = R13 = CameraSystem
+    param_1,
+    &local_3c8,                  // RDX: slot token (16B)
+    &local_508,                  // R8:  new position (xyz, 12B)
+    pfVar22 + 0x12               // R9:  out pos = cam + 0x48
+);
+```
+
+Shape: `CameraSystem::CommitSlotTransform(sys, slotToken, newPos, outPos)`.
+`outPos = cam+0x48` is written by this call; the function clearly treats
+`cam[]` as the authoritative storage, since the whole body wrote to
+`cam[0x17]` (pitch), `cam[0x1c..0x1e]` (forward), `cam[0x1f..0x21]`
+(SLERP target) directly before this commit.
+
+The question is: does `vt[0x58]` *also* mirror these values into a cached
+view matrix the renderer reads independently? Static analysis alone can't
+rule it out (`vt[0x58]` is reached indirectly, we'd need to resolve the
+vtable instance to decomp it).
+
+**Two mitigations, both cheap, applied together:**
+
+A. **Post-hook writes `cam[]` directly after `UpdateCamera` returns.**
+   If `cam[]` is the renderer's source, we win here — zero-frame lag.
+
+B. **If a mirror exists, we re-invoke `vt[0x58]` with our position.**
+   We hold `param_1` (CameraSystem) and can reconstruct the slot token
+   from `param_4[0xe]` + `param_1[1]`. Cost: one virtual call per
+   frame (~1 µs on modern x64).
+
+Taken together, zero-frame lag is deterministic without proving which
+scenario holds. **In-game smoke test to confirm:** walk the character
+in a straight line at the fastest run speed. If the camera visibly
+trails by one frame at the start-of-run or stop-of-run acceleration
+spike, the mirror exists and we re-commit; otherwise (A) was enough and
+we can drop (B) to save the virtual call.
+
+Pitch field (`cam+0x5c`) and forward vector (`cam+0x70`) are written by
+`UpdateCamera` in the body (not by `vt[0x58]`); overwriting them in our
+post-hook is sufficient. We **always** write them to match the forward
+we chose, so the engine can't reconstruct a conflicting pitch from the
+forward or vice versa.
+
+## Character position source
+
+BG3 characters hold two transforms:
+
+- `ls::TransformComponent` — simulation position, written by the physics
+  tick (confirmed via string at `0x1454d6880`).
+- `ls::VisualComponent` → `.VisualTransform` / `.VisualTransform3D` —
+  render-interpolated position, exposed by name at `0x14531c7b8` and
+  `0x14531c7d0` (reflection surface, used by the engine's own
+  serializers).
+
+**We read `VisualComponent.VisualTransform`**, not `TransformComponent`.
+Rationale: the simulation tick runs at a fixed rate (BG3's physics is
+60 Hz typical); between ticks the renderer interpolates. Reading sim
+position means the camera snaps once per physics tick while frames
+in between still render — classic 1-tick stutter when sim rate <
+frame rate (e.g. 144 Hz display).
+
+The camera object already holds a character pointer at
+`cam+0x220` (`pfVar22[0x44]`), likely the "active character to follow"
+and already used by `UpdateCamera` for position-based zoom math.
+
+**TODO at implementation time (not blocking the spike close):** confirm
+the VisualTransform offset *on the character* and whether the camera's
+`cam+0x220` ptr targets the character or its VisualComponent. One
+decompilation of `GrannyNode_GrannyGetBoneWorldTransform`'s callee (or
+any existing site that reads a character's visual transform) nails it;
+pattern search for `char + <small offset>` reads tagged by the string
+xrefs above. Keep the lookup in `offsets.h` so it's one line to swap.
+
+## NCT coexistence
+
+NCT loads from `<BG3>/bin/NativeMods/BG3NativeCameraTweaks.dll` via
+Ch4nKyy's loader. Ch4nKyy iterates `NativeMods/*.dll` **alphabetically**,
+so load order is deterministic:
+
+```
+BG3NativeCameraTweaks.dll   loads first
+BG3WASD.dll                 loads second
+DarkAndGate.dll             loads last
+```
+
+NCT's `Hooks.cpp` installs its UpdateCamera hook via DKUtil
+`write_call<5>(callAddr, Hook_UpdateCamera)` on the exact same 5 bytes
+at `0x141e0c9bc`. When we install our hook, DKUtil's `write_call<5>`
+captures the **current** target at `callAddr` (which is NCT's trampoline
+address, not the real `FUN_141e0f110`) and stores it in our
+`_UpdateCamera`. Chain safely:
+
+```
+UpdateCamera call-site (bg3.exe)
+  → OurHook  (reads _UpdateCamera, calls it)
+      → NCT's Hook_UpdateCamera
+          → NCT's _UpdateCamera (real FUN_141e0f110)
+          → (NCT applies pitch/zoom/FOV/offset tweaks here)
+      → (NCT returns)
+  → (we overwrite cam[] with our pin)
+```
+
+That's the behaviour we want. DKUtil's capture-current-target idiom is
+documented and both NCT and WASD rely on it.
+
+**Startup check:** at DLL load, read the 5 bytes at `0x141e0c9bc`. If the
+displacement in the CALL doesn't resolve to `FUN_141e0f110`, log a
+`[Native] Camera call-site already hooked by another mod — chaining via
+captured target`. Not a warning in the error sense — just a log line so
+future-us can tell what happened.
+
+**Should NCT stay installed once our follow works?** **Yes, with its
+offsets zeroed.** NCT provides four things we want for free:
+
+- `ExplorationFOVClose = 90.0` — FP-friendly FOV, we'd otherwise have
+  to hook `AfterUpdateCameraZoom` ourselves.
+- `ExplorationUnlockPitch = true` + wide pitch limits — mouselook needs
+  this; otherwise the engine clamps pitch to the normal isometric range.
+- `ExplorationZoomMin = 0.0` — pushes the camera into the character
+  (so the engine's own "camera inside geometry" fallback doesn't fire).
+- `MouseCameraRotationMult`, `MousePitchMult` — handy backstops.
+
+What fights us:
+
+- `ExplorationHorizontalOffsetMult`, `ExplorationVerticalOffsetMult`
+  must be `0.0` when our FP mode is active. If not, NCT adds its offset,
+  then we overwrite with character+eyeHeight, net result is the engine
+  reads character+eyeHeight correctly but there's an extra lerp step
+  per frame we don't want. Zero them in `BG3NativeCameraTweaks.toml`
+  while FP is on. Document in `tools/native/README.md`.
+
+If NCT turns out to constrain our mouselook (fighting over pitch), we
+patch the dependency by disabling NCT's pitch hook; but that's a bridge
+to cross if we hit it, not up front.
+
 ## Head bone — deferred to a follow-up spike
 
 What the search found:
@@ -106,110 +265,174 @@ What the search found:
   belongs behind its own spike (`m1a-bone-reads.md`), not the camera
   critical path.
 
-**M1a camera's first-pass:** target the character's eye position via a
-cheap offset from character world position:
-`eye = character.world + (0, 0, eye_height_m)` with `eye_height_m` tuned
-in config (default 1.65). That gives us a camera that pins to the head
-without needing the Granny read. The visible drop vs. bone-accurate:
-head bob doesn't propagate, which is actually desirable for FP comfort.
+**M1a camera's first-pass (Y-up corrected):**
+`eye = character.VisualTransform.pos + (0, eye_height_m, 0)` — eye
+height adds to **y**, not z. Per-race defaults go in config since the
+Granny bone read isn't live yet:
+
+| Race | Eye height (m) | Note |
+| --- | --- | --- |
+| Human / Half-Elf / Tiefling | 1.68 | baseline |
+| Elf / Drow | 1.75 | taller / willowy |
+| Dragonborn | 1.90 | tallest |
+| Half-Orc | 1.80 | |
+| Githyanki | 1.78 | |
+| Dwarf (any) | 1.12 | ~2/3 human height |
+| Halfling | 0.90 | |
+| Gnome | 0.88 | |
+| Default fallback | 1.65 | if race-lookup fails |
+
+Resolved by reading the character's `RaceComponent` (string tag). The
+exact offset-to-tag lookup lands at implementation time; we can also
+start by hard-coding one value and tune after a quick in-game read.
+
+**The eye-height path is a stopgap.** Head-bone-accurate FP remains the
+goal; see `docs/spikes/m1a-bone-reads.md` (sibling spike, scheduled
+inside M1a, not after). DECISIONS.md carries the one-liner.
 
 Finding the player character pointer from inside the hook: the camera
 object already carries a character handle. From `FUN_141e0f110`'s body:
-- `*(longlong *)(pfVar22 + 0x44)` — "ActiveCharacter" (confidence medium,
-  xref'd in SLERP code with char* `[0xf]` and `[0x79]` state bytes)
-- `*(longlong *)(pfVar22 + 0x48)` — alternate character ptr (secondary)
+- `*(longlong *)(pfVar22 + 0x44)` (= `cam+0x220`) — "ActiveCharacter"
+  (confidence medium, xref'd in SLERP code with char* `[0xf]` and
+  `[0x79]` state bytes).
+- `*(longlong *)(pfVar22 + 0x48)` (= `cam+0x240`) — alternate character
+  ptr (secondary; probably "target of look-at"; ignore for FP).
 
-We read the former; its world position is at `character + <TBD>` — need
-one more decompilation pass to confirm the character's transform offset,
-but that's a 5-minute dig once we're hooking.
+## Mouselook
 
-## Proposed hook plan
+**Scope:**
+- SDL relative mode: `SDL_SetRelativeMouseMode(SDL_TRUE)` when FP is
+  active and no modal UI is open. Cursor hidden, locked to the window,
+  per-frame mouse delta accumulates yaw/pitch.
+- Pause states (relative mode OFF, cursor shown, our yaw/pitch frozen):
+  - Any BG3 UI panel open (character sheet, inventory, map, journal,
+    tutorial).
+  - In dialogue (we subscribe to the same hook BG3WASD uses:
+    `DialogStatusChangedHook.cpp` — flips a bool; we read it).
+  - In a cutscene / timeline (BG3WASD's state machine already tracks
+    this; we mirror).
+  - At the main menu / in load screens (sanity: cam ptr null).
+- Pitch clamp: ±89°. Yaw unbounded.
+- Sensitivity + invert in `native-config.toml`:
+
+```toml
+[dag.mouselook]
+enabled = true
+sensitivity_yaw = 0.12    # deg per mouse-count
+sensitivity_pitch = 0.12
+invert_pitch = false
+pause_in_ui = true
+```
+
+**Character facing follows yaw automatically.** `FUN_141e0f110` doesn't
+turn the character — it just updates the camera. The character turns
+through BG3's own "camera-forward movement" command, which BG3WASD has
+remapped: `CharacterMoveForward -> CameraForward` (confirmed in
+`reference/BG3WASD/src/InputconfigPatcher.cpp:54`). The engine reads
+the camera forward vector (which we overwrite) and translates it into
+character motion. **No extra hook needed from us** to make W/A/S/D
+drive the character relative to our new yaw.
+
+Caveat: for stationary 180° turns in place (no WASD held), the
+character stays facing its last movement direction. That's a known
+BG3 behaviour and we live with it for M1a; M1b combat can revisit.
+
+**Mouselook hook anchor:**
+We re-use NCT's existing anchor at `0x141e0b4ca ... 0x141e0b4d0`
+region or hook SDL's own `SDL_PumpEvents` entry via a trampoline on
+the WASD-style `InputHook.cpp` pattern. Preferred: hook the game's
+own mouse-delta ingestion point so we see the delta regardless of SDL
+relative-mode state. Pattern-scan belongs in `offsets.h` once we
+decompile one more call-site; not needed to start the DKUtil
+scaffolding.
+
+## Proposed hook plan (Y-up corrected, with vt[0x58] re-commit)
 
 **One hook, placed at `0x141e0c9bc` — the `UpdateCamera` call-site.**
 
-DKUtil `write_call<5>` wraps the 5-byte CALL. Our trampoline:
+DKUtil `write_call<5>` wraps the 5-byte CALL and chains cleanly through
+NCT if NCT loaded first (see NCT coexistence).
 
 ```c++
+// Y-UP WORLD. All positions are (x, y, z) with y = height.
 void Hook_UpdateCamera(void* scene, void** ctx, uintptr_t frameInfo, void** cameraSlot)
 {
-    // 1. Let the engine do its full update (zoom, pitch, scene blending,
-    //    HUD sync, companion placement, sound-listener updates).
+    // 1. Let the engine (and NCT, if present) do their full update:
+    //    zoom, pitch, scene blending, HUD sync, companion placement,
+    //    sound-listener setup. We'll overwrite the final transform.
     _UpdateCamera(scene, ctx, frameInfo, cameraSlot);
 
-    // 2. Gate on config: only active in true-FP mode.
     if (!g_config.cameraFollow.enabled) return;
+    if (IsCutsceneOrLoading(scene)) return;  // flag at scene+0x1332
 
-    // 3. Reach the camera object and the active character.
     float* cam = (float*)cameraSlot[6];
-    void*  character = *(void**)((uintptr_t)cam + 0x220);  // pfVar22[0x44*2]
+    if (!cam) return;
+
+    void* character = *(void**)((uintptr_t)cam + 0x220);
     if (!character) return;
 
-    // 4. Read character world position (offset TBD — one more decomp
-    //    pass; stored on the character's TransformComponent, likely
-    //    the "GrannyNode_GrannyGetBoneWorldTransform" world root).
-    Vec3 charPos = ReadCharWorldPos(character);
-    float eyeHeight = g_config.cameraFollow.eyeHeight;  // default 1.65m
+    // 2. Visual (render-interpolated) position, NOT sim position.
+    //    Avoids 1-tick stutter when sim rate < frame rate.
+    Vec3 charPos = ReadCharVisualPos(character);         // VisualComponent.VisualTransform
+    float eyeHeight = GetEyeHeightForRace(character);     // per-race table + config
 
-    // 5. Compute forward from accumulated mouse delta owned by this DLL
-    //    (set by our SDL mouse hook; see BG3WASD InputHook.cpp for the
-    //    template). Yaw/pitch -> unit forward.
-    Vec3 fwd = YawPitchToForward(g_mouselook.yaw, g_mouselook.pitch);
+    // 3. Forward from our own yaw/pitch accumulator.
+    //    Y-up: forward = (cos(pitch)*sin(yaw), sin(pitch), cos(pitch)*cos(yaw))
+    Vec3 fwd = YawPitchToForwardYUp(g_mouselook.yaw, g_mouselook.pitch);
 
-    // 6. Overwrite the engine's output for this frame. No lerp here --
-    //    straight write, so the engine's smoothing from step 1 is
-    //    bypassed and the camera is pin-sharp to the head.
-    cam[0x12] = charPos.x;
-    cam[0x13] = charPos.y;
-    cam[0x14] = charPos.z + eyeHeight;
+    // 4. Overwrite cam[] -- Y gets the eye offset.
+    cam[0x12] = charPos.x;                  // +0x48
+    cam[0x13] = charPos.y + eyeHeight;      // +0x4c   (Y is up)
+    cam[0x14] = charPos.z;                  // +0x50
 
-    cam[0x1c] = fwd.x;  cam[0x1d] = fwd.y;  cam[0x1e] = fwd.z;
-    // Clear the SLERP target so next frame doesn't drift back.
-    cam[0x1f] = fwd.x;  cam[0x20] = fwd.y;  cam[0x21] = fwd.z;
+    cam[0x1c] = fwd.x;  cam[0x1d] = fwd.y;  cam[0x1e] = fwd.z;   // +0x70 forward
+    cam[0x1f] = fwd.x;  cam[0x20] = fwd.y;  cam[0x21] = fwd.z;   // +0x7c SLERP target (prevents drift-back)
+
+    // Keep pitch field consistent with the forward we wrote, so the
+    // engine's downstream readers don't rebuild a different direction.
+    cam[0x17] = g_mouselook.pitch;          // +0x5c
+
+    // 5. Re-commit via vt[0x58] IF the mirror-cache path exists.
+    //    Smoke test determines whether we keep this call.
+    if (g_config.cameraFollow.recommit_vt58) {
+        RecommitCameraSlot(scene, cameraSlot, cam);  // calls (*(void*)*scene)[0x58]
+    }
 }
 ```
 
 ### Why this beats NCT's follow
 
-NCT applies its offsets *into* the engine's camera update: the game's
-own smoother then still runs on top, which is where lag enters. We call
-the original first and overwrite *after* it, so there's no code path
-after our write that can smooth the result for this frame. Each frame
-starts fresh from the engine's view of truth and ends with our pin.
+NCT writes *into* the engine's camera update; the engine's smoother then
+runs on top with NCT's inputs. We call the original first and overwrite
+*after* it, so no code path downstream of our write can smooth the
+result. The optional `vt[0x58]` re-commit covers the mirror-cache case
+without introducing lag.
 
 ### Mouselook
 
-One extra hook, templated from BG3WASD's `InputHook.cpp`: subscribe to
-the SDL mouse-motion delta before the engine consumes it, accumulate
-yaw += dx * sens, pitch += dy * sens (clamped to ±89°). The engine's
-own camera-rotation input (the `HandleCameraInput` call-site we have
-confirmed) stays disabled by NCT's config — we don't need to override
-it, we just stop feeding it. Mouselook is driven by our yaw/pitch
-accumulator alone.
+See the "Mouselook" section above. Separate hook on the game's mouse
+ingestion point feeding `g_mouselook.{yaw,pitch}`. State machine mirrors
+BG3WASD's pause-on-UI logic so dialogue and panels don't jerk the view.
 
 ### Risks
 
 | Risk | Mitigation |
 | --- | --- |
 | `pfVar22[0x44]` character pointer wrong in some scenes (cutscenes, flight) | Fall back to no-op when character is null; disable follow during cutscene state (detect via existing camera-def toggle at scene-def `+0x1332`). |
-| Character world-position offset not yet confirmed | One more decomp pass against `FUN_141e0f110`'s "move camera toward character" branch nails it before we write code. |
-| Engine other-frame systems (companion follow, HUD anchor) read the smoothed camera, not our pinned camera | We overwrite after their reads inside UpdateCamera. If something downstream re-reads next frame, no harm — it sees our pin. |
+| `vt[0x58]` writes a mirror the renderer uses | Optional re-commit path (`g_config.cameraFollow.recommit_vt58`) calls `vt[0x58]` again with our position. Enabled by default; smoke test confirms whether needed. |
+| Character VisualTransform offset not yet confirmed | Keep in `offsets.h` — one-line change once an in-game read nails it. First build can hard-code a plausible offset and iterate. |
 | `UpdateCamera` runs on cameras we don't want to touch (minimap, cinematic) | `cameraSlot[?]` identifies the slot. Spike 11b's camera dump already distinguishes "exploration" vs "tactical" slot; same check here. |
+| NCT or another mod hooks the same call-site | Chain through DKUtil's captured target. Log a line at load if the 5 bytes differ from the known-good disassembly. |
+| NCT's vertical/horizontal offset mults fight our pin | Zero them in `BG3NativeCameraTweaks.toml` while FP is on. Document in `tools/native/README.md`. |
 | Pattern drift on BG3 Patch 9 | All six patterns are unique one-hits today, so breakage will be loud. Keep them in one `offsets.h`. |
 
-## Next steps (pending your OK)
+## Next steps (approved)
 
-1. One more Ghidra pass to nail: character-world-position offset on the
-   character pointer, and the exact scene check for "FP eligible". ~30
-   min of static work.
-2. Start the DKUtil skeleton in `tools/native/src/Hooks/Camera.{h,cpp}`
-   with `Hook_UpdateCamera` as above. Config lives in
-   `Script Extender/DarkAndGate/native-config.toml`.
-3. Separate `tools/native/src/Hooks/Mouselook.{h,cpp}` with the SDL
-   motion delta.
-4. Smoke-test flow: deploy DLL, launch BG3, enable `follow` in config,
-   watch camera pin to character + eye height. Mouselook tested with
-   `yaw+=1°/frame` self-rotation sanity check before wiring mouse delta.
+1. Build Camera.{h,cpp} and Mouselook.{h,cpp} under
+   `tools/native/src/Hooks/` with every pattern in `offsets.h`.
+2. Off by default via `native-config.toml`. First commit stops when the
+   DLL compiles — no in-game testing until the dev quits League.
+3. In-game smoke tests follow the "zero-frame lag" and
+   "mouselook-pauses-on-UI" test shape.
 
-I will **not** touch the binary (no renames, no comment edits that
-patch bytes — only Ghidra project metadata). I will not launch the
-game. Waiting for your OK before I write the hook.
+Static-only pass complete. Writing hook next.
