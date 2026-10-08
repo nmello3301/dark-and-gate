@@ -24,3 +24,14 @@ OsiDump.Register()
 
 local NativeBridge = Ext.Require("Shared/NativeBridge.lua")
 NativeBridge.Register("Server")
+
+-- M1b combat slice (server side): mana + hit validation + spell routing + dummy.
+local Mana         = Ext.Require("Server/Combat/Mana.lua")
+local HitValidator = Ext.Require("Server/Combat/HitValidator.lua")
+local SpellCast    = Ext.Require("Server/Combat/SpellCast.lua")
+local Dummy        = Ext.Require("Server/Combat/Dummy.lua")
+
+Mana.Register()
+HitValidator.Register()
+SpellCast.Register()
+Dummy.Register()

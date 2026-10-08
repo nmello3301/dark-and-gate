@@ -39,6 +39,29 @@ Net.Channels = {
     -- Spike 7. Payload: { targetUuid: string, durationMs: int }.
     -- Server freezes the target by setting a short-lived timescale status.
     HitStopRequest    = "DAG_HitStopRequest",
+
+    -- M1b melee. Payload: {
+    --   weapon: string, swingIndex: int, swingNonce: int64,
+    --   eye: {x,y,z}, forward: {x,y,z},
+    --   targetUuid: string, hitPoint: {x,y,z}, hitZone: "head"|"torso"|"limbs",
+    --   damage: number, reach: number
+    -- }
+    -- Server validates range + swing state, applies damage, replies via HitResult.
+    HitClaim          = "DAG_HitClaim",
+    HitResult         = "DAG_HitResult",
+
+    -- M1b mana. Server broadcasts pool state. Payload: { max, current, regen }.
+    ManaUpdate        = "DAG_ManaUpdate",
+    -- Client requests a mana refill (debug only). Server echoes ManaUpdate.
+    ManaRefill        = "DAG_ManaRefill",
+
+    -- M1b combat intent. Payload: { targetUuid: string, kind: "melee"|"block" }.
+    -- The server tracks combat state for the user and keeps real-time combat
+    -- running (opposite of BG3's turn-based mode) when active.
+    CombatIntent      = "DAG_CombatIntent",
+
+    -- M1b debug: spawn a training dummy in front of the user.
+    SpawnDummy        = "DAG_SpawnDummy",
 }
 
 -- Every channel both sides care about. Both server and client must register
@@ -51,6 +74,12 @@ Net.AllChannels = {
     Net.Channels.PlayAnimRequest,
     Net.Channels.RagdollPush,
     Net.Channels.HitStopRequest,
+    Net.Channels.HitClaim,
+    Net.Channels.HitResult,
+    Net.Channels.ManaUpdate,
+    Net.Channels.ManaRefill,
+    Net.Channels.CombatIntent,
+    Net.Channels.SpawnDummy,
 }
 
 return Net

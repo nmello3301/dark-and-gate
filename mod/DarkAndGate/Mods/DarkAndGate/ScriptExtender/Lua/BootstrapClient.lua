@@ -51,3 +51,17 @@ local Spike7 = Ext.Require("Spikes/Spike7_HitStop.lua");   Spike7.Register()
 Ext.RegisterConsoleCommand("dag_ping", function()
     ClientNet.Ping()
 end)
+
+-- M1b combat slice: input + swing + spells + hotbar + HUD + debug.
+local CombatState  = Ext.Require("Client/Combat/State.lua")
+local CombatInput  = Ext.Require("Client/Combat/Input.lua")
+local CombatSwing  = Ext.Require("Client/Combat/Swing.lua")
+local CombatHotbar = Ext.Require("Client/Combat/Hotbar.lua")
+local CombatHUD    = Ext.Require("Client/Combat/HUD.lua")
+local CombatDebug  = Ext.Require("Client/Combat/Debug.lua")
+
+CombatInput.Register()
+CombatSwing.Register()
+CombatHotbar.Register()
+CombatHUD.Register()
+CombatDebug.Register()

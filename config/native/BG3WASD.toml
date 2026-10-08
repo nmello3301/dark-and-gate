@@ -1,0 +1,111 @@
+﻿[ModHotkeys]
+# For the names of all available keys, see the bottom of this config file.
+# The ModHotkeys are region DEPENDANT!!! AZERTY keyboard users must adapt them!
+
+ToggleMovementMode = "key:capslock"
+# Key that toggles between Character and Camera movement mode.
+
+HoldMovementMode = ""
+# Switch between Character and Camera movement mode while you hold this key.
+
+ToggleWalkspeed = "key:insert"
+# Toggles between walking and jogging movespeed.
+
+HoldWalkspeed = ""
+# When you are jogging, holding this key will make you walk.
+# If you are walking, holding this key will make you jog.
+
+ReloadConfig = "key:f11"
+# This will hot reload all config values and the inputconfig.
+
+ToggleAutoforward = "shift+key:w"
+# Lets you move forward without holding Forward.
+# AZERTY users should set it to shift+key:z.
+
+
+[Core]
+
+WalkSpeed = 0.3
+# 1.0 would be jog speed. 0.5 would be 50% of that. [0.0, 1.0]
+
+WalkingIsDefault = false
+# Whether the character walks, when the game starts up. [true, false]
+
+SwitchToWalkingAfterCombat = false
+# Whether to switch to walking, when combat ends. [true, false]
+
+
+[AutoToggleMovementMode]
+
+EnableAutoTogglingMovementMode = true
+# Automatically toggle movement mode depending on the context. 
+# Toggle to Camera movement, when combat starts, and back to Character movement, when combat ends.
+# [true, false]
+
+
+[Mouselook]
+
+EnableMouselook = true
+# Hides the mouse cursor and disables Interact (usually left click) during rotation.
+# [true, false]
+
+EnableRotatePlusLeftclickMovesForward = false
+# Holding the Camera Rotate key and Leftclick at the same time will move Forward.
+# This feature is automatically suppressed if you bind Rotate to Leftclick.
+# [true, false]
+
+RotateThreshold = 200
+# This threshold is only of interest, when you bind Camera Rotate to the same key as Context Menu and Cancel Action.
+# E.g. when you want to bind Rotate to Rightclick.
+# In that case, it is the threshold in milliseconds where the mod distinguishes between Rotate and other commands.
+# [0, 2000]
+
+
+[InteractMoveBlocker]
+
+BlockInteractMove = false
+# During Character movement mode, block Interact (usually Leftclick) from moving your character.
+# Interacting with objects and people still works.
+# Even if set to false, you can still cancel interact moves by pressing your CharacterMove keys.
+# [true, false]
+
+
+# List of all available keys:
+
+# Modifiers: ctrl, shift, alt. E.g. "ctrl+shift+key:w"
+# Multiple keycombos possible, separated by comma: "key:x,ctrl+key:y"
+
+# mouse:left            mouse:right             mouse:middle
+# mouse:x1              mouse:x2
+
+# key:a                 key:b                   ...                     key:z
+# key:1                 key:2                   ...                     key:0
+# key:f1                key:f2                  ...                     key:f24
+
+# key:left              key:up                  key:right               key:down
+# key:backspace         key:tab                 key:return              key:capslock
+# key:insert            key:delete              key:space               key:end
+# key:home              key:printscreen         key:scrolllock          key:escape
+# key:pause             key:numlock             key:pageup              key:pagedown
+
+# key:lalt              key:ralt
+# key:lshift            key:rshift
+# key:lctrl             key:rctrl
+# key:lgui              key:rgui (Windows keys)                
+
+# key:;                 key:=                   key:,                   key:'
+# key:-                 key:.                   key:/                   key:`
+# key:[                 key:]
+# key:\\ (Backslash is a very special character in the toml format. You must either
+# write xxx="key:\\" or xxx='key:\' for it to work.)
+
+# key:kp_0              key:kp_1                ...                     key:kp_9
+# key:kp_multiply       key:kp_plus             key:kp_period           key:kp_divide
+# key:kp_minus            
+
+# key:modechange        key:prior               key:clear               key:select
+# key:execute           key:help                key:sleep
+# key:volume_down       key:volume_up           key:audio_mute          key:audio_next
+# key:audio_prev        key:audio_stop          key:audio_play
+# key:crsel             key:exsel               key:apps
+
