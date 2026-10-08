@@ -1,47 +1,19 @@
-# Dark and Gate native plugin — runtime config.
-#
-# Copy this to:
+# Dark and Gate native plugin runtime config.
+# Lives at:
 #   %LOCALAPPDATA%\Larian Studios\Baldur's Gate 3\Script Extender\
 #   DarkAndGate\native-config.toml
 #
-# The DLL reads it once on process start. Hot-reload lands in a later
-# commit; for now, restart BG3 after editing.
+# Lua owns the race -> eye_height lookup (data/camera.lua) and
+# rewrites eye_height here on SessionLoaded. The DLL only reads it.
 
 [dag.camera]
-# Master switch. OFF by default: with this false, the camera hook is
-# installed but no-ops. The game plays vanilla + NCT + WASD.
 enabled           = false
-
-# Belt-and-braces write path: after overwriting cam[], re-invoke the
-# camera-system's commit function so any mirror-cache picks up our
-# values this frame. Smoke test confirms whether we can disable this.
 recommit_vt58     = true
-
-# Eye height in metres (Y-up world). Fallback when the race-tag read
-# fails or when no race-specific key below matches.
-eye_height_default   = 1.65
-
-# Per-race defaults. Approximate; tune in-game once we can see them.
-eye_height_human     = 1.68
-eye_height_elf       = 1.75
-eye_height_dragonborn = 1.90
-eye_height_halforc   = 1.80
-eye_height_githyanki = 1.78
-eye_height_dwarf     = 1.12
-eye_height_halfling  = 0.90
-eye_height_gnome     = 0.88
+eye_height        = 1.65   # metres, Y-up; Lua overrides per character
 
 [dag.mouselook]
-# Master switch. OFF by default. The engine's own camera rotation stays
-# functional while this is off (held middle-mouse-button to rotate).
 enabled            = false
-
-# Degrees per mouse count. 0.12 is a comfortable FPS default on a 400
-# DPI mouse at Windows pointer-speed 6/11; tune to taste.
 sensitivity_yaw    = 0.12
 sensitivity_pitch  = 0.12
 invert_pitch       = false
-
-# When true, mouselook pauses while any BG3 UI panel or dialogue is
-# open, cursor returns to normal, yaw/pitch frozen.
 pause_in_ui        = true

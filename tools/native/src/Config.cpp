@@ -59,17 +59,9 @@ void Assign(AllConfig& cfg, const std::string& section,
             const std::string& key,     const std::string& value)
 {
     if (section == "dag.camera") {
-        if      (key == "enabled")             ParseBool(value, cfg.camera.enabled);
-        else if (key == "recommit_vt58")       ParseBool(value, cfg.camera.recommit_vt58);
-        else if (key == "eye_height_default")  ParseFloat(value, cfg.camera.eye_height_default);
-        else if (key == "eye_height_human")    ParseFloat(value, cfg.camera.eye_height_human);
-        else if (key == "eye_height_elf")      ParseFloat(value, cfg.camera.eye_height_elf);
-        else if (key == "eye_height_dragonborn") ParseFloat(value, cfg.camera.eye_height_dragonborn);
-        else if (key == "eye_height_halforc")  ParseFloat(value, cfg.camera.eye_height_halforc);
-        else if (key == "eye_height_githyanki") ParseFloat(value, cfg.camera.eye_height_githyanki);
-        else if (key == "eye_height_dwarf")    ParseFloat(value, cfg.camera.eye_height_dwarf);
-        else if (key == "eye_height_halfling") ParseFloat(value, cfg.camera.eye_height_halfling);
-        else if (key == "eye_height_gnome")    ParseFloat(value, cfg.camera.eye_height_gnome);
+        if      (key == "enabled")        ParseBool(value, cfg.camera.enabled);
+        else if (key == "recommit_vt58")  ParseBool(value, cfg.camera.recommit_vt58);
+        else if (key == "eye_height")     ParseFloat(value, cfg.camera.eye_height);
     } else if (section == "dag.mouselook") {
         if      (key == "enabled")             ParseBool(value, cfg.mouselook.enabled);
         else if (key == "sensitivity_yaw")     ParseFloat(value, cfg.mouselook.sensitivity_yaw);

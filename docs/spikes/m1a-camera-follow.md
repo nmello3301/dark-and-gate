@@ -152,35 +152,72 @@ post-hook is sufficient. We **always** write them to match the forward
 we chose, so the engine can't reconstruct a conflicting pitch from the
 forward or vice versa.
 
-## Character position source
+## Character position source — resolved via the engine's own output
 
 BG3 characters hold two transforms:
 
 - `ls::TransformComponent` — simulation position, written by the physics
-  tick (confirmed via string at `0x1454d6880`).
+  tick (string at `0x1454d6880`).
 - `ls::VisualComponent` → `.VisualTransform` / `.VisualTransform3D` —
-  render-interpolated position, exposed by name at `0x14531c7b8` and
-  `0x14531c7d0` (reflection surface, used by the engine's own
-  serializers).
+  render-interpolated position (strings at `0x14531c7b8`, `0x14531c7d0`).
 
-**We read `VisualComponent.VisualTransform`**, not `TransformComponent`.
-Rationale: the simulation tick runs at a fixed rate (BG3's physics is
-60 Hz typical); between ticks the renderer interpolates. Reading sim
-position means the camera snaps once per physics tick while frames
-in between still render — classic 1-tick stutter when sim rate <
-frame rate (e.g. 144 Hz display).
+### Ghidra pass on FUN_141b7d0e0 (dev-asked follow-up)
 
-The camera object already holds a character pointer at
-`cam+0x220` (`pfVar22[0x44]`), likely the "active character to follow"
-and already used by `UpdateCamera` for position-based zoom math.
+The camera's SLERP branch in `FUN_141e0f110` calls:
+```c
+plVar26 = *(longlong **)(pfVar22 + 0x44);          // char ptr at cam+0x110
+...
+lVar15  = FUN_141b7d0e0(plVar26[5], plVar26[4]);   // char+0x28, char+0x20
+uVar17  = FUN_140e5a590(plVar26[5], plVar26[4]);   // char+0x28, char+0x20
+```
 
-**TODO at implementation time (not blocking the spike close):** confirm
-the VisualTransform offset *on the character* and whether the camera's
-`cam+0x220` ptr targets the character or its VisualComponent. One
-decompilation of `GrannyNode_GrannyGetBoneWorldTransform`'s callee (or
-any existing site that reads a character's visual transform) nails it;
-pattern search for `char + <small offset>` reads tagged by the string
-xrefs above. Keep the lookup in `offsets.h` so it's one line to swap.
+Decomp confirms these are **generic ECS component accessors**, not
+dedicated position readers:
+- Both have the identical shape: hash-table lookup keyed on an entity
+  ID (`param_2`), walking a chunk map at `(param_1 + 0x210)` / `(+ 0x340)`.
+- Both return a `longlong*` to a component struct.
+- They differ only in `local_60`, the component byte-size: `0x88` for
+  `141b7d0e0` and `0x28` for `140e5a590`.
+- Call counts (715 and 61) match "widely-used component getter".
+
+So `plVar26[5]` = ECS world and `plVar26[4]` = entity handle, and the
+camera uses these to pull two different components. The 0x28-byte one
+is almost certainly a `TranslateComponent`-style small transform; the
+0x88-byte one is probably `TransformComponent` with rotation + scale.
+
+Verifying visual-vs-sim through that path means (a) finding each
+component's type ID and (b) decomp'ing the exact byte offsets. ~2-4
+hours of static work, with the risk that one of them turns out to be
+sim and we re-pick anyway.
+
+### Why we skip that work: read `cam[0x48]` directly
+
+After `_UpdateCamera` returns, `cam[0x48..0x50]` already holds
+`character.pos + camera_offset` using the engine's own transform
+pipeline. The engine is responsible for picking visual vs. sim, so we
+inherit whichever it uses — and by observation (vanilla BG3 doesn't
+jitter at high frame rates on fast movement) it's **visual**.
+
+**Confidence: high — by construction.** We're not reading an engine
+field in isolation; we're reading the engine's own answer to "where
+should the camera be this frame". If NCT or anyone else tweaks that
+answer, we see their tweaked value. If BG3 Patch 9 changes the camera
+smoothing, we still see the current frame's answer.
+
+Trade: we lose the ability to position the camera at a point the
+engine *didn't* choose (e.g. a bone offset that isn't the character
+root). That's the head-bone work in [m1a-bone-reads.md](m1a-bone-reads.md).
+For M1a's pin-at-eye goal, cam[0x48] + eye_height on Y is sufficient.
+
+### Horizontal / vertical offset interaction with NCT
+
+With `ExplorationHorizontalOffsetMult = 0.0` and
+`ExplorationVerticalOffsetMult = 0.0` in `BG3NativeCameraTweaks.toml`,
+`cam[0x48]` = character center exactly, so our y-only add places the
+camera at `(charX, charY + eyeHeight, charZ)`. If the user leaves
+NCT's vertical offset non-zero, the eye_height adds on top of NCT's
+offset — the dev just lowers eye_height to compensate. Document in
+`tools/native/README.md`.
 
 ## NCT coexistence
 

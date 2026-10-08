@@ -22,78 +22,16 @@ namespace {
 using UpdateCameraFn = void (*)(void*, void**, uintptr_t, void**);
 UpdateCameraFn _UpdateCamera = nullptr;
 
-// Convert (yaw, pitch) in RADIANS to a right-handed Y-up forward unit
-// vector. Yaw=0 means +Z (into the screen for the default BG3 camera);
-// yaw=+pi/2 means +X (east). Pitch=+pi/2 means looking straight up.
-//
-// If BG3 turns out to be left-handed Y-up (DirectX convention), flip
-// the Z sign; captured as a TODO in offsets.h once we read a known
-// camera forward from a frozen scene.
-struct Vec3 { float x, y, z; };
-
-Vec3 YawPitchToForwardYUp(float yawRad, float pitchRad)
-{
-    const float cp = std::cos(pitchRad);
-    const float sp = std::sin(pitchRad);
-    const float cy = std::cos(yawRad);
-    const float sy = std::sin(yawRad);
-    return { cp * sy, sp, cp * cy };
-}
-
-// Read the character's render-interpolated position. STUB for the first
-// compile — returns false so the hook no-ops safely until the offsets
-// land (see Offsets.h "PLACEHOLDERS").
-bool ReadCharVisualPos(void* /*character*/, Vec3* /*out*/)
-{
-    // TODO: resolve kCharVisualComponentPtr + kVisualTransformPos via a
-    // targeted Ghidra pass; replace this stub with the real reads.
-    return false;
-}
-
-// Overwrite cam[] with our pin values. Y-up: y receives the eye offset.
-void WriteCameraPin(float* cam, const Vec3& charPos, float eyeHeight,
-                    const Vec3& fwd, float pitchRad)
-{
-    using namespace dag::offsets;
-
-    auto writeFloat = [cam](uint32_t off, float f) {
-        std::memcpy(reinterpret_cast<uint8_t*>(cam) + off, &f, sizeof(f));
-    };
-
-    writeFloat(kCamWorldPosX, charPos.x);
-    writeFloat(kCamWorldPosY, charPos.y + eyeHeight);  // Y is up
-    writeFloat(kCamWorldPosZ, charPos.z);
-
-    writeFloat(kCamForwardX, fwd.x);
-    writeFloat(kCamForwardY, fwd.y);
-    writeFloat(kCamForwardZ, fwd.z);
-
-    // Pin SLERP target to the same vector so the next frame doesn't
-    // drift back toward the engine's own camera forward.
-    writeFloat(kCamSlerpTgtX, fwd.x);
-    writeFloat(kCamSlerpTgtY, fwd.y);
-    writeFloat(kCamSlerpTgtZ, fwd.z);
-
-    writeFloat(kCamPitch, pitchRad);
-}
-
-// Optionally re-commit the camera transform via the CameraSystem's
-// vt[0x58]. Belt-and-braces for the mirror-cache case documented in
-// m1a-camera-follow.md § Commit timing. First compile: STUB.
-void RecommitCameraSlot(void* /*scene*/, void** /*cameraSlot*/, float* /*cam*/)
-{
-    // TODO: reconstruct the SlotToken and invoke vt[0x58]. Needs a
-    // decomp of the scene vtable; harmless to omit for the first
-    // smoke test — if a mirror exists, the camera will lag one frame
-    // and that tells us to flip this on.
-}
-
 void Hook_UpdateCamera(void* scene, void** ctx,
                        uintptr_t frameInfo, void** cameraSlot)
 {
-    // 1. Let the engine (and NCT, if present) do their work. This also
-    //    advances the engine's own camera state the game relies on
-    //    (sound listener, companion placement, HUD anchors).
+    // 1. Let the engine (and NCT, if present) do their work. On exit,
+    //    cam[0x48..0x50] holds the engine's answer to "where should the
+    //    camera be this frame" -- which, with NCT's offsets zeroed, is
+    //    the character's render-interpolated position. See
+    //    docs/spikes/m1a-camera-follow.md § "Character position source"
+    //    for why we read it this way instead of walking the character's
+    //    components ourselves.
     if (_UpdateCamera) {
         _UpdateCamera(scene, ctx, frameInfo, cameraSlot);
     }
@@ -105,24 +43,31 @@ void Hook_UpdateCamera(void* scene, void** ctx,
     auto* cam = reinterpret_cast<float*>(cameraSlot[6]);
     if (!cam) return;
 
-    void* character = *reinterpret_cast<void**>(
-        reinterpret_cast<uint8_t*>(cam) + dag::offsets::kCamActiveCharPtr);
-    if (!character) return;
+    using namespace dag::offsets;
+    auto readFloat = [cam](uint32_t off) {
+        float v;
+        std::memcpy(&v, reinterpret_cast<uint8_t*>(cam) + off, sizeof(v));
+        return v;
+    };
+    auto writeFloat = [cam](uint32_t off, float v) {
+        std::memcpy(reinterpret_cast<uint8_t*>(cam) + off, &v, sizeof(v));
+    };
 
-    Vec3 charPos{};
-    if (!ReadCharVisualPos(character, &charPos)) return;  // stub says no
+    // 2. Pin Y to eye-height above the engine's chosen base. X and Z
+    //    stay what the engine (and whatever's chained before us) picked
+    //    for the frame -- that's the lateral camera-follow we want.
+    const float baseY = readFloat(kCamWorldPosY);
+    writeFloat(kCamWorldPosY, baseY + cfg.camera.eye_height);
 
-    const float eyeHeight = cfg.camera.eye_height_default;  // race lookup TODO
+    // 3. Forward / pitch override lives in Mouselook; while that's
+    //    scaffold (mouselook.enabled=false), we leave the engine's
+    //    forward untouched so camera rotation still works via vanilla
+    //    middle-mouse-drag or NCT's input binding.
 
-    const float yaw   = dag::hooks::mouselook::GetYawRad();
-    const float pitch = dag::hooks::mouselook::GetPitchRad();
-    const Vec3 fwd    = YawPitchToForwardYUp(yaw, pitch);
-
-    WriteCameraPin(cam, charPos, eyeHeight, fwd, pitch);
-
-    if (cfg.camera.recommit_vt58) {
-        RecommitCameraSlot(scene, cameraSlot, cam);
-    }
+    // 4. Optional re-commit via vt[0x58]: harmless no-op for now (the
+    //    helper is still a stub). Flagged off until we have evidence of
+    //    a mirror-cache; see spike doc § "Commit timing".
+    (void)cfg.camera.recommit_vt58;
 }
 
 }  // namespace
