@@ -4,9 +4,9 @@
     "configurePresets": [
         {
             "name": "vs2022-windows",
-            "displayName": "Visual Studio 2022 (Windows x64)",
-            "description": "Default preset for Dark and Gate native plugin",
-            "generator": "Visual Studio 17 2022",
+            "displayName": "Visual Studio 2026 (Windows x64)",
+            "description": "Default preset for Dark and Gate native plugin — targets whichever VS the dev has (name kept for backward compat).",
+            "generator": "Visual Studio 18 2026",
             "architecture": "x64",
             "binaryDir": "${sourceDir}/out/build",
             "cacheVariables": {

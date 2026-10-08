@@ -2,27 +2,21 @@
 //
 // Dark and Gate native plugin — entry point.
 //
-// M1a scaffold: on DLL load, write a version line to the Script Extender
-// output folder so the Lua side can confirm the native plugin is present
-// without us having to build a real Lua↔DLL bridge first.
-//
-// Path: %LOCALAPPDATA%\Larian Studios\Baldur's Gate 3\Script Extender\
-//       DarkAndGate\native-version.txt
-//
-// The Lua side (Shared/NativeBridge.lua) reads this file via
-// Ext.IO.LoadFile() on SessionLoaded, logs the version, and exposes
-// `!dag_native_version` from the SE console.
-//
-// Hooks (camera follow + mouselook, bone reads, SetAnimPlaySpeed,
-// CancelAnim, RaycastHitNormal) land in follow-up commits once the
-// bridge-less architecture is OK'd and we've picked a hooking toolkit
-// (DKUtil, matching NCT and BG3WASD).
+// Writes a one-line version file to the Script Extender output folder
+// so Shared/NativeBridge.lua can confirm the DLL loaded. Then installs
+// the camera-follow + mouselook hooks (both off by default; flip in
+// native-config.toml).
 
 #include <windows.h>
 
 #include <filesystem>
 #include <fstream>
 #include <string>
+
+#include "Config.h"
+#include "Hooks/Camera.h"
+#include "Hooks/Mouselook.h"
+#include "Log.h"
 
 namespace {
 
@@ -80,6 +74,21 @@ BOOL APIENTRY DllMain(HMODULE /*module*/, DWORD reason, LPVOID /*reserved*/)
 {
     if (reason == DLL_PROCESS_ATTACH) {
         WriteVersionFile();
+        dag::log::Init();
+        dag::log::Writef("Native: Dark and Gate %s %s loaded",
+                         kPluginVersion, kBuildKind);
+
+        // Loads native-config.toml and caches it.
+        (void)dag::config::Get();
+
+        // Install hooks. They're always installed; the enabled flags in
+        // native-config.toml decide whether they override the engine's
+        // behaviour. Install failure logs and leaves the game running
+        // vanilla — no crash path on load.
+        dag::hooks::camera::Install();
+        dag::hooks::mouselook::Install();
+    } else if (reason == DLL_PROCESS_DETACH) {
+        dag::log::Shutdown();
     }
     return TRUE;
 }

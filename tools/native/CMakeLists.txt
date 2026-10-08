@@ -35,6 +35,11 @@ endif()
 # the next pass once the bridge-less architecture is OK'd.
 add_library(DarkAndGate SHARED
     src/main.cpp
+    src/Config.cpp
+    src/Log.cpp
+    src/PatternScan.cpp
+    src/Hooks/Camera.cpp
+    src/Hooks/Mouselook.cpp
 )
 
 target_include_directories(DarkAndGate PRIVATE src)
