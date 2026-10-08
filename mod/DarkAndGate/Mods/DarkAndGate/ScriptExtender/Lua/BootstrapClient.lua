@@ -36,7 +36,12 @@ NativeBridge.Register("Client")
 
 -- Full first-person POV (!dag_full_pov). Lua tells the DLL where the
 -- head bone lives; the DLL drives the camera every frame.
+-- We load CombatState first (further down) in a module require, then
+-- back-fill FullPov's reference so setOn() can flip State.povOn without
+-- any Ext.Require dance at console-command time (round 2 regression).
 local FullPov = Ext.Require("FullPov.lua")
+local CombatStateEarly = Ext.Require("Client/Combat/State.lua")
+FullPov.LinkState(CombatStateEarly)
 FullPov.Register()
 
 -- Combined 4+5+6+7 probe. Each spike is a module behind an MCM toggle and

@@ -209,18 +209,27 @@ end
 -- ---------------------------------------------------------------------
 -- Commands
 -- ---------------------------------------------------------------------
+-- BootstrapClient wires this once at load. We avoid Ext.Require inside
+-- setOn because `pcall(Ext.Require, ...)` broke path resolution in the
+-- round-2 build (povOn stayed false in-game even though setOn ran).
+-- The injected reference is the exact same module table the Input / HUD /
+-- Debug modules see, so a write here is visible across combat Lua on
+-- the same frame.
+local linkedState = nil
+function M.LinkState(state) linkedState = state end
+
 local function setOn(on)
     S.on = on
     cache.at = -100000
     setHideHead(on)
     lastWrite = 0
     writeState()
-    -- Propagate directly to the combat state module so Input / HUD /
-    -- !dag_combat_status see the change on the same frame. (Previous
-    -- design polled a DLL status file; it never flipped true, so every
-    -- key 1-0 / RMB / LMB was swallowed by the input gate.)
-    local okS, CombatState = pcall(Ext.Require, "Client/Combat/State.lua")
-    if okS and CombatState then CombatState.povOn = on end
+    if linkedState then
+        linkedState.povOn = on
+        Log.Write("FullPov: State.povOn <- " .. tostring(on))
+    else
+        Log.Write("FullPov: WARNING — LinkState never called; povOn gate will stay false")
+    end
     if on then
         Log.Write("FullPov: ON. Mouse-look is on; press MMB to toggle it. !dag_full_pov again to exit.")
     else

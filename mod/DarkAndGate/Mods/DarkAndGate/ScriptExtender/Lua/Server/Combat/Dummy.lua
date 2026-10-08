@@ -100,6 +100,49 @@ local function sendReply(userId, payload)
     end)
 end
 
+-- Read a character's world position. Round-2 build hit "position lookup
+-- failed" on Osi.GetX/Y/Z — these may not be available in this SE build
+-- or need Osi-safe context we're not quite in. Fall back to Ext.Entity's
+-- Transform the same way FullPov.lua does on the client; works on both
+-- states. Returns {x,y,z} or nil + error string.
+local function readPos(uuid)
+    local errors = {}
+    -- 1. Try Osi.GetPosition (multi-return).
+    local okP, px, py, pz = pcall(function() return Osi.GetPosition(uuid) end)
+    if okP and tonumber(px) and tonumber(py) and tonumber(pz) then
+        return { x = tonumber(px), y = tonumber(py), z = tonumber(pz) }, nil
+    else
+        errors[#errors+1] = "Osi.GetPosition err=" .. tostring(px)
+    end
+    -- 2. Try individual Osi.GetX/Y/Z.
+    local okX, gx = pcall(function() return Osi.GetX(uuid) end)
+    local okY, gy = pcall(function() return Osi.GetY(uuid) end)
+    local okZ, gz = pcall(function() return Osi.GetZ(uuid) end)
+    if okX and okY and okZ and tonumber(gx) and tonumber(gy) and tonumber(gz) then
+        return { x = tonumber(gx), y = tonumber(gy), z = tonumber(gz) }, nil
+    end
+    errors[#errors+1] = string.format("Osi.GetX/Y/Z okX=%s okY=%s okZ=%s", tostring(okX), tostring(okY), tostring(okZ))
+    -- 3. Ext.Entity.Get(uuid).Transform.Transform.Translate (same shape FullPov uses).
+    local okE, ent = pcall(function() return Ext.Entity.Get(uuid) end)
+    if not okE or not ent then
+        errors[#errors+1] = "Ext.Entity.Get err=" .. tostring(ent)
+        return nil, table.concat(errors, " | ")
+    end
+    local okT, t = pcall(function() return ent.Transform.Transform.Translate end)
+    if not okT or not t then
+        errors[#errors+1] = "Transform.Transform.Translate err=" .. tostring(t)
+        return nil, table.concat(errors, " | ")
+    end
+    local x = t[1] or t.x
+    local y = t[2] or t.y
+    local z = t[3] or t.z
+    if not (x and y and z) then
+        errors[#errors+1] = "Transform fields nil"
+        return nil, table.concat(errors, " | ")
+    end
+    return { x = tonumber(x), y = tonumber(y), z = tonumber(z) }, nil
+end
+
 function M.Register()
     Ext.RegisterNetListener(Net.Channels.SpawnDummy, function(_, _, userId)
         ServerNet.EnqueueOsi(function()
@@ -108,16 +151,16 @@ function M.Register()
                 sendReply(userId, { ok = false, reason = "no character for user" })
                 return
             end
-            local okX, cx = pcall(function() return Osi.GetX(caster) end)
-            local okY, cy = pcall(function() return Osi.GetY(caster) end)
-            local okZ, cz = pcall(function() return Osi.GetZ(caster) end)
-            if not (okX and okY and okZ) then
-                sendReply(userId, { ok = false, reason = "position lookup failed" })
+            Log.Write("Dummy: user=" .. tostring(userId) .. " caster=" .. tostring(caster))
+            local pos, err = readPos(caster)
+            if not pos then
+                Log.Write("Dummy: position lookup failed: " .. tostring(err))
+                sendReply(userId, { ok = false, reason = "position lookup failed: " .. tostring(err) })
                 return
             end
-            local x = (tonumber(cx) or 0) + 3.0
-            local y =  tonumber(cy) or 0
-            local z =  tonumber(cz) or 0
+            local x = pos.x + 3.0
+            local y = pos.y
+            local z = pos.z
 
             local choice, topList, err = findDummyTemplate()
             if not choice then
