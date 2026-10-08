@@ -26,7 +26,7 @@ param(
   # -NoWait: fail immediately if BG3 is running (old behaviour, keep for CI).
   # Default: poll every 2s, up to 5 minutes, until BG3 exits. The pak is
   # file-locked while BG3 holds it open, so there's no point in doing anything
-  # else — waiting is strictly nicer than throwing and asking the dev to rerun.
+  # else -- waiting is strictly nicer than throwing and asking the dev to rerun.
   [switch]$NoWait
 )
 
@@ -52,7 +52,7 @@ if (& $bg3Running) {
   $deadline = (Get-Date).AddMinutes(5)
   while (& $bg3Running) {
     if ((Get-Date) -gt $deadline) {
-      throw "BG3 still running after 5 min. Giving up — close it and retry."
+      throw "BG3 still running after 5 min. Giving up -- close it and retry."
     }
     Start-Sleep -Seconds 2
   }
