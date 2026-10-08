@@ -25,26 +25,42 @@ function M.Cast(spellId)
     end
     local cd = State.cooldownUntil[spellId] or 0
     if nowMs() < cd then return end
-    State.cooldownUntil[spellId] = nowMs() + (def.cooldown_ms or 400)
 
-    local aim = Aim.CrosshairRay(60.0, def.kind == "target")
+    local kind = def.kind or "target"
+    local aim  = Aim.CrosshairRay(60.0, kind == "target")
+
     local payload = {
         withMana = true,
         spell    = spellId,
     }
-    if aim and aim.hit then
-        payload.hitPoint = { x = aim.hit.pos[1], y = aim.hit.pos[2], z = aim.hit.pos[3] }
-        if def.kind == "target" and aim.hit.target then
-            payload.targetUuid = aim.hit.target
-        elseif def.kind == "target" then
-            payload.targetUuid = "__nearest_enemy__"  -- server will pick
+
+    if kind == "self" then
+        payload.targetUuid = "__self__"
+    elseif kind == "target" then
+        if not aim or not aim.hit or not aim.hit.target then
+            Log.Write("Spells: NO TARGET IN SIGHT for " .. spellId .. " -- aborting cast")
+            return
         end
+        payload.targetUuid = aim.hit.target
+        payload.hitPoint   = { x = aim.hit.pos[1], y = aim.hit.pos[2], z = aim.hit.pos[3] }
+    elseif kind == "point" or kind == "teleport" then
+        if not aim or not aim.hit then
+            Log.Write("Spells: NO GROUND HIT for " .. spellId .. " -- aborting cast")
+            return
+        end
+        payload.hitPoint = { x = aim.hit.pos[1], y = aim.hit.pos[2], z = aim.hit.pos[3] }
     else
-        -- No ray hit: still try. Server falls back to self.
-        payload.targetUuid = "__nearest_enemy__"
+        Log.Write("Spells: unknown kind " .. tostring(kind) .. " for " .. spellId)
+        return
     end
+
+    -- Only after we're committed to firing: eat the cooldown.
+    State.cooldownUntil[spellId] = nowMs() + (def.cooldown_ms or 400)
     ClientNet.Send(Net.Channels.CastSpellRequest, payload)
-    Log.Write(string.format("Spells: request %s (%s)", spellId, def.label or def.kind))
+    Log.Write(string.format("Spells: request %s (%s) target=%s point=%s",
+        spellId, def.label or kind,
+        tostring(payload.targetUuid),
+        payload.hitPoint and string.format("(%.2f,%.2f,%.2f)", payload.hitPoint.x, payload.hitPoint.y, payload.hitPoint.z) or "nil"))
 end
 
 return M

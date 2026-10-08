@@ -18,28 +18,17 @@ local spells = Ext.Require("data/spells.lua")
 
 local M = {}
 
-local function targetFromAim(caster, claim)
-    -- Preference order: explicit target UUID, nearest hostile from eye ray.
-    if claim.targetUuid and claim.targetUuid ~= "" then
-        return claim.targetUuid
+-- Resolve claim.targetUuid against the caster. Returns the UUID to pass to
+-- Osi.UseSpell, or nil if the claim can't yield a valid target (which must
+-- abort the cast per the user's rules — no silent "or caster" fallback).
+local function resolveTarget(caster, claim)
+    local raw = claim.targetUuid
+    if raw == "__self__" then return caster end
+    if raw and raw ~= "" then
+        -- The client raycast already picked a character; trust it.
+        return raw
     end
-    -- Fall back to the shared "nearest hostile" helper via Osi (poor but works).
-    local best, bestDist = nil, 1e9
-    local ents = Ext.Entity.GetAllEntitiesWithComponent("ServerCharacter") or {}
-    for _, ent in ipairs(ents) do
-        local uuid = ent.Uuid and ent.Uuid.EntityUuid
-        if uuid and uuid ~= caster then
-            local okE, enemy = pcall(function() return Osi.CharacterIsEnemy(uuid, caster) end)
-            if okE and tonumber(enemy) == 1 then
-                local okD, d = pcall(function() return Osi.GetDistanceTo(caster, uuid) end)
-                local dist = tonumber(d) or 1e9
-                if okD and dist < bestDist and dist < 30 then
-                    best, bestDist = uuid, dist
-                end
-            end
-        end
-    end
-    return best
+    return nil
 end
 
 local function tryUseSpellAtPosition(caster, spellId, point)
@@ -75,15 +64,27 @@ function M.Register()
                 return
             end
 
-            if def and def.kind == "point" and parsed.hitPoint then
+            local kind = def and def.kind or "target"
+            if kind == "point" or kind == "teleport" then
+                if not parsed.hitPoint then
+                    Log.Write("SpellCast: NO GROUND HIT for " .. tostring(spellId) .. " -- aborting")
+                    return
+                end
                 tryUseSpellAtPosition(caster, spellId, parsed.hitPoint)
-            elseif def and def.kind == "teleport" and parsed.hitPoint then
-                tryUseSpellAtPosition(caster, spellId, parsed.hitPoint)
-            else
-                local target = targetFromAim(caster, parsed) or caster
+                Log.Write(string.format("SpellCast: UseSpellAtPosition caster=%s spell=%s cost=%d at (%.2f,%.2f,%.2f)",
+                    caster, tostring(spellId), cost,
+                    parsed.hitPoint.x or 0, parsed.hitPoint.y or 0, parsed.hitPoint.z or 0))
+            elseif kind == "target" or kind == "self" then
+                local target = resolveTarget(caster, parsed)
+                if not target then
+                    Log.Write("SpellCast: NO TARGET IN SIGHT for " .. tostring(spellId) .. " -- aborting (no 'or caster' fallback)")
+                    return
+                end
                 pcall(function() Osi.UseSpell(caster, spellId, target) end)
                 Log.Write(string.format("SpellCast: UseSpell caster=%s spell=%s target=%s cost=%d",
                     caster, tostring(spellId), tostring(target), cost))
+            else
+                Log.Write("SpellCast: unknown kind " .. tostring(kind) .. " for " .. tostring(spellId))
             end
         end)
     end)
