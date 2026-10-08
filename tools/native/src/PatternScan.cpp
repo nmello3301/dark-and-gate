@@ -125,4 +125,91 @@ uint8_t* WriteCall5(uint8_t* callSite, void* newTarget)
     return oldTarget;
 }
 
+namespace {
+
+// Find a RWX page within ±2GB of `nearAddr` and allocate `size` bytes
+// on it. Returns nullptr if nothing in range is free.
+//
+// Why ±2GB: our 5-byte CALL carries a 32-bit relative displacement.
+// Call-site + 5 ± INT32_MAX = ± ~2.14 GB. Caller must land in that
+// window so WriteCall5 can reach it.
+uint8_t* AllocNearRWX(void* nearAddr, size_t size)
+{
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    const uintptr_t gran = si.dwAllocationGranularity;
+    const uintptr_t anchor = reinterpret_cast<uintptr_t>(nearAddr);
+    const uintptr_t rangeHi = 0x7FFF0000ULL;  // leave ~64KB headroom under INT32_MAX
+    const uintptr_t minAddr = (anchor > rangeHi) ? anchor - rangeHi : 0;
+    const uintptr_t maxAddr = anchor + rangeHi;
+
+    auto tryAlloc = [&](uintptr_t probe) -> uint8_t* {
+        if (probe < minAddr || probe > maxAddr) return nullptr;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (!VirtualQuery(reinterpret_cast<void*>(probe), &mbi, sizeof(mbi))) {
+            return nullptr;
+        }
+        if (mbi.State != MEM_FREE) return nullptr;
+        // VirtualAlloc requires granularity-aligned base when a specific
+        // address is requested.
+        const uintptr_t base = (reinterpret_cast<uintptr_t>(mbi.BaseAddress) + gran - 1) & ~(gran - 1);
+        if (base < probe) {
+            // Already past probe, nothing to do.
+        }
+        void* alloc = VirtualAlloc(
+            reinterpret_cast<void*>(base),
+            size,
+            MEM_COMMIT | MEM_RESERVE,
+            PAGE_EXECUTE_READWRITE);
+        return reinterpret_cast<uint8_t*>(alloc);
+    };
+
+    // Sweep upward from the anchor first (common case: anchor is in
+    // bg3.exe, free pages above it in user-mode space).
+    const uintptr_t startUp = ((anchor + gran) / gran) * gran;
+    for (uintptr_t p = startUp; p <= maxAddr; p += gran) {
+        if (uint8_t* r = tryAlloc(p)) return r;
+    }
+    // Then downward.
+    uintptr_t p = (anchor / gran) * gran;
+    while (p >= minAddr && p >= gran) {
+        p -= gran;
+        if (uint8_t* r = tryAlloc(p)) return r;
+    }
+    return nullptr;
+}
+
+}  // namespace
+
+uint8_t* InstallFarCall5(uint8_t* callSite, void* newTarget)
+{
+    if (!callSite || callSite[0] != 0xE8) return nullptr;
+
+    // Fast path: if the target is already in range, use the simple hook.
+    const ptrdiff_t direct =
+        reinterpret_cast<uint8_t*>(newTarget) - (callSite + 5);
+    if (direct <= INT32_MAX && direct >= INT32_MIN) {
+        return WriteCall5(callSite, newTarget);
+    }
+
+    // Allocate 16-byte stub (12 bytes of code + room for alignment)
+    // within ±2GB of the call-site.
+    constexpr size_t kStubSize = 16;
+    uint8_t* stub = AllocNearRWX(callSite, kStubSize);
+    if (!stub) return nullptr;
+
+    // Fill stub with: 48 B8 <abs64> FF E0
+    //   MOV RAX, imm64
+    //   JMP RAX
+    stub[0] = 0x48;
+    stub[1] = 0xB8;
+    std::memcpy(stub + 2, &newTarget, sizeof(void*));
+    stub[10] = 0xFF;
+    stub[11] = 0xE0;
+    std::memset(stub + 12, 0xCC, kStubSize - 12);  // INT3 padding
+    FlushInstructionCache(GetCurrentProcess(), stub, kStubSize);
+
+    return WriteCall5(callSite, stub);
+}
+
 }  // namespace dag::patternscan

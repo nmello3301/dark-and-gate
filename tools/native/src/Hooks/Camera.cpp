@@ -148,10 +148,14 @@ bool Install()
         "Camera: anchor at %p, CALL at %p -> current target %p",
         anchor, callSite, current);
 
-    uint8_t* previous = dag::patternscan::WriteCall5(
+    // Our DLL may be loaded >2GB from bg3.exe, so a plain 5-byte CALL
+    // can't reach Hook_UpdateCamera directly. InstallFarCall5 allocates
+    // a 12-byte near-stub (MOV RAX, abs64; JMP RAX) within ±2GB of the
+    // call-site, then rewrites the CALL to the stub.
+    uint8_t* previous = dag::patternscan::InstallFarCall5(
         callSite, reinterpret_cast<void*>(&Hook_UpdateCamera));
     if (!previous) {
-        dag::log::Writef("Camera: WriteCall5 failed");
+        dag::log::Writef("Camera: InstallFarCall5 failed (no free pages within +/- 2GB of callsite?)");
         return false;
     }
     _UpdateCamera = reinterpret_cast<UpdateCameraFn>(previous);

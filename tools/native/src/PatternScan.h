@@ -33,6 +33,19 @@ uint8_t* DecodeRelCallTarget(uint8_t* callSite);
 // `callSite[0]` must be `0xE8` or the function returns nullptr.
 // Handles VirtualProtect page toggles. Not thread-safe; call during DLL
 // load before the game's own threads touch this code.
+//
+// Fails and returns nullptr if `newTarget` is further than ±2GB from
+// `callSite + 5`. For that case use `InstallFarCall5` instead.
 uint8_t* WriteCall5(uint8_t* callSite, void* newTarget);
+
+// Hook a 5-byte CALL that targets a function possibly out of 32-bit
+// relative range (common on x64 when the DLL loads far from the EXE).
+// Allocates a 12-byte near-stub within ±2GB of callSite that does
+// `MOV RAX, <newTarget>; JMP RAX`, then rewires the CALL to the stub.
+//
+// Returns the OLD CALL target on success (same semantics as WriteCall5
+// — chain through it). Returns nullptr if the stub couldn't be
+// allocated near enough or if callSite[0] != 0xE8.
+uint8_t* InstallFarCall5(uint8_t* callSite, void* newTarget);
 
 }  // namespace dag::patternscan
