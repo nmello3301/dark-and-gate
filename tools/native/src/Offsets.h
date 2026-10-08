@@ -85,4 +85,19 @@ constexpr uint32_t kCharVisualComponentPtr = 0x0;  // TODO
 // world position (`.VisualTransform.pos`).
 constexpr uint32_t kVisualTransformPos = 0x0;      // TODO
 
+// -----------------------------------------------------------------------
+// GameCameraBehavior layout (bg3se Components/Camera.h:221; confirmed
+// against the LERP sequence at 0x141e0fbe0+, see m1a-camera-follow.md).
+// The 4th arg to UpdateCamera (R9) is likely this struct. We use it as
+// the calibration source for the controlled character's live world pos.
+// -----------------------------------------------------------------------
+constexpr uint32_t kBehaviorTargetDestination     = 0x24;  // glm::vec3
+constexpr uint32_t kBehaviorTargetDestinationHigh = 0x30;  // glm::vec3 — LERP target
+constexpr uint32_t kBehaviorTargetCurrentLow      = 0x3C;  // glm::vec3
+constexpr uint32_t kBehaviorTargetCurrent         = 0x48;  // glm::vec3
+
+// Candidate offsets we probe inside *any* struct we're given, when the
+// 4th arg is NOT the behavior directly (e.g. cameraSlot[6] indirection).
+// Only used by the calibration pass against Lua ground truth.
+
 }  // namespace dag::offsets

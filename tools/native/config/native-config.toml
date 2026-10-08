@@ -3,17 +3,59 @@
 #   %LOCALAPPDATA%\Larian Studios\Baldur's Gate 3\Script Extender\
 #   DarkAndGate\native-config.toml
 #
-# Lua owns the race -> eye_height lookup (data/camera.lua) and
-# rewrites eye_height here on SessionLoaded. The DLL only reads it.
+# The DLL polls this file every ~1s and reloads if the mtime changes
+# (same pattern as Native Camera Tweaks). Lua also writes a few keys
+# via !dag_set_eye and the dag_* console commands.
+#
+# Every feature has its own switch, OFF by default. Flip one at a time.
+# A crash or bad behaviour must be attributable to one switch.
 
+# ---------------------------------------------------------------------
+# Camera position pin: writes gameplay cam XYZ to (char.x, char.y+h, char.z)
+# every frame. Non-gameplay cams (dialog, cutscene, menu) are untouched.
+# ---------------------------------------------------------------------
 [dag.camera]
 enabled           = false
 recommit_vt58     = true
-eye_height        = 1.65   # metres, Y-up; Lua overrides per character
+eye_height        = 1.65    # metres; Lua overwrites per race on load
+debug_lift_m      = 0.0     # if >0, used in place of eye_height for A/B tests
+head_bone         = false   # pin to head bone instead of char.y+h (STUB)
 
+# ---------------------------------------------------------------------
+# Mouselook: SDL relative-mouse delta -> yaw/pitch -> cam forward vector.
+# Toggles cursor-lock on/off automatically. Pauses while gameplay is
+# inactive (dialog, cutscene, UI) -- that signal comes from Lua.
+# ---------------------------------------------------------------------
 [dag.mouselook]
 enabled            = false
 sensitivity_yaw    = 0.12
 sensitivity_pitch  = 0.12
 invert_pitch       = false
 pause_in_ui        = true
+character_facing   = false  # DLL writes yaw to file; Lua rotates char
+
+# ---------------------------------------------------------------------
+# Animation speed + hit-stop. STUB in M1a: SE exposes no anim-speed API
+# and Granny internals aren't RE'd. The DLL will log a line each 5s
+# describing what it WOULD do.
+# ---------------------------------------------------------------------
+[dag.anim]
+enabled      = false
+hit_stop     = false
+hit_stop_ms  = 100
+
+# ---------------------------------------------------------------------
+# Bone-position reads. STUB: no clean hook. Head-bone-accurate FP cam
+# depends on this; the switch exists so the user can see it ship real
+# in a future pass.
+# ---------------------------------------------------------------------
+[dag.bone]
+enabled = false
+
+# ---------------------------------------------------------------------
+# Raycast with hit normal. NATIVE NOT NEEDED -- Ext.Level.RaycastClosest
+# returns PhysicsHit with Normal. Switch here is informational; use
+# the !dag_raynormal console command (Lua-only).
+# ---------------------------------------------------------------------
+[dag.raycast]
+enabled = false
