@@ -33,3 +33,9 @@ decompiled/
 .vscode/
 Thumbs.db
 desktop.ini
+
+# patches/*/ transient outputs (apply status + rendered commit message).
+# The source files (Lua, apply.ps1, manifest.txt) are checked in; these
+# two are per-run artefacts that would just churn the repo.
+patches/**/apply.result
+patches/**/commit-msg.txt
