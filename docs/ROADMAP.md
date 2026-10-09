@@ -113,18 +113,47 @@ See **Archived (future)** below for bone reads, anim speed/cancel and ragdoll pu
 Depends on M1a camera + mouselook being usable. Everything else in M1a can
 land in parallel with M1b work.
 
+### Status (2026-10-08): player-side combat works in first person ✅
+
+Verified in-game on DEV-SAVE (fixes 1–5, `patches/m1b-fix*`):
+
+- **LMB** swings a melee chain: 3 swings, real BG3 one-handed attack clip, hits land through a camera-relative swing arc (geometric cone + line of sight) and the server applies the damage.
+- **1–0** arm a spell, **LMB** casts it at the crosshair, **RMB** or the same key cancels. Fire Bolt hits the character under the crosshair (6° aim assist) or the ground/object you aim at; Fireball and Misty Step land where you look.
+- **Mana** is server-owned: pool from class level + casting stat, regeneration, per-spell cost, refund if a cast fails.
+- **HUD**: crosshair + one status line (mana, armed spell, what you are aiming at).
+- **MMB** toggles mouse-look; with the cursor visible, LMB/RMB go to the vanilla UI.
+- `!dag_spawn_dummy [hostile] [name]` spawns an adult goblin to test on.
+
+Lessons recorded for the next pass: `Ext.Require` only works at load time; `hit.Distance` is a 0–1 fraction of the ray; BG3's view forward is `+InvViewMatrix` column 3; ray hits can't name an entity from Lua; Fire Bolt is `Projectile_FireBolt`; `Osi.UseSpellAtPosition` takes 6 args; scripted `PlayAnimation` stalls the player during turn-based combat.
+
+### Known issues (M1b)
+
+- **Turn-based takes over** as soon as an enemy turns hostile — the real-time loop (Brawl import) is the fix. Until then swing animations are skipped in turn-based combat; `!dag_unstick` clears a stuck action queue.
+- **Attack animations move Gale ahead of the camera**: the camera follows the engine pivot, not the body. Needs the head-bone anchor (see Archived) — now a real polish item, not just nice-to-have.
+- Camera can dip under the map while casting in turn-based (moot once combat is real-time).
+- Rare frames of Gale's head showing while walking.
+- All 3 swings use the same clip (`HUM_M_Rig_DFLT_CMBT_Melee_RHand_01_Attack`); per-swing clips and timing come with the animation pass.
+- Head-zone hits need target height (bone reads); hits are torso/limbs for now.
+
+### Checklist
+
 - [ ] Brawl import wired in: `Server/Brawl/` strips committed, `BrawlAdapter.lua` bridges Brawl's AI into our net channels and mana check.
 - [ ] Real-time combat loop (Brawl's RealTime pulse) running on DEV-SAVE goblins.
-- [ ] Longsword: 3-swing chain with timing data (`data/weapons/longsword.lua`).
+- [x] Generic melee chain: 3 swings with timing data, one shared attack clip. *(2026-10-08 — uses `data/weapons/longsword.lua` values for whatever is equipped)*
+- [ ] Longsword: tested with a longsword actually equipped; chain picked from the equipped weapon's family.
+- [x] Interim hit check: camera-relative swing arc (cone + line of sight), torso / limb zones, server-validated damage. *(2026-10-08)*
 - [ ] Blade-path hit check, with head / torso / limb zones. Uses `GetBoneWorldPos`.
 - [ ] **AI melee goes through our swing + blade-path system, not BG3 attack rolls.** `Pick.decideActionOnTarget` adapted so melee choices resolve through the swing scheduler, not `Osi.UseSpell`.
-- [ ] Blocking and parry with a shield.
-- [ ] Fire Bolt aimed at the crosshair (uses the aim ray from spike 2).
-- [ ] Fireball with a ground preview.
-- [ ] Misty Step to the crosshair (needs a position-based cast; probe `Osi.UseSpellAtPosition` or spawn a transient target).
-- [ ] Mana pool, regeneration and costs (server-owned).
-- [ ] Hotbar on keys 1–0 (ImGui window to set it up — native tab is M4).
-- [ ] Hit reactions and blood/spark effects (uses `RaycastHitNormal` for surface alignment).
+- [ ] Blocking and parry: **custom animations**; block only with a shield equipped, parry only with a weapon that can parry (decided 2026-10-08).
+- [x] Fire Bolt aimed at the crosshair (character aim assist, or ground / object point). *(2026-10-08)*
+- [x] Fireball cast at the crosshair. *(2026-10-08)*
+- [ ] Fireball ground preview.
+- [x] Misty Step to the crosshair (`Osi.UseSpellAtPosition`, 6 args). *(2026-10-08)*
+- [x] Mana pool, regeneration and costs (server-owned). *(2026-10-08)*
+- [x] Hotbar on keys 1–0, arm-then-cast (LMB cast, RMB / same key cancel). *(2026-10-08)*
+- [ ] Hotbar setup window (ImGui; `!dag_hotbar <slot> <spell>` works meanwhile — native tab is M4).
+- [x] Hit reactions (BG3's own, triggered by our server-side damage). *(2026-10-08)*
+- [ ] Blood / spark effects at the hit point.
 - [ ] Goblin enemies on the shared Brawl-adapted AI.
 - [ ] The Emerald Grove gate fight playable start to finish in DEV-SAVE.
 - [ ] **Gate 1 — combat feels tight.** Playtest notes written; go / no-go recorded in `DECISIONS.md`.
