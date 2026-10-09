@@ -95,7 +95,15 @@ local function activeCameraController()
 end
 M.ActiveCameraController = activeCameraController
 
-local function readInvView()
+-- fix4: which way the view matrix's 3rd column points. Spike 2 assumed
+-- the GL convention (forward = -col3); in-game the crosshair aimed
+-- straight BEHIND the player (swing fwd matched the DLL's pivot->eye
+-- vector, i.e. backwards), so BG3's forward is +col3. The sign is still
+-- re-checked every second against the DLL's own eye -> look-at vector
+-- (native-pov-status.txt) and flips itself if it ever disagrees.
+local fwdSign = 1
+
+local function rawMatrix()
     local ctl = activeCameraController()
     if not ctl then return nil end
     local okI, inner = pcall(function() return ctl.Camera end)
@@ -107,11 +115,65 @@ local function readInvView()
         return (ok and tonumber(v)) or 0
     end
     local eye = { el(13), el(14), el(15) }
-    local fwd = { -el(9), -el(10), -el(11) }
-    local L = math.sqrt(fwd[1] ^ 2 + fwd[2] ^ 2 + fwd[3] ^ 2)
+    local c3 = { el(9), el(10), el(11) }
+    local L = math.sqrt(c3[1] ^ 2 + c3[2] ^ 2 + c3[3] ^ 2)
+    if L < 1e-4 then camCache.ctl = nil; return nil end
+    return eye, { c3[1] / L, c3[2] / L, c3[3] / L }
+end
+
+-- DLL status: eye and look-at point actually committed to the camera.
+local STATUS_PATH = "DarkAndGate/native-pov-status.txt"
+local dll = { at = -1e9, eye = nil, fwd = nil, t = nil }
+local function readDll()
+    local t = now()
+    if t - dll.at < 250 then return dll.eye, dll.fwd end
+    dll.at = t
+    dll.eye, dll.fwd = nil, nil
+    local ok, s = pcall(Ext.IO.LoadFile, STATUS_PATH)
+    if not ok or not s then return nil end
+    if not s:find("applied=1", 1, true) then return nil end
+    local ex, ey, ez = s:match("eye=([%-%d%.]+),([%-%d%.]+),([%-%d%.]+)")
+    local px, py, pz = s:match(" P=([%-%d%.]+),([%-%d%.]+),([%-%d%.]+)")
+    if not (ex and px) then return nil end
+    local e = { tonumber(ex), tonumber(ey), tonumber(ez) }
+    local d = { tonumber(px) - e[1], tonumber(py) - e[2], tonumber(pz) - e[3] }
+    local L = math.sqrt(d[1] ^ 2 + d[2] ^ 2 + d[3] ^ 2)
     if L < 1e-4 then return nil end
-    fwd[1], fwd[2], fwd[3] = fwd[1] / L, fwd[2] / L, fwd[3] / L
-    return eye, fwd
+    dll.eye, dll.fwd = e, { d[1] / L, d[2] / L, d[3] / L }
+    return dll.eye, dll.fwd
+end
+
+local flipVotes = 0
+local lastCal = -1e9
+local function calibrate()
+    local t = now()
+    if t - lastCal < 1000 then return end
+    lastCal = t
+    local _, c3 = rawMatrix()
+    local _, dfwd = readDll()
+    if not c3 or not dfwd then return end
+    local s = c3[1] * dfwd[1] + c3[2] * dfwd[2] + c3[3] * dfwd[3]
+    local want = (s > 0.8 and 1) or (s < -0.8 and -1) or nil
+    if want and want ~= fwdSign then
+        flipVotes = flipVotes + 1
+        if flipVotes >= 2 then
+            fwdSign = want
+            flipVotes = 0
+            Log.Write(string.format("Aim: forward sign recalibrated to %+d (dot=%.2f vs DLL view)", want, s))
+        end
+    else
+        flipVotes = 0
+    end
+end
+
+local function readInvView()
+    local eye, c3 = rawMatrix()
+    if eye then
+        return eye, { c3[1] * fwdSign, c3[2] * fwdSign, c3[3] * fwdSign }
+    end
+    -- Camera entity briefly unreadable (e.g. right after a teleport):
+    -- fall back to the DLL's last committed view.
+    return readDll()
 end
 M.ReadInvView = readInvView
 
@@ -261,7 +323,10 @@ function M.Characters()
     return nearList
 end
 
-function M.Tick() pcall(stepScan) end
+function M.Tick()
+    pcall(stepScan)
+    pcall(calibrate)
+end
 
 -- ---------------------------------------------------------------------
 -- Cone targeting
@@ -340,16 +405,18 @@ function M.Register()
     Ext.Events.Tick:Subscribe(M.Tick)
     Ext.RegisterConsoleCommand("dag_aim_test", function()
         local eye, fwd = readInvView()
+        local deye, dfwd = readDll()
         local pos, d, via = M.GroundPoint(30)
         local t = M.TargetAtCrosshair(40)
-        Log.Write(string.format("Aim test: eye=%s fwd=%s ground=%s d=%s via=%s rawDistance=%s target=%s near=%d",
-            eye and string.format("(%.2f,%.2f,%.2f)", eye[1], eye[2], eye[3]) or "nil",
-            fwd and string.format("(%.2f,%.2f,%.2f)", fwd[1], fwd[2], fwd[3]) or "nil",
-            pos and string.format("(%.2f,%.2f,%.2f)", pos[1], pos[2], pos[3]) or "nil",
+        local function v(x) return x and string.format("(%.2f,%.2f,%.2f)", x[1], x[2], x[3]) or "nil" end
+        Log.Write(string.format("Aim test: sign=%+d eye=%s fwd=%s | DLL eye=%s fwd=%s", fwdSign,
+            v(eye), v(fwd), v(deye), v(dfwd)))
+        Log.Write(string.format("Aim test: ground=%s d=%s via=%s rawDistance=%s target=%s near=%d",
+            v(pos),
             d and string.format("%.2f", d) or "nil", tostring(via), tostring(lastRawDistance),
             t and string.format("%s @%.1fm", t.target, t.distance) or "none", #M.Characters()))
     end)
-    Log.Write("Aim: registered fix3 (incremental character scan, !dag_aim_test)")
+    Log.Write("Aim: registered fix4 (forward = +col3, self-calibrating; !dag_aim_test)")
 end
 
 return M

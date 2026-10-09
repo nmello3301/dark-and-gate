@@ -26,13 +26,27 @@ local function dist3(a, b)
     return math.sqrt(dx * dx + dy * dy + dz * dz)
 end
 
+-- fix4: Osi.GetX/Y/Z are not callable in this build ("missing positions"
+-- on every claim). Same chain Dummy.lua uses: Osi.GetPosition, then the
+-- entity Transform.
 local function targetPos(uuid)
-    local okX, x = pcall(function() return Osi.GetX(uuid) end)
-    local okY, y = pcall(function() return Osi.GetY(uuid) end)
-    local okZ, z = pcall(function() return Osi.GetZ(uuid) end)
-    if okX and okY and okZ then
-        return { tonumber(x) or 0, tonumber(y) or 0, tonumber(z) or 0 }
+    local okP, x, y, z = pcall(function() return Osi.GetPosition(uuid) end)
+    if okP and tonumber(x) and tonumber(y) and tonumber(z) then
+        return { tonumber(x), tonumber(y), tonumber(z) }
     end
+    local okE, t = pcall(function() return Ext.Entity.Get(uuid).Transform.Transform.Translate end)
+    if okE and t then
+        local tx, ty, tz = t[1] or t.x, t[2] or t.y, t[3] or t.z
+        if tx and ty and tz then return { tonumber(tx), tonumber(ty), tonumber(tz) } end
+    end
+    return nil
+end
+
+local function vec(v)
+    if type(v) ~= "table" then return nil end
+    local x, y, z = v[1] or v.x, v[2] or v.y, v[3] or v.z
+    if x and y and z then return { tonumber(x), tonumber(y), tonumber(z) } end
+    return nil
 end
 
 function M.Register()
@@ -46,11 +60,13 @@ function M.Register()
             if not target or target == "" then return end
 
             local tp = targetPos(target)
-            if not tp or not claim.eye then
-                Log.Write("HitValidator: missing positions")
+            local eye = vec(claim.eye)
+            if not tp or not eye then
+                Log.Write(string.format("HitValidator: missing positions target=%s eye=%s",
+                    tostring(tp ~= nil), tostring(eye ~= nil)))
                 return
             end
-            local d = dist3(claim.eye, tp)
+            local d = dist3(eye, tp)
             local maxReach = (claim.reach or 2.0) + 1.0
             if d > maxReach then
                 Log.Write(string.format("HitValidator: REJECT dist=%.2f reach=%.2f target=%s",
@@ -72,6 +88,11 @@ function M.Register()
             local okD, err = pcall(function()
                 Osi.ApplyDamage(target, dmg, "Slashing", attacker)
             end)
+            if not okD then
+                -- Arity differs between patches; try without the source.
+                local ok3, err3 = pcall(function() Osi.ApplyDamage(target, dmg, "Slashing") end)
+                if ok3 then okD = true else err = tostring(err) .. " | 3 args: " .. tostring(err3) end
+            end
             if not okD then
                 Log.Write("HitValidator: ApplyDamage err: " .. tostring(err))
             end

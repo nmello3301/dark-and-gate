@@ -23,8 +23,8 @@ local ClientNet = Ext.Require("Client/Net.lua")
 
 local M = {}
 
-local CACHE_PATH = "DarkAndGate/anim-cache.txt"
-local STEP = 80                   -- inner iterations per tick
+local CACHE_PATH = "DarkAndGate/anim-cache-v2.txt"   -- fix4: v2 scoring
+local STEP = 50                   -- inner iterations per tick (fix4: was 80)
 
 local cands = {}                  -- { key, res, file, score }
 local picks = {}                  -- swing index -> { id = string }
@@ -34,26 +34,32 @@ local stats = { sets = 0, maps = 0, t0 = 0 }
 
 local function now() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
 
-local EXCLUDE = { "ranged", "bow", "xbow", "crossbow", "throw", "react", "_hit", "hitreact", "dodge",
-                  "block", "parry", "prepare", "loop", "idle", "cast", "spell", "emote", "death",
-                  "knock", "downed", "dual", "offhand", "unarmed", "shield", "_2h", "2hand",
-                  "twohand", "polearm", "staff", "cine", "_add", "additive", "face", "_ik", "pose" }
+-- fix4: scoring v2, from the clip names the v1 scan found
+-- (HUM_M_Rig_<weapon>_CMBT_Melee_RHand_NN_Attack...). Only real melee
+-- combat clips qualify; the player's own rig (hum_m_rig) and one-handed
+-- slashing (1HS) win; skills, dashes and other phases are pushed down.
+local EXCLUDE = { "_hit", "react", "dodge", "block", "parry", "loop", "idle", "death", "knock",
+                  "downed", "prepare", "_end", "_start", "offhand", "lhand", "unarmed", "shield",
+                  "_add", "additive", "face", "_ik", "pose", "cine" }
 
 local function score(file)
     local f = file:lower()
-    local atk = f:find("_att_", 1, true) or f:find("_att%d") or f:find("attack", 1, true)
-    if not atk then return nil end
+    if not f:find("_cmbt_melee_", 1, true) then return nil end
     for _, x in ipairs(EXCLUDE) do
         if f:find(x, 1, true) then return nil end
     end
-    local s = 5
-    if f:find("hum_m", 1, true) then s = s + 4 end
-    if f:find("1h", 1, true) then s = s + 3 end
-    if f:find("melee", 1, true) then s = s + 2 end
-    if f:find("slash", 1, true) or f:find("swing", 1, true) then s = s + 2 end
-    if f:find("sword", 1, true) then s = s + 1 end
-    if f:find("dflt", 1, true) then s = s + 1 end
+    local s = 0
+    if f:find("hum_m_rig_", 1, true) then s = s + 10 end
+    if f:find("_1hs_", 1, true) then s = s + 5
+    elseif f:find("_1hp_", 1, true) or f:find("_1hb_", 1, true) then s = s + 3 end
+    if f:find("rhand", 1, true) then s = s + 2 end
+    if f:find("attack", 1, true) then s = s + 3 end
+    if f:find("dash", 1, true) or f:find("skill", 1, true) or f:find("jump", 1, true) then s = s - 6 end
     return s
+end
+
+local function short(f)
+    return (f:gsub("^.*/", ""))
 end
 
 local function sortCands()
@@ -74,7 +80,7 @@ local function autoPick()
         end
     end
     for i, p in ipairs(picks) do
-        Log.Write(string.format("Anims: swing %d -> %s (%s)", i, p.id, p.file))
+        Log.Write(string.format("Anims: swing %d -> %s (%s)", i, p.id, short(p.file)))
     end
     if #picks == 0 then Log.Write("Anims: no melee attack clip found -- swings will play no animation") end
 end
@@ -93,7 +99,8 @@ local function loadCache()
     cands = {}
     for line in s:gmatch("[^\r\n]+") do
         local key, res, sc, file = line:match("^([^|]*)|([^|]*)|(%-?%d+)|(.*)$")
-        if key then cands[#cands + 1] = { key = key, res = res, score = tonumber(sc), file = file } end
+        local sc2 = key and score(file) or nil
+        if sc2 then cands[#cands + 1] = { key = key, res = res, score = sc2, file = file } end
     end
     sortCands()
     return #cands > 0
@@ -188,7 +195,9 @@ local function tick()
 end
 
 -- Animation id for swing `i` (1..3), or nil while unknown.
+local enabled = true
 function M.ForSwing(i)
+    if not enabled then return nil end
     local p = picks[i] or picks[1]
     return p and p.id or nil
 end
@@ -205,6 +214,10 @@ function M.Register()
     Ext.Events.SessionLoaded:Subscribe(function() pcall(M.StartScan, false) end)
 
     Ext.RegisterConsoleCommand("dag_anim_scan", function() M.StartScan(true) end)
+    Ext.RegisterConsoleCommand("dag_anim", function(_, a)
+        enabled = not (a == "off" or a == "0")
+        Log.Write("Anims: swing animations " .. (enabled and "ON" or "OFF"))
+    end)
     Ext.RegisterConsoleCommand("dag_anim_list", function(_, filter)
         local f = filter and filter:lower() or nil
         local shown = 0
@@ -212,7 +225,7 @@ function M.Register()
             f and (" filter=" .. f) or ""))
         for i, c in ipairs(cands) do
             if not f or c.file:lower():find(f, 1, true) then
-                Log.Write(string.format("  [%d] score=%d key=%s file=%s", i, c.score, c.key, c.file))
+                Log.Write(string.format("  [%d] score=%d key=%s %s", i, c.score, c.key, short(c.file)))
                 shown = shown + 1
                 if shown >= 25 then break end
             end
