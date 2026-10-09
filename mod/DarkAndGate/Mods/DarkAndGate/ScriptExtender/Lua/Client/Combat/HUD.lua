@@ -122,7 +122,19 @@ local function updateAim(armedId, def)
     end
 end
 
+local lastRenderAt = -1e9
+local lastCrossVW, lastCrossVH = -1, -1
+
 local function render()
+    -- Throttle to ~10 Hz. SE's console prints "Dispatching event Tick …
+    -- took N ms" for every handler >3 ms; running the full retained-mode
+    -- layout + Characters scan + ConeTarget every frame was spamming
+    -- 5-11 ms lines so the SE console was unusable. 100 ms is well under
+    -- any visible lag threshold for a HUD readout.
+    local now = tonumber(Ext.Timer.MonotonicTime()) or 0
+    if now - lastRenderAt < 100 then return end
+    lastRenderAt = now
+
     local want = State.povOn and State.IsCombatActive()
     if not want then
         if wasVisible then show(false); wasVisible = false end
@@ -133,8 +145,14 @@ local function render()
     if not wasVisible then show(true); wasVisible = true end
 
     local vw, vh = viewport()
-    pcall(function() t.cross:SetPos({ vw / 2 - 6 + crossNudge[1], vh / 2 - 9 + crossNudge[2] }) end)
-    pcall(function() t.panel:SetPos({ vw / 2 - 130, vh - 230 }) end)
+    -- SetPos re-triggers an ImGui layout even if the value hasn't changed;
+    -- skip the call when the viewport is stable (every tick after the
+    -- first in a given resolution).
+    if vw ~= lastCrossVW or vh ~= lastCrossVH then
+        lastCrossVW, lastCrossVH = vw, vh
+        pcall(function() t.cross:SetPos({ vw / 2 - 6 + crossNudge[1], vh / 2 - 9 + crossNudge[2] }) end)
+        pcall(function() t.panel:SetPos({ vw / 2 - 130, vh - 230 }) end)
+    end
 
     local armedId = State.armedSpell
     local def = armedId and spells.spells[armedId] or nil
