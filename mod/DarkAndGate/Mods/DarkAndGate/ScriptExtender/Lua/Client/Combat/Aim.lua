@@ -207,4 +207,126 @@ function M.ClassifyZone(targetUuid, hitY)
     return "torso"
 end
 
+-- ---------------------------------------------------------------------
+-- Geometric target acquisition (fix2).
+--
+-- Raycasts against characters proved unreliable from inside the player's
+-- own head (the first-person eye sits inside our own collision), so both
+-- melee and targeted spells fall back to a plain geometry test: every
+-- living client character except us, aimed at its chest (feet + 1.0 m),
+-- scored by angle off the crosshair. Spells also check line of sight
+-- with a world-only ray (terrain / scenery / doors), so you can't cast
+-- through walls.
+-- ---------------------------------------------------------------------
+local charCache = { at = -1e9, list = {} }
+
+local function vecOf(t)
+    if not t then return nil end
+    local x, y, z = t[1] or t.x, t[2] or t.y, t[3] or t.z
+    if x and y and z then return { tonumber(x), tonumber(y), tonumber(z) } end
+    return nil
+end
+
+local function isDead(ent)
+    local ok, hp = pcall(function() return ent.Health.Hp end)
+    return ok and tonumber(hp) ~= nil and tonumber(hp) <= 0
+end
+
+-- List of { uuid, feet = {x,y,z} } for living characters, cached 250 ms.
+function M.Characters()
+    local now = tonumber(Ext.Timer.MonotonicTime()) or 0
+    if now - charCache.at < 250 then return charCache.list end
+    charCache.at = now
+    local me = selfUuid()
+    local list, seen = {}, {}
+    for _, comp in ipairs({ "ClientCharacter", "Character" }) do
+        local ok, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, comp)
+        if ok and ents and #ents > 0 then
+            for _, e in ipairs(ents) do
+                local okU, u = pcall(function() return e.Uuid.EntityUuid end)
+                if okU and u and u ~= me and not seen[u] then
+                    seen[u] = true
+                    local okT, t = pcall(function() return e.Transform.Transform.Translate end)
+                    local feet = okT and vecOf(t) or nil
+                    if feet and not isDead(e) then
+                        list[#list + 1] = { uuid = u, feet = feet }
+                    end
+                end
+            end
+            break
+        end
+    end
+    charCache.list = list
+    return list
+end
+
+-- Best character inside a cone around `fwd`. Each character is treated
+-- as a vertical body from feet + 0.3 m to feet + 1.5 m (goblin- to
+-- human-sized); the angle is measured to the closest of 5 points on it.
+--   maxDist    metres from the eye to that point
+--   halfDeg    max angle off the crosshair
+-- Returns { targetUuid, pos, distance, angle } or nil. Smallest angle
+-- wins; near-ties go to the closer target.
+local BODY_HEIGHTS = { 0.3, 0.6, 0.9, 1.2, 1.5 }
+function M.ConeTarget(eye, fwd, maxDist, halfDeg)
+    local cosMax = math.cos(math.rad(halfDeg))
+    local best
+    for _, c in ipairs(M.Characters()) do
+        local cBest
+        for _, h in ipairs(BODY_HEIGHTS) do
+            local pt = { c.feet[1], c.feet[2] + h, c.feet[3] }
+            local dx, dy, dz = pt[1] - eye[1], pt[2] - eye[2], pt[3] - eye[3]
+            local d = math.sqrt(dx * dx + dy * dy + dz * dz)
+            if d > 1e-3 and d <= maxDist then
+                local cosA = (dx * fwd[1] + dy * fwd[2] + dz * fwd[3]) / d
+                if cosA >= cosMax and (not cBest or cosA > cBest.cosA) then
+                    cBest = { cosA = cosA, pos = pt, d = d }
+                end
+            end
+        end
+        if cBest then
+            local ang = math.deg(math.acos(math.min(1, cBest.cosA)))
+            if not best or ang < best.angle - 0.5 or (math.abs(ang - best.angle) <= 0.5 and cBest.d < best.distance) then
+                best = { targetUuid = c.uuid, pos = cBest.pos, distance = cBest.d, angle = ang }
+            end
+        end
+    end
+    return best
+end
+
+-- True if nothing solid (terrain / scenery / door) blocks eye -> point.
+function M.LineOfSight(eye, point)
+    local dx, dy, dz = point[1] - eye[1], point[2] - eye[2], point[3] - eye[3]
+    local d = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if d < 0.5 then return true end
+    local dir = { dx / d, dy / d, dz / d }
+    local from = { eye[1] + dir[1] * 0.4, eye[2] + dir[2] * 0.4, eye[3] + dir[3] * 0.4 }
+    local hitD = rayIgnoringSelf(from, dir, d - 0.4, COLLIDES_WITH_WORLD, nil)
+    return (not hitD) or hitD >= (d - 0.4) - 0.6
+end
+
+-- Spell target under the crosshair: exact ray first, then a 6 degree
+-- aim-assist cone with line of sight. Returns { target, pos, distance,
+-- via = "ray"|"cone" } or nil.
+function M.TargetAtCrosshair(maxDist)
+    maxDist = maxDist or 40.0
+    local eye, fwd = readInvView()
+    if not eye then return nil end
+    local aim = M.CrosshairRay(maxDist, true)
+    if aim and aim.hit and aim.hit.target then
+        local okC = false
+        for _, c in ipairs(M.Characters()) do
+            if c.uuid == aim.hit.target then okC = true; break end
+        end
+        if okC then
+            return { target = aim.hit.target, pos = aim.hit.pos, distance = aim.hit.distance, via = "ray" }
+        end
+    end
+    local c = M.ConeTarget(eye, fwd, maxDist, 6.0)
+    if c and M.LineOfSight(eye, c.pos) then
+        return { target = c.targetUuid, pos = c.pos, distance = c.distance, via = "cone" }
+    end
+    return nil
+end
+
 return M

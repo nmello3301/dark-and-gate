@@ -53,6 +53,15 @@ local function sampleHit()
     if not eye then return end
     local hit = Aim.FanClosestCharacter(
         eye, fwd, s.def.reach_m, s.def.arc_deg_h, 0, s.def.arc_rays, 0.3)
+    local via = hit and "ray" or nil
+    if not hit then
+        -- fix2: geometric fallback. Body within reach + 0.5 m and inside
+        -- the swing's arc (half of arc_deg_h; at least 35 degrees so a
+        -- slightly high or low look still connects).
+        local half = math.max(35, (s.def.arc_deg_h or 90) / 2)
+        hit = Aim.ConeTarget(eye, fwd, (s.def.reach_m or 2.2) + 0.5, half)
+        if hit then via = "cone" end
+    end
     if State.swingDebug then
         local n = s.def.arc_rays
         local reach = s.def.reach_m
@@ -75,7 +84,8 @@ local function sampleHit()
             "Swing: first sample fwd=(%.2f,%.2f,%.2f) hit=%s%s",
             fwd[1], fwd[2], fwd[3],
             hit and hit.targetUuid or "NONE",
-            hit and string.format(" dist=%.2f", hit.distance or 0) or ""))
+            hit and string.format(" dist=%.2f via=%s", hit.distance or 0, tostring(via)) or
+                string.format(" (characters nearby=%d)", #Aim.Characters())))
     end
 end
 

@@ -58,7 +58,31 @@ end
 --   choice   = { uuid, name, tier, type } | nil
 --   topList  = up to 10 { uuid, name, type } candidates when no match is
 --              found, so the user can see what's actually available.
-local function findDummyTemplate()
+-- Score an (already lower-cased) template name as a test goblin.
+-- nil = never pick it.
+local EXCLUDE = { "child", "kid", "young", "baby", "cine", "festiv", "corpse", "dead", "cutscene",
+                  "prisoner", "captive", "statue", "portrait", "illusion", "dream", "polymorph",
+                  "wildshape", "summon", "_tut", "origin", "hireling", "player", "puppet", "zombie",
+                  "_dummy_root", "cameo", "ghost", "spirit", "_sleep", "_drunk", "_party" }
+local function goblinScore(n)
+    if not (n:find("goblin", 1, true) or n:find("^gob_")) then return nil end
+    for _, x in ipairs(EXCLUDE) do
+        if n:find(x, 1, true) then return nil end
+    end
+    local sc = 0
+    if n:find("^goblins?_") then sc = sc + 10 end
+    if n:find("^gob_") then sc = sc + 6 end
+    if n:find("hobgoblin", 1, true) then sc = sc - 3 end
+    for _, w in ipairs({ "warrior", "melee", "fighter", "brute", "grunt", "raider", "soldier", "sentry", "guard" }) do
+        if n:find(w, 1, true) then sc = sc + 4; break end
+    end
+    for _, w in ipairs({ "ranged", "archer", "caster", "shaman", "priest" }) do
+        if n:find(w, 1, true) then sc = sc + 1; break end
+    end
+    return sc
+end
+
+local function findDummyTemplate(filter)
     if not (Ext.Template and Ext.Template.GetAllRootTemplates) then
         return nil, {}, "Ext.Template.GetAllRootTemplates unavailable"
     end
@@ -89,40 +113,39 @@ local function findDummyTemplate()
         "Dummy: scanned %d templates, %d matched character filter",
         scannedCount, charCount))
 
-    for _, tier in ipairs(TIERS) do
-        for _, cand in ipairs(pool) do
-            for _, pat in ipairs(tier.patterns) do
-                if cand.low:find(pat) then
-                    return {
-                        uuid = cand.uuid, name = cand.name,
-                        tier = tier.tag, type = cand.type,
-                    }, nil, nil
-                end
-            end
+    -- fix2: deterministic, scored choice. pairs() over the template map
+    -- has no stable order, so "first match wins" picked a different
+    -- goblin every run (a child goblin last time). Adult combat goblins
+    -- score highest; children / cinematic / dead / captive variants are
+    -- excluded outright.
+    local filterLow = filter and filter ~= "" and filter:lower() or nil
+    local ranked = {}
+    for _, cand in ipairs(pool) do
+        local sc
+        if filterLow then
+            sc = cand.low:find(filterLow, 1, true) and 1 or nil
+        else
+            sc = goblinScore(cand.low)
+        end
+        if sc then
+            ranked[#ranked + 1] = { c = cand, s = sc }
         end
     end
-
-    -- No match. Return the 10 most "dummy / goblin / monster" sounding
-    -- candidates so the user can pick one.
-    local function score(n)
-        if n:find("training") then return 15 end
-        if n:find("dummy")    then return 10 end
-        if n:find("goblin")   then return 9 end
-        if n:find("^gob_")    then return 8 end
-        if n:find("monster")  then return 5 end
-        if n:find("npc")      then return 3 end
-        return 0
-    end
-    table.sort(pool, function(a, b)
-        local sa, sb = score(a.low), score(b.low)
-        if sa ~= sb then return sa > sb end
-        return a.name < b.name
+    table.sort(ranked, function(a, b)
+        if a.s ~= b.s then return a.s > b.s end
+        if #a.c.name ~= #b.c.name then return #a.c.name < #b.c.name end
+        return a.c.name < b.c.name
     end)
     local top = {}
-    for i = 1, math.min(10, #pool) do
-        top[i] = { uuid = pool[i].uuid, name = pool[i].name, type = pool[i].type }
+    for i = 1, math.min(25, #ranked) do
+        top[i] = { uuid = ranked[i].c.uuid, name = ranked[i].c.name, type = ranked[i].c.type, score = ranked[i].s }
     end
-    return nil, top, "no template matched the ranked patterns"
+    if #ranked > 0 then
+        local c = ranked[1].c
+        return { uuid = c.uuid, name = c.name, tier = filterLow and "filter" or "adult-goblin", type = c.type }, top, nil
+    end
+    return nil, top, filterLow and ("no character template name contains '" .. filter .. "'")
+                              or "no adult goblin template found"
 end
 
 local function sendReply(userId, payload)
@@ -176,7 +199,20 @@ local function readPos(uuid)
 end
 
 function M.Register()
-    Ext.RegisterNetListener(Net.Channels.SpawnDummy, function(_, _, userId)
+    Ext.RegisterNetListener(Net.Channels.SpawnDummy, function(_, payload, userId)
+        local okP, req = pcall(Ext.Json.Parse, payload or "{}")
+        if not okP or type(req) ~= "table" then req = {} end
+        if req.list then
+            local _, top, err = findDummyTemplate(req.filter)
+            Log.Write(string.format("Dummy: list filter=%s -> %d candidates %s",
+                tostring(req.filter), #(top or {}), err and ("(" .. err .. ")") or ""))
+            for i, c in ipairs(top or {}) do
+                Log.Write(string.format("  [%d] score=%s %s", i, tostring(c.score), c.name))
+            end
+            sendReply(userId, { ok = false, reason = "list only (nothing spawned)",
+                                list = top or {}, filter = req.filter })
+            return
+        end
         ServerNet.EnqueueOsi(function()
             local caster = ServerNet.UserToCharacter(userId)
             if not caster then
@@ -194,7 +230,7 @@ function M.Register()
             local y = pos.y
             local z = pos.z
 
-            local choice, topList, err = findDummyTemplate()
+            local choice, topList, err = findDummyTemplate(req.filter)
             if not choice then
                 Log.Write("Dummy: " .. tostring(err))
                 for i, c in ipairs(topList or {}) do
@@ -226,18 +262,19 @@ function M.Register()
 
             Log.Write(string.format("Dummy: spawned %s at (%.2f, %.2f, %.2f)", spawned, x, y, z))
 
-            -- Try to force the dummy hostile. BG3 Osi exposes several
-            -- hostility knobs with different signatures across patches;
-            -- we attempt the common ones and log which (if any) took.
-            local function try(name, ...)
-                local args = { ... }
-                local okCall, err = pcall(function() return Osi[name](table.unpack(args)) end)
-                Log.Write(string.format("  Osi.%s ok=%s err=%s",
-                    name, tostring(okCall), tostring(err)))
+            -- Hostile only on request: a hostile goblin that sees you makes
+            -- BG3 start TURN-BASED combat, which real-time M1b can't stop
+            -- yet. Damage works on a neutral target too.
+            if req.hostile then
+                local okF, errF = pcall(function()
+                    Osi.SetFaction(spawned, "Evil NPC_64321d50-d516-b1b2-cfac-2eb773de1ff6")
+                end)
+                local okG, fac = pcall(function() return Osi.GetFaction(spawned) end)
+                Log.Write(string.format("Dummy: hostile SetFaction ok=%s err=%s now=%s",
+                    tostring(okF), tostring(errF), okG and tostring(fac) or "?"))
             end
-            try("SetFaction", spawned, "Evil_NPC")
-            try("SetHostileAndEnterCombat", caster, spawned)
-            try("AttackObject", spawned, caster, 1)
+            local okH, hp = pcall(function() return Osi.GetHitpoints(spawned) end)
+            Log.Write(string.format("Dummy: hp=%s hostile=%s", okH and tostring(hp) or "?", tostring(req.hostile == true)))
 
             sendReply(userId, {
                 ok       = true,

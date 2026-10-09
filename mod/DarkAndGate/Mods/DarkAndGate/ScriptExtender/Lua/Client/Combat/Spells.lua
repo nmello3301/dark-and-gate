@@ -27,7 +27,7 @@ function M.Cast(spellId)
     if nowMs() < cd then return end
 
     local kind = def.kind or "target"
-    local aim  = Aim.CrosshairRay(60.0, kind == "target")
+    local aim  = (kind ~= "target") and Aim.CrosshairRay(60.0, false) or nil
 
     local payload = {
         withMana = true,
@@ -37,12 +37,16 @@ function M.Cast(spellId)
     if kind == "self" then
         payload.targetUuid = "__self__"
     elseif kind == "target" then
-        if not aim or not aim.hit or not aim.hit.target then
-            Log.Write("Spells: NO TARGET IN SIGHT for " .. spellId .. " -- aborting cast")
+        -- fix2: exact ray, then a 6 degree aim-assist cone with line of sight.
+        local t = Aim.TargetAtCrosshair(60.0)
+        if not t then
+            Log.Write(string.format("Spells: NO TARGET IN SIGHT for %s -- aborting cast (characters nearby=%d)",
+                spellId, #Aim.Characters()))
             return
         end
-        payload.targetUuid = aim.hit.target
-        payload.hitPoint   = { x = aim.hit.pos[1], y = aim.hit.pos[2], z = aim.hit.pos[3] }
+        Log.Write(string.format("Spells: target %s via %s at %.1f m", t.target, t.via, t.distance or 0))
+        payload.targetUuid = t.target
+        payload.hitPoint   = { x = t.pos[1], y = t.pos[2], z = t.pos[3] }
     elseif kind == "point" or kind == "teleport" then
         if not aim or not aim.hit then
             Log.Write("Spells: NO GROUND HIT for " .. spellId .. " -- aborting cast")
