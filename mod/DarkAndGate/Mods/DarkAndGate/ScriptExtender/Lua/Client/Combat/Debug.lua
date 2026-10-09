@@ -65,12 +65,12 @@ function M.Register()
     end)
 
     -- Short-circuit the arm-then-LMB UX: fire the current slot-1 spell
-    -- (default Target_FireBolt) at the crosshair target right now. Lets
+    -- (default Projectile_FireBolt) at the crosshair target right now. Lets
     -- the user confirm the full cast pipeline works without needing the
     -- hotkey arming to be running correctly first.
     Ext.RegisterConsoleCommand("dag_fire_test", function()
-        Spells.Cast("Target_FireBolt")
-        Log.Write("fire_test: Target_FireBolt cast attempt (see client.log for NO TARGET IN SIGHT or Spells: request)")
+        Spells.Cast("Projectile_FireBolt")
+        Log.Write("fire_test: Projectile_FireBolt cast attempt")
     end)
 
     -- Fire any spell id at the crosshair.

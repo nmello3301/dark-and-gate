@@ -50,13 +50,25 @@ end
 
 -- Input gate: POV on AND no modal UI. Does NOT depend on realTime or
 -- inFight (see above — needed for dummy tests before the goblin fight).
-function M.IsCombatActive()
-    if not M.povOn then return false end
+-- fix3: the modal-UI part (3 entity queries) is cached for 250 ms; it
+-- used to run on every input event and every HUD tick.
+local modalCache = { at = -1e9, modal = false }
+local function modalOpen()
+    local now = tonumber(Ext.Timer.MonotonicTime()) or 0
+    if now - modalCache.at < 250 then return modalCache.modal end
+    modalCache.at = now
+    local modal = false
     for _, c in ipairs({ "Dialog", "Cinematic", "Cutscene" }) do
         local ok, es = pcall(Ext.Entity.GetAllEntitiesWithComponent, c)
-        if ok and es and #es > 0 then return false end
+        if ok and es and #es > 0 then modal = true; break end
     end
-    return true
+    modalCache.modal = modal
+    return modal
+end
+
+function M.IsCombatActive()
+    if not M.povOn then return false end
+    return not modalOpen()
 end
 
 -- Is first-person mouse-look currently on (cursor hidden, camera rotating)?

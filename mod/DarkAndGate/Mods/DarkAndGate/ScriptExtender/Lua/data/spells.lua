@@ -20,11 +20,14 @@ return {
     --   point:  cast at a world point (projectile travels there)
     --   teleport: move caster to a world point
     spells = {
-        Target_FireBolt = {
-            kind       = "target",
+        -- fix3: BG3's Fire Bolt is Projectile_FireBolt. "Target_FireBolt"
+        -- does not exist, which is why spike 5 saw nothing happen.
+        Projectile_FireBolt = {
+            kind       = "target",    -- character under crosshair, else ground point
             level      = 0,
             cost       = 0,
             cooldown_ms = 400,
+            range_m    = 36,
             label      = "Fire Bolt",
             icon       = nil,
         },
@@ -33,6 +36,7 @@ return {
             level      = 3,
             cost       = 32,
             cooldown_ms = 1500,
+            range_m    = 36,
             label      = "Fireball",
         },
         Target_MistyStep = {
@@ -40,13 +44,14 @@ return {
             level      = 2,
             cost       = 20,
             cooldown_ms = 1500,
+            range_m    = 18,
             label      = "Misty Step",
         },
     },
 
     -- Default DEV-SAVE hotbar: 10 slots, index 1 == key 1.
     default_hotbar = {
-        [1] = "Target_FireBolt",
+        [1] = "Projectile_FireBolt",
         [2] = "Projectile_Fireball",
         [3] = "Target_MistyStep",
     },

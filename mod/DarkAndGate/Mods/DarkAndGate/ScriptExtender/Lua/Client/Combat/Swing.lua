@@ -18,6 +18,7 @@ local State     = Ext.Require("Client/Combat/State.lua")
 local Aim       = Ext.Require("Client/Combat/Aim.lua")
 local longsword = Ext.Require("data/weapons/longsword.lua")
 local ClientNet = Ext.Require("Client/Net.lua")
+local Anims     = Ext.Require("Client/Combat/Anims.lua")
 
 local M = {}
 
@@ -51,17 +52,11 @@ local function sampleHit()
     if not s then return end
     local eye, fwd = Aim.ReadInvView()
     if not eye then return end
-    local hit = Aim.FanClosestCharacter(
-        eye, fwd, s.def.reach_m, s.def.arc_deg_h, 0, s.def.arc_rays, 0.3)
-    local via = hit and "ray" or nil
-    if not hit then
-        -- fix2: geometric fallback. Body within reach + 0.5 m and inside
-        -- the swing's arc (half of arc_deg_h; at least 35 degrees so a
-        -- slightly high or low look still connects).
-        local half = math.max(35, (s.def.arc_deg_h or 90) / 2)
-        hit = Aim.ConeTarget(eye, fwd, (s.def.reach_m or 2.2) + 0.5, half)
-        if hit then via = "cone" end
-    end
+    -- fix3: geometric melee test only (ray hits can't name an entity).
+    -- Body within reach + 0.5 m, inside half the swing arc (>= 35 deg),
+    -- with line of sight.
+    local half = math.max(35, (s.def.arc_deg_h or 90) / 2)
+    local hit = Aim.MeleeTarget(eye, fwd, (s.def.reach_m or 2.2) + 0.5, half)
     if State.swingDebug then
         local n = s.def.arc_rays
         local reach = s.def.reach_m
@@ -75,23 +70,26 @@ local function sampleHit()
         local zone = Aim.ClassifyZone(hit.targetUuid, hit.pos[2])
         sendHitClaim(s.def, hit.targetUuid, hit.pos, zone)
     end
-    -- First-sample summary (one line per swing even when swingDebug is off),
-    -- so a swing that doesn't connect is visible in client.log instead of
-    -- just the "Swing: start" line with no follow-up.
-    if not s.firstSampleLogged then
-        s.firstSampleLogged = true
-        Log.Write(string.format(
-            "Swing: first sample fwd=(%.2f,%.2f,%.2f) hit=%s%s",
-            fwd[1], fwd[2], fwd[3],
-            hit and hit.targetUuid or "NONE",
-            hit and string.format(" dist=%.2f via=%s", hit.distance or 0, tostring(via)) or
-                string.format(" (characters nearby=%d)", #Aim.Characters())))
-    end
+    if hit and not s.firstHit then s.firstHit = hit end
+    s.lastFwd = fwd
+end
+
+-- One summary line per swing, logged when its active window closes.
+local function logSummary(s)
+    if s.summaryLogged then return end
+    s.summaryLogged = true
+    local h, f = s.firstHit, s.lastFwd or { 0, 0, 0 }
+    Log.Write(string.format("Swing: #%d result hit=%s%s fwd=(%.2f,%.2f,%.2f)",
+        s.swingIndex, h and h.targetUuid or "NONE",
+        h and string.format(" dist=%.2f", h.distance or 0)
+          or string.format(" (characters nearby=%d)", #Aim.Characters()),
+        f[1], f[2], f[3]))
 end
 
 local function startSwing(index)
     local def = longsword.chain[index]
     if not def then return end
+    if State.currentSwing then logSummary(State.currentSwing) end
     local eye, fwd = Aim.ReadInvView()
     State.currentSwing = {
         swingIndex    = index,
@@ -110,7 +108,15 @@ local function startSwing(index)
         index, def.name, def.damage, def.reach_m))
     -- Play the animation (server-authoritative). The hit sampling is on
     -- our client ticks; the animation is cosmetic.
-    ClientNet.PlayAnim(def.anim)
+    -- fix3: real attack clip from the animation scan (Anims.lua). The old
+    -- def.anim id was a looping combat idle and only made Gale twitch.
+    local anim = Anims.ForSwing(index)
+    if anim then
+        ClientNet.PlayAnim(anim)
+    elseif not State.animWarned then
+        State.animWarned = true
+        Log.Write("Swing: no attack animation yet (Anims state=" .. tostring(Anims.State()) .. ")")
+    end
 end
 
 function M.OnLMB()
@@ -135,12 +141,16 @@ local function tick()
     if now >= s.activeStart and now < s.activeUntil then
         -- Sample every tick while active.
         sampleHit()
+    elseif now >= s.activeUntil and not s.summaryLogged then
+        logSummary(s)
     elseif now > s.chainResetAt then
         State.currentSwing = nil
     end
 end
 
 function M.Register()
+    Anims.Register()
+    Aim.Register()
     Ext.Events.Tick:Subscribe(function() pcall(tick) end)
     Log.Write("Swing: registered (longsword, " .. #longsword.chain .. " swings)")
 end

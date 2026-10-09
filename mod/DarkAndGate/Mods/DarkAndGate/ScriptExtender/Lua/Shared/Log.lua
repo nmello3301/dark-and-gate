@@ -40,13 +40,44 @@ function Log.Init(side)
     Ext.IO.SaveFile(LOG_PATH, "")
 end
 
+-- fix3: the file used to be rewritten on EVERY line (SaveFile has no
+-- append), which made bursts like Spike11's 30-line hide take 100+ ms.
+-- Lines still go to the console immediately; the file is flushed at most
+-- once a second (and right away for the first line), and only the last
+-- MAX_LINES lines are kept.
+local MAX_LINES = 4000
+local dirty = false
+local lastFlush = -1e9
+
+local function flush()
+    if not dirty or not LOG_PATH then return end
+    dirty = false
+    lastFlush = tonumber(Ext.Timer.MonotonicTime()) or 0
+    pcall(Ext.IO.SaveFile, LOG_PATH, table.concat(buffer, "\n") .. "\n")
+end
+Log.Flush = flush
+
 function Log.Write(msg)
     local line = string.format("[%s] [%s] %s", timestamp(), tag, tostring(msg))
     table.insert(buffer, line)
+    if #buffer > MAX_LINES + 500 then
+        local keep = {}
+        for i = #buffer - MAX_LINES + 1, #buffer do keep[#keep + 1] = buffer[i] end
+        buffer = keep
+    end
     -- Console / SE log window.
     Ext.Utils.Print(line)
-    -- Flush the whole buffer to the file. Cheap for M0.
-    Ext.IO.SaveFile(LOG_PATH, table.concat(buffer, "\n") .. "\n")
+    dirty = true
+    local now = tonumber(Ext.Timer.MonotonicTime()) or 0
+    if now - lastFlush >= 1000 then flush() end
 end
+
+pcall(function()
+    Ext.Events.Tick:Subscribe(function()
+        if dirty and (tonumber(Ext.Timer.MonotonicTime()) or 0) - lastFlush >= 1000 then
+            pcall(flush)
+        end
+    end)
+end)
 
 return Log

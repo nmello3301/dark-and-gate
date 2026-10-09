@@ -31,15 +31,47 @@ local function resolveTarget(caster, claim)
     return nil
 end
 
-local function tryUseSpellAtPosition(caster, spellId, point)
-    local x, y, z = point.x or point[1] or 0, point.y or point[2] or 0, point.z or point[3] or 0
-    local ok, err = pcall(function()
-        return Osi.UseSpellAtPosition(caster, spellId, x, y, z)
-    end)
-    if not ok then
-        Log.Write("SpellCast: UseSpellAtPosition err; falling back to UseSpell self: " .. tostring(err))
-        pcall(function() Osi.UseSpell(caster, spellId, caster) end)
+-- fix3: Osiris call arity differs between patches and SE throws "No
+-- function named X exists that can be called with N parameters" on a
+-- mismatch. Try the known shapes in order and remember the one that
+-- worked. WithoutMove = 1 so the caster casts from where they stand.
+local arity = {}
+local function callFirst(name, variants)
+    local order = {}
+    if arity[name] then order[1] = arity[name] end
+    for i = 1, #variants do if i ~= arity[name] then order[#order + 1] = i end end
+    local errs = {}
+    for _, i in ipairs(order) do
+        local args = variants[i]
+        local ok, err = pcall(function() return Osi[name](table.unpack(args)) end)
+        if ok then
+            if arity[name] ~= i then
+                arity[name] = i
+                Log.Write(string.format("SpellCast: Osi.%s works with %d args", name, #args))
+            end
+            return true
+        end
+        errs[#errs + 1] = string.format("%d args: %s", #args, tostring(err))
     end
+    Log.Write("SpellCast: Osi." .. name .. " failed: " .. table.concat(errs, " | "))
+    return false
+end
+
+local function castAtPosition(caster, spellId, p)
+    local x, y, z = p.x or p[1] or 0, p.y or p[2] or 0, p.z or p[3] or 0
+    return callFirst("UseSpellAtPosition", {
+        { caster, spellId, x, y, z, 1 },
+        { caster, spellId, x, y, z },
+        { caster, spellId, x, y, z, 1, 0 },
+    })
+end
+
+local function castAtTarget(caster, spellId, target)
+    return callFirst("UseSpell", {
+        { caster, spellId, target },
+        { caster, spellId, target, 1 },
+        { caster, spellId, target, 1, 0 },
+    })
 end
 
 function M.Register()
@@ -64,28 +96,25 @@ function M.Register()
                 return
             end
 
-            local kind = def and def.kind or "target"
-            if kind == "point" or kind == "teleport" then
-                if not parsed.hitPoint then
-                    Log.Write("SpellCast: NO GROUND HIT for " .. tostring(spellId) .. " -- aborting")
-                    return
-                end
-                tryUseSpellAtPosition(caster, spellId, parsed.hitPoint)
-                Log.Write(string.format("SpellCast: UseSpellAtPosition caster=%s spell=%s cost=%d at (%.2f,%.2f,%.2f)",
-                    caster, tostring(spellId), cost,
-                    parsed.hitPoint.x or 0, parsed.hitPoint.y or 0, parsed.hitPoint.z or 0))
-            elseif kind == "target" or kind == "self" then
-                local target = resolveTarget(caster, parsed)
-                if not target then
-                    Log.Write("SpellCast: NO TARGET IN SIGHT for " .. tostring(spellId) .. " -- aborting (no 'or caster' fallback)")
-                    return
-                end
-                pcall(function() Osi.UseSpell(caster, spellId, target) end)
-                Log.Write(string.format("SpellCast: UseSpell caster=%s spell=%s target=%s cost=%d",
-                    caster, tostring(spellId), tostring(target), cost))
+            -- Character target if the client found one, else the point.
+            local target = resolveTarget(caster, parsed)
+            local okCast, how
+            if target then
+                okCast, how = castAtTarget(caster, spellId, target), "UseSpell target=" .. tostring(target)
+            elseif parsed.hitPoint then
+                okCast = castAtPosition(caster, spellId, parsed.hitPoint)
+                how = string.format("UseSpellAtPosition (%.2f,%.2f,%.2f)",
+                    parsed.hitPoint.x or 0, parsed.hitPoint.y or 0, parsed.hitPoint.z or 0)
             else
-                Log.Write("SpellCast: unknown kind " .. tostring(kind) .. " for " .. tostring(spellId))
+                okCast, how = false, "no target and no point"
             end
+            if not okCast then
+                -- Refund: nothing was cast.
+                local st = Mana.StateFor(userId)
+                st.current = math.min(st.max, st.current + cost)
+            end
+            Log.Write(string.format("SpellCast: %s %s spell=%s cost=%d",
+                okCast and "CAST" or "FAILED", how, tostring(spellId), okCast and cost or 0))
         end)
     end)
     Log.Write("SpellCast: registered")

@@ -1,0 +1,11 @@
+Client\Combat\Aim.lua|d44aa677c6cf12660e5dbaa9342661d34e263109
+Client\Combat\Anims.lua|NEW
+Client\Combat\Debug.lua|cf491a35e436f240d6b814f41687b0296fc6b159
+Client\Combat\HUD.lua|473fd895acdbd04448cfdc82a2fa8366b2000801
+Client\Combat\Spells.lua|94dd93a99b071dae4050f3cddfca64d38434be8e
+Client\Combat\State.lua|987199a0f8c761a597faef6d1a529326cf922147
+Client\Combat\Swing.lua|03cb1bff5f86b6c7abf257d683e0b50c02f5bb9b
+FullPov.lua|4b7b7caa3e75cab5d40d66f0cc987c8b1c602761
+Server\Combat\SpellCast.lua|d61cb225996faf0cf06720b0454a0dfd01485387
+Shared\Log.lua|b34cffdafadceac17bea479abc8b379fc5e308e9
+data\spells.lua|67fa5fdabaacc645e1fc87d2b066e7929ad6d4dd

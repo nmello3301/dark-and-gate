@@ -46,7 +46,13 @@ local function controlledEntity()
     return nil
 end
 
-local function isPaused()
+-- fix3: the head-bone anchor is archived (the DLL anchors on the engine
+-- pivot, src=pivot), so the per-second MeshBinding/socket walk is off by
+-- default -- it cost 3-4 ms per run. !dag_pov_dump still collects them.
+local USE_BONE_ANCHOR = false
+
+local pausedCache = { at = -1e9, v = false }
+local function isPausedUncached()
     local ok, dlgs = pcall(Ext.Entity.GetAllEntitiesWithComponent, "Dialog")
     if ok and dlgs and #dlgs > 0 then return true end
     for _, c in ipairs({ "Cinematic", "Cutscene", "ClientMoveToCutscene" }) do
@@ -54,6 +60,14 @@ local function isPaused()
         if ok2 and es and #es > 0 then return true end
     end
     return false
+end
+
+local function isPaused()
+    local now = Ext.Utils.MonotonicTime()
+    if now - pausedCache.at < 450 then return pausedCache.v end
+    pausedCache.at = now
+    pausedCache.v = isPausedUncached()
+    return pausedCache.v
 end
 
 local function readTranslate(e)
@@ -189,7 +203,7 @@ local function writeState()
         local tx, ty, tz = readTranslate(e)
         if tx then x, y, z = tx, ty, tz end
     end
-    if S.on then refreshCache(e, now) end
+    if S.on and USE_BONE_ANCHOR then refreshCache(e, now) end
 
     local line = string.format(
         "on=%d active=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
