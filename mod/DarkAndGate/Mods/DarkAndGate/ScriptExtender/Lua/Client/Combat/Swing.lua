@@ -19,6 +19,7 @@ local Aim       = Ext.Require("Client/Combat/Aim.lua")
 local longsword = Ext.Require("data/weapons/longsword.lua")
 local ClientNet = Ext.Require("Client/Net.lua")
 local Anims     = Ext.Require("Client/Combat/Anims.lua")
+local Tags      = Ext.Require("Client/AnimLib/Tags.lua")
 
 local M = {}
 
@@ -110,9 +111,16 @@ local function startSwing(index)
     -- our client ticks; the animation is cosmetic.
     -- fix3: real attack clip from the animation scan (Anims.lua). The old
     -- def.anim id was a looping combat idle and only made Gale twitch.
-    local anim = Anims.ForSwing(index)
+    -- Tags picked in the animation browser (swing1..3) win over the
+    -- automatic picks from the Anims.lua scan.
+    local tagged = Tags.ForPlayer("swing" .. index)
+    local anim = tagged and tagged.key or Anims.ForSwing(index)
     if anim then
-        ClientNet.PlayAnim(anim)
+        ClientNet.PlayAnim(anim, tagged and tagged.dur and tagged.dur > 0 and tagged.dur or nil)
+        if tagged and not State["tagLogged" .. index] then
+            State["tagLogged" .. index] = true
+            Log.Write(string.format("Swing: #%d uses tagged clip %s (%s)", index, tostring(tagged.file), tagged.key))
+        end
     elseif not State.animWarned then
         State.animWarned = true
         Log.Write("Swing: no attack animation yet (Anims state=" .. tostring(Anims.State()) .. ")")

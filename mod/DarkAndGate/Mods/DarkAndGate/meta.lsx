@@ -8,7 +8,7 @@
                 <node id="ModuleInfo">
                     <attribute id="Author" type="LSWString" value="Nick"/>
                     <attribute id="CharacterCreationLevelName" type="FixedString" value=""/>
-                    <attribute id="Description" type="LSWString" value="First-person, real-time action combat for BG3. M0 scaffold."/>
+                    <attribute id="Description" type="LSWString" value="First-person, real-time action combat for BG3. Animation play-rate approach learned from QSAT; thanks to BG3AF."/>
                     <attribute id="Folder" type="LSWString" value="DarkAndGate"/>
                     <attribute id="GMTemplate" type="FixedString" value=""/>
                     <attribute id="LobbyLevelName" type="FixedString" value=""/>

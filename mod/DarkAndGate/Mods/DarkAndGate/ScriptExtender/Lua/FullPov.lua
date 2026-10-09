@@ -283,6 +283,10 @@ function M.Jump(seq, durMs, height, flatness)
     pcall(writeState)
 end
 
+-- Animation browser: third person while its window is open.
+function M.SetOn(on) setOn(on and true or false) end
+function M.IsOn() return S.on end
+
 function M.Register()
     -- POV starts off every session; make sure a hide_head left on by a
     -- previous session doesn't fire before the character exists.

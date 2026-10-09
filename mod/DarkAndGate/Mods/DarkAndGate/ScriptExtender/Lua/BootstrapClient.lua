@@ -77,3 +77,8 @@ local JumpAnims = Ext.Require("Client/Movement/JumpAnims.lua")
 local Jump      = Ext.Require("Client/Movement/Jump.lua")
 JumpAnims.Register()
 Jump.Register()
+
+-- Animation browser + gallery (!dag_animlib). Tags picked there feed
+-- Swing.lua and the jump (Client/AnimLib/Tags.lua).
+local AnimBrowser = Ext.Require("Client/AnimLib/Browser.lua")
+AnimBrowser.Register()

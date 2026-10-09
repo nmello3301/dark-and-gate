@@ -35,3 +35,7 @@ Mana.Register()
 HitValidator.Register()
 SpellCast.Register()
 Dummy.Register()
+
+-- Animation browser + gallery (server side: preview copies).
+local AnimLib = Ext.Require("Server/AnimLib.lua")
+AnimLib.Register()

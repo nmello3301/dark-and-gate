@@ -1,6 +1,6 @@
 # Spike 4: Can scripts play an animation at a chosen speed and cancel it?
 
-**Status:** answered partial — can trigger, cannot modify speed or cancel from Lua
+**Status:** answered partial — can trigger; speed: see the 2026-10-09 update (Genome `PlayRate` variable); cancel still no clean Lua path
 **Date:** 2026-10-08 · **BG3 version:** Patch 8 · **Script Extender version:** v32
 
 ## Question
@@ -69,3 +69,14 @@ The trigger side stays in Lua via `Osi.PlayAnimation`.
 
 No. The probe uses an existing BG3 animation UUID. Toolkit matters only
 once M1 authors our own swing clips.
+
+
+## Update 2026-10-09: speed may be reachable from Lua after all
+
+The "no Lua lever" result above only tried top-level fields on
+`AnimationSet` / `AnimationBlueprint`. QSAT (Nexus 17737) changes playback
+speed by writing the **Genome blueprint variable `PlayRate`** through
+`ent.AnimationBlueprint.Instance.Variables[i] = { Type, Value }`, client side
+-- on photo-mode dummies. Whether gameplay characters' blueprints expose
+the same variable is the open question; `!dag_anim_vars playrate` answers
+it. Details, credits and the fallback options: [anim-speed.md](anim-speed.md).

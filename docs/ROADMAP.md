@@ -126,6 +126,10 @@ Verified in-game on DEV-SAVE (fixes 1–5, `patches/m1b-fix*`):
 
 Lessons recorded for the next pass: `Ext.Require` only works at load time; `hit.Distance` is a 0–1 fraction of the ray; BG3's view forward is `+InvViewMatrix` column 3; ray hits can't name an entity from Lua; Fire Bolt is `Projectile_FireBolt`; `Osi.UseSpellAtPosition` takes 6 args; scripted `PlayAnimation` stalls the player during turn-based combat.
 
+### Tooling (M1b)
+
+- [ ] **Animation browser + gallery** (`!dag_animlib`): per-character clip list with filters, solo play, tagging by mapping id (per-rig overrides, DFLT fallback), coverage by rig, a looping grid of preview copies with floating labels, play-rate slider when the blueprint exposes `PlayRate`. Written 2026-10-09, playtest: [playtest/animlib.md](playtest/animlib.md).
+
 ### Known issues (M1b)
 
 - **WASD dead after LMB spam** (reproducible, 3 fast clicks): queued `Osi.PlayAnimation` tasks stalled the Osiris queue. Fix written 2026-10-09 (queue purge before each clip + watchdog + swing recovery gate); `!dag_unstick` remains the manual escape. Awaiting playtest.

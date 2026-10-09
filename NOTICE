@@ -15,6 +15,13 @@ This mod includes code from:
   Thanks to tinybike for solving the hardest 20% of real-time BG3 combat
   so we didn't have to.
 
+Approaches learned from (studied, not copied; none of their files ship here):
+
+- QSAT - Quick Small Animation Thingy (Nexus Mods 17737), by its author:
+  animation play rate through the Genome "PlayRate" blueprint variable.
+- BG3AF - BG3 Animation Framework (Nexus Mods 16207), by its author:
+  how animation sets and mapping keys are linked at runtime.
+
 This mod depends on, but does not include:
 
 - Script Extender (https://github.com/Norbyte/bg3se), by Norbyte. MIT.

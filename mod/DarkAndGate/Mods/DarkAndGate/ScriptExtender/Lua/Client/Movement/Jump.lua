@@ -33,6 +33,7 @@ local State     = Ext.Require("Client/Combat/State.lua")
 local FullPov   = Ext.Require("FullPov.lua")
 local JumpAnims = Ext.Require("Client/Movement/JumpAnims.lua")
 local movement  = Ext.Require("data/movement.lua")
+local AnimSpeed = Ext.Require("Client/AnimLib/AnimSpeed.lua")
 
 local M = {}
 
@@ -142,7 +143,21 @@ function M.OnSpace()
     FullPov.Jump(J.seq, J.T, h, k)
     ClientNet.JumpStart(J.T, h, k)
 
+    -- Slow the clips to fit when the blueprint exposes PlayRate
+    -- (docs/spikes/anim-speed.md); otherwise the phase substitute alone.
     local animPath = (#J.events > 0) and "substitute" or "none"
+    J.rateEnt = nil
+    local clipsAir = dur(P.ascend) + dur(P.descend)
+    if #J.events > 0 and clipsAir > 0 and cfg("play_anims") then
+        local okE, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+        local me = okE and ents and ents[1] or nil
+        local rate = math.max(0.3, math.min(1.0, clipsAir / T))
+        local okR = me and AnimSpeed.Set(me, rate)
+        if okR then
+            J.rateEnt = me
+            animPath = string.format("genome PlayRate x%.2f + phases", rate)
+        end
+    end
     Log.Write(string.format(
         "Jump: start seq=%d T=%.2fs h=%.2fm k=%.1f base=%.2fs(%s) mult=%.2f anim=%s phases=%d clips=%s speed=%.1fm/s",
         J.seq, T, h, k, base, baseSrc, cfg("duration_mult"), animPath, #J.events, JumpAnims.State(), speed.v))
@@ -167,6 +182,7 @@ local function tick()
         J.active = false
         State.jumping = false
         J.readyAt = now + D.cooldown_s * 1000
+        if J.rateEnt then AnimSpeed.Set(J.rateEnt, 1.0); J.rateEnt = nil end
         Log.Write(string.format("Jump: landed seq=%d after %.2fs", J.seq, (now - J.t0) / 1000))
     end
 end

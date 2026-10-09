@@ -71,6 +71,14 @@ Net.Channels = {
     -- JumpNotify { uuid, durMs, h, k } to every other client.
     JumpStart         = "DAG_JumpStart",
     JumpNotify        = "DAG_JumpNotify",
+
+    -- Animation gallery (Server/AnimLib.lua). Client -> server:
+    --   AnimLibSpawn { n, rig, template?, target?, fwd = {x,y,z} }
+    --   AnimLibClear { why }
+    -- Server -> client, one per copy: AnimLibSpawned { slot, uuid | error }.
+    AnimLibSpawn      = "DAG_AnimLibSpawn",
+    AnimLibSpawned    = "DAG_AnimLibSpawned",
+    AnimLibClear      = "DAG_AnimLibClear",
 }
 
 -- Every channel both sides care about. Both server and client must register
@@ -92,6 +100,9 @@ Net.AllChannels = {
     Net.Channels.SpawnDummyReply,
     Net.Channels.JumpStart,
     Net.Channels.JumpNotify,
+    Net.Channels.AnimLibSpawn,
+    Net.Channels.AnimLibSpawned,
+    Net.Channels.AnimLibClear,
 }
 
 return Net

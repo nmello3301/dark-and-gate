@@ -97,10 +97,35 @@ local function animWatchdog()
     end
 end
 
+-- Animation browser (2026-10-09): payload.target plays on another
+-- character (a party member, an animation-gallery copy, or anyone within
+-- 10 m of the requester); payload.force skips the turn-based guard;
+-- payload.quiet logs only the first play per target (gallery loops).
+local extraTargetCheck = nil   -- set by Server/AnimLib.lua: fn(uuid) -> bool
+function M.SetAnimTargetCheck(fn) extraTargetCheck = fn end
+local quietLogged = {}
+
+local function allowedTarget(requester, target)
+    if target == requester then return true end
+    if extraTargetCheck and extraTargetCheck(target) then return true end
+    local okP, isP = pcall(function() return Osi.IsPartyMember(target, 0) end)
+    if okP and tonumber(isP) == 1 then return true end
+    local okD, d = pcall(function() return Osi.GetDistanceTo(requester, target) end)
+    return okD and tonumber(d) ~= nil and tonumber(d) <= 10.0
+end
+
 handlers[Net.Channels.PlayAnimRequest] = function(payload, userId)
     enqueueOsi(function()
-        local uuid = userToCharacter(userId)
-        if not uuid then Log.Write("Net: PlayAnim no character for user " .. userId); return end
+        local self = userToCharacter(userId)
+        if not self then Log.Write("Net: PlayAnim no character for user " .. userId); return end
+        local uuid = self
+        if payload.target and payload.target ~= "" and payload.target ~= self then
+            if not allowedTarget(self, payload.target) then
+                Log.Write("Net: PlayAnim target refused (not party, copy or within 10 m): " .. tostring(payload.target))
+                return
+            end
+            uuid = payload.target
+        end
         -- fix5: "__unstick__" clears a stuck action queue (!dag_unstick).
         if payload.animId == "__unstick__" then
             for _, fn in ipairs({ "PurgeOsirisQueue", "FlushOsirisQueue", "StopAnimation" }) do
@@ -113,7 +138,7 @@ handlers[Net.Channels.PlayAnimRequest] = function(payload, userId)
         -- player queues an action that never finishes outside your turn,
         -- which left Gale unable to walk. Skip swing anims while in combat.
         local okC, inC = pcall(function() return Osi.IsInCombat(uuid) end)
-        if okC and tonumber(inC) == 1 then
+        if okC and tonumber(inC) == 1 and not payload.force then
             Log.Write("Net: PlayAnim skipped (in turn-based combat) anim=" .. tostring(payload.animId))
             return
         end
@@ -124,7 +149,11 @@ handlers[Net.Channels.PlayAnimRequest] = function(payload, userId)
         -- queue is cleared before EVERY clip, not only on interrupts.
         clearOsirisQueue(uuid, animState[uuid] and "interrupt" or "before-play")
         animState[uuid] = { endsAt = animNow() + dur * 1000 }
-        Log.Write(string.format("Net: PlayAnim uuid=%s anim=%s dur=%.2fs", uuid, tostring(payload.animId), dur))
+        if not payload.quiet or not quietLogged[uuid] then
+            quietLogged[uuid] = true
+            Log.Write(string.format("Net: PlayAnim uuid=%s anim=%s dur=%.2fs%s%s", uuid, tostring(payload.animId), dur,
+                payload.force and " force" or "", payload.quiet and " (gallery; further plays not logged)" or ""))
+        end
         Osi.PlayAnimation(uuid, payload.animId, "")
     end)
 end

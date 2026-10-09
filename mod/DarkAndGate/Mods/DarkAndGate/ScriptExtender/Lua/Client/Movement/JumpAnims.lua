@@ -26,6 +26,7 @@
 
 local Log = Ext.Require("Shared/Log.lua")
 local movement = Ext.Require("data/movement.lua")
+local Tags = Ext.Require("Client/AnimLib/Tags.lua")
 
 local M = {}
 
@@ -223,7 +224,13 @@ end
 -- 2026-10-09: the ids live in data/movement.lua (jump.anims); the scan
 -- took ~4 min and jumps before it finished had no animation. A pick made
 -- with !dag_jump_anim (or a finished rescan) overrides the data.
+-- Browser tags for the jump phases win over everything below.
+local TAG_FOR_PHASE = { ascend = "jump_start", hang = "jump_loop", land = "jump_land" }
+
 function M.Pick(phase)
+    local tag = TAG_FOR_PHASE[phase]
+    local tagged = tag and Tags.ForPlayer(tag)
+    if tagged then return { key = tagged.key, dur = tagged.dur or 0, file = tagged.file } end
     local c = picks[phase]
     if c == false then return nil end
     if c then return { key = c.key, dur = c.dur or 0, file = c.file } end
@@ -282,18 +289,31 @@ function M.Register()
         if not e then Log.Write("AnimVars: no controlled entity"); return end
         local ok, err = pcall(function()
             local inst = e.AnimationBlueprint.Instance
-            local tmpl = inst.Parent.Variables
-            Log.Write(string.format("AnimVars: %d template variables, %d instance values",
-                #tmpl, #inst.Variables))
+            -- Names: the blueprint resource (the path QSAT uses), else the
+            -- instance's parent template. Values: Instance.Variables[i] is
+            -- a { Type, Value } table.
+            local names, src = {}, "Resource.Blueprints[1]"
+            pcall(function()
+                for i, v in ipairs(e.AnimationBlueprint.Resource.Blueprints[1].Variables) do names[i] = tostring(v.Name) end
+            end)
+            if #names == 0 then
+                src = "Instance.Parent"
+                pcall(function()
+                    for _, v in ipairs(inst.Parent.Variables) do names[v.Index + 1] = tostring(v.Name) end
+                end)
+            end
+            Log.Write(string.format("AnimVars: %d variable names (%s), %d instance values", #names, src, #inst.Variables))
             local shown = 0
-            for _, v in ipairs(tmpl) do
-                local name = tostring(v.Name)
+            for i, name in ipairs(names) do
                 if not f or name:lower():find(f, 1, true) then
-                    local okV, val = pcall(function() return inst.Variables[v.Index + 1] end)
-                    local vs = okV and tostring(val) or ("<" .. tostring(val) .. ">")
-                    if type(val) == "number" then vs = string.format("%.4f", val) end
-                    Log.Write(string.format("  [%d] %-40s type=%s value=%s",
-                        v.Index, name, tostring(v.Type), vs))
+                    local okV, val = pcall(function() return inst.Variables[i] end)
+                    local vs
+                    if okV and type(val) == "table" then
+                        vs = string.format("type=%s value=%s", tostring(val.Type), tostring(val.Value))
+                    else
+                        vs = okV and tostring(val) or ("<" .. tostring(val) .. ">")
+                    end
+                    Log.Write(string.format("  [%d] %-40s %s", i, name, vs))
                     shown = shown + 1
                     if shown >= 200 then break end
                 end

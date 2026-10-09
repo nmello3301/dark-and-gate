@@ -27,6 +27,12 @@ function M.PlayAnim(animId, dur)
     send(Net.Channels.PlayAnimRequest, { animId = animId, dur = dur })
 end
 
+-- Animation browser: play on any allowed character (party, gallery copy,
+-- within 10 m). force skips the turn-based guard; quiet = gallery loop.
+function M.PlayAnimOn(target, animId, dur, force, quiet)
+    send(Net.Channels.PlayAnimRequest, { animId = animId, dur = dur, target = target, force = force, quiet = quiet })
+end
+
 function M.JumpStart(durMs, h, k)
     send(Net.Channels.JumpStart, { durMs = durMs, h = h, k = k })
 end
