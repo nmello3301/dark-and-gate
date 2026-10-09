@@ -13,18 +13,12 @@
 local Log = Ext.Require("Shared/Log.lua")
 local Net = Ext.Require("Shared/Net.lua")
 local ServerNet = Ext.Require("Server/Net.lua")
+local Hitbox = Ext.Require("Shared/Hitbox.lua")
 
 local M = {}
 
 -- (attackerUuid .. "|" .. nonce) -> { [targetUuid] = true }
 local landed = {}
-
-local function dist3(a, b)
-    local dx = a[1] - b[1]
-    local dy = a[2] - b[2]
-    local dz = a[3] - b[3]
-    return math.sqrt(dx * dx + dy * dy + dz * dz)
-end
 
 -- fix4: Osi.GetX/Y/Z are not callable in this build ("missing positions"
 -- on every claim). Same chain Dummy.lua uses: Osi.GetPosition, then the
@@ -66,8 +60,11 @@ function M.Register()
                     tostring(tp ~= nil), tostring(eye ~= nil)))
                 return
             end
-            local d = dist3(eye, tp)
-            local maxReach = (claim.reach or 2.0) + 1.0
+            -- Reach is measured to the target's cylinder hitbox (lifted if
+            -- the target is mid-jump), not to its feet.
+            local cyl = Hitbox.Cylinder(target, tp)
+            local d = Hitbox.Distance(cyl, eye)
+            local maxReach = (claim.reach or 2.0) + Hitbox.ReachSlack()
             if d > maxReach then
                 Log.Write(string.format("HitValidator: REJECT dist=%.2f reach=%.2f target=%s",
                     d, maxReach, target))
@@ -82,7 +79,8 @@ function M.Register()
             landed[key][target] = true
 
             local zone = claim.hitZone or "torso"
-            local zoneMult = (zone == "head") and 2.0 or (zone == "limbs") and 0.6 or 1.0
+            if zone ~= "head" and zone ~= "torso" and zone ~= "limbs" then zone = "torso" end
+            local zoneMult = Hitbox.ZoneMult(zone)
             local dmg = math.max(1, math.floor((claim.damage or 1) * zoneMult))
 
             local okD, err = pcall(function()
@@ -96,7 +94,7 @@ function M.Register()
             if not okD then
                 Log.Write("HitValidator: ApplyDamage err: " .. tostring(err))
             end
-            Log.Write(string.format("HitValidator: HIT %s zone=%s dmg=%d dist=%.2f", target, zone, dmg, d))
+            Log.Write(string.format("HitValidator: HIT %s zone=%s dmg=%d dist=%.2f lift=%.2f", target, zone, dmg, d, cyl.lift))
 
             Ext.Net.PostMessageToUser(userId, Net.Channels.HitResult, Ext.Json.Stringify({
                 target = target, zone = zone, damage = dmg, swingNonce = claim.swingNonce,

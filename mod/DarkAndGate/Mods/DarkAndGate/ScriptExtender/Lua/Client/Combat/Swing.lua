@@ -67,7 +67,7 @@ local function sampleHit()
     end
     if hit and not s.hitTargets[hit.targetUuid] then
         s.hitTargets[hit.targetUuid] = true
-        local zone = Aim.ClassifyZone(hit.targetUuid, hit.pos[2])
+        local zone = hit.zone or Aim.ClassifyZone(hit.targetUuid, hit.pos[2])
         sendHitClaim(s.def, hit.targetUuid, hit.pos, zone)
     end
     if hit and not s.firstHit then s.firstHit = hit end
@@ -119,7 +119,13 @@ local function startSwing(index)
     end
 end
 
-function M.OnLMB()
+-- 2026-10-09: a swing can't start before the previous one's recovery
+-- ends (recovery_ms in the weapon data was never enforced, so LMB spam
+-- restarted the animation every click). One early click is buffered and
+-- fires the moment recovery ends.
+local buffered = false
+
+local function advance()
     if chainExpired() then
         startSwing(1)
     else
@@ -134,10 +140,28 @@ function M.OnLMB()
     end
 end
 
+function M.OnLMB()
+    local s = State.currentSwing
+    if s and nowMs() < s.recoveryUntil then
+        if not buffered then
+            buffered = true
+            Log.Write("Swing: LMB buffered until recovery ends")
+        end
+        return
+    end
+    advance()
+end
+
 local function tick()
     local s = State.currentSwing
-    if not s then return end
+    if not s then buffered = false; return end
     local now = nowMs()
+    if buffered and now >= s.recoveryUntil then
+        buffered = false
+        advance()
+        s = State.currentSwing
+        if not s then return end
+    end
     if now >= s.activeStart and now < s.activeUntil then
         -- Sample every tick while active.
         sampleHit()

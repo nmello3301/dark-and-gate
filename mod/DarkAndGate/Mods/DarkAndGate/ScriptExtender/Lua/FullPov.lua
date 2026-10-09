@@ -14,6 +14,7 @@
 -- Commands (client console, C >>):
 --   !dag_full_pov [on|off]      toggle first-person POV
 --   !dag_pov_eye <up> <fwd> [look]  eye offset from the head bone, metres
+--   !dag_pov_anchor [bone|pivot] camera on the head bone (default) or the engine pivot
 --   !dag_pov_down <m>           extra forward shift when looking straight down (default 0.20)
 --   !dag_pov_dump               DLL logs every pose candidate to native.log
 --   !dag_pov_status             print the DLL's POV status line
@@ -35,6 +36,15 @@ local S = {
     pivot_up = -0.15,
     down_fwd = 0.20,
     dump = 0,
+    -- 1 = camera anchored on the head bone (follows the body through
+    -- attacks and jumps), 0 = the engine pivot (the M1a camera).
+    anchor = 1,
+    -- Jump lift (Client/Movement/Jump.lua -> M.Jump). The DLL starts the
+    -- lift curve the frame it sees a new jump_seq.
+    jump_seq = 0,
+    jump_ms = 0,
+    jump_h = 0,
+    jump_k = 2,
 }
 
 -- ---------------------------------------------------------------------
@@ -46,10 +56,13 @@ local function controlledEntity()
     return nil
 end
 
--- fix3: the head-bone anchor is archived (the DLL anchors on the engine
--- pivot, src=pivot), so the per-second MeshBinding/socket walk is off by
--- default -- it cost 3-4 ms per run. !dag_pov_dump still collects them.
-local USE_BONE_ANCHOR = false
+-- 2026-10-09: the head-bone anchor is back (the DLL reads Head_M from the
+-- live Granny world pose, docs/spikes/m1b-head-bone.md). The DLL only needs
+-- MeshBinding addresses now (no socket walk), refreshed every 3 s or when
+-- the controlled character changes; the cost of each walk is logged for
+-- the first few runs (fix3 measured 3-4 ms for the old mesh+socket walk).
+local USE_BONE_ANCHOR = true
+local MESH_REFRESH_MS = 3000
 
 local pausedCache = { at = -1e9, v = false }
 local function isPausedUncached()
@@ -178,16 +191,26 @@ end
 -- ---------------------------------------------------------------------
 -- Per-tick writer
 -- ---------------------------------------------------------------------
-local cache = { meshes = {}, sock = -1, skel = 0, at = -100000, ent = nil }
+local cache = { meshes = {}, sock = -1, skel = 0, at = -100000, ent = nil, visual = nil, timed = 0 }
 local lastWrite = 0
 
 local function refreshCache(e, now)
-    if e == nil then cache.meshes = {}; return end
-    if cache.ent ~= e or now - cache.at > 1000 then
-        cache.ent = e
+    if e == nil then cache.meshes = {}; cache.visual = nil; return end
+    -- Compare by handle string: a fresh entity userdata each tick need
+    -- not compare equal to the cached one.
+    local key = tostring(e)
+    if cache.ent ~= key or now - cache.at > MESH_REFRESH_MS then
+        local t0 = tonumber(Ext.Timer.MonotonicTime()) or 0
+        cache.ent = key
         cache.at = now
         cache.meshes = collectMeshes(e, nil)
-        cache.sock, cache.skel = headSocket(e, nil)
+        local okV, vis = pcall(function() return e.Visual.Visual end)
+        cache.visual = okV and addrOf(vis) or nil
+        if cache.timed < 3 then
+            cache.timed = cache.timed + 1
+            Log.Write(string.format("FullPov: mesh walk %d meshes, visual=%s in %d ms",
+                #cache.meshes, tostring(cache.visual), math.floor((tonumber(Ext.Timer.MonotonicTime()) or 0) - t0)))
+        end
     end
 end
 
@@ -206,8 +229,9 @@ local function writeState()
     if S.on and USE_BONE_ANCHOR then refreshCache(e, now) end
 
     local line = string.format(
-        "on=%d active=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
-        S.on and 1 or 0, active and 1 or 0, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
+        "on=%d active=%d visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
+        S.on and 1 or 0, active and 1 or 0, (S.on and cache.visual) or "0", S.anchor, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
+        S.jump_seq, math.floor(S.jump_ms + 0.5), S.jump_h, S.jump_k,
         S.dump, cache.sock or -1, cache.skel or 0, x, y, z,
         (S.on and #cache.meshes > 0) and table.concat(cache.meshes, ",") or "0",
         now)
@@ -251,6 +275,14 @@ local function setOn(on)
     end
 end
 
+-- Start a jump lift in the DLL. Written straight away (not on the next
+-- 150 ms tick) so the lift starts within a frame of the key press.
+function M.Jump(seq, durMs, height, flatness)
+    S.jump_seq, S.jump_ms, S.jump_h, S.jump_k = seq, durMs, height, flatness
+    lastWrite = 0
+    pcall(writeState)
+end
+
 function M.Register()
     -- POV starts off every session; make sure a hide_head left on by a
     -- previous session doesn't fire before the character exists.
@@ -268,6 +300,13 @@ function M.Register()
         S.eye_fwd = tonumber(fwd) or S.eye_fwd
         S.look    = tonumber(look) or S.look
         Log.Write(string.format("FullPov: eye_up=%.3f eye_fwd=%.3f look=%.2f", S.eye_up, S.eye_fwd, S.look))
+    end)
+
+    Ext.RegisterConsoleCommand("dag_pov_anchor", function(_, a)
+        if a == "pivot" or a == "0" then S.anchor = 0
+        elseif a == "bone" or a == "1" then S.anchor = 1
+        else S.anchor = 1 - S.anchor end
+        Log.Write("FullPov: camera anchor = " .. (S.anchor == 1 and "head bone" or "engine pivot"))
     end)
 
     Ext.RegisterConsoleCommand("dag_pov_down", function(_, m)
@@ -298,7 +337,7 @@ function M.Register()
         Log.Write("FullPov status: " .. (readStatus() or "(no status file -- is DarkAndGate.dll loaded?)"))
     end)
 
-    Log.Write("FullPov: registered !dag_full_pov / !dag_pov_eye / !dag_pov_down / !dag_pov_dump / !dag_pov_status")
+    Log.Write("FullPov: registered !dag_full_pov / !dag_pov_eye / !dag_pov_anchor / !dag_pov_down / !dag_pov_dump / !dag_pov_status")
 end
 
 return M

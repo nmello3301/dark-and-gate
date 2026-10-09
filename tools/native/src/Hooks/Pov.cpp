@@ -26,6 +26,7 @@
 
 #include "../Log.h"
 #include "../SafeMem.h"
+#include "VisualLift.h"
 
 namespace dag::pov {
 
@@ -140,11 +141,17 @@ struct LuaState {
     float pivotUp   = -0.15f;  // for the engine-pivot fallback
     float downFwd   = 0.20f;   // extra forward shift when looking straight down
     int   dump      = 0;       // bumped by Lua to request a pose dump
+    int   anchor    = 1;       // 1 = head bone (pivot until calibrated), 0 = engine pivot only
+    int   jumpSeq   = 0;       // Lua bumps it on every jump (Jump.lua)
+    float jumpMs    = 0;       // jump duration
+    float jumpH     = 0;       // apex lift, metres
+    float jumpK     = 2;       // apex flatness (2 = parabola)
     int   sockBone  = -1;      // head socket bone index (Lua)
     int   skelBones = 0;       // skeleton bone count (Lua)
     float root[3]   = { 0, 0, 0 };
     int   numMeshes = 0;
     uintptr_t meshes[kMaxMeshes] = {};
+    uintptr_t visual = 0;      // player's root rf Visual (body lift)
     DWORD readTick  = 0;
 };
 
@@ -153,16 +160,24 @@ DWORD    g_lastPollMs = 0;
 FILETIME g_lastMtime  = {};
 int      g_lastDump   = 0;
 
+// Checked every frame, but only the mtime (GetFileAttributesEx, no open)
+// unless the file changed, so a jump written by Lua starts within a frame.
+bool LuaFileMtime(FILETIME* mt)
+{
+    wchar_t path[MAX_PATH * 2];
+    OutputPath(path, MAX_PATH * 2, L"native-pov.txt");
+    WIN32_FILE_ATTRIBUTE_DATA fad;
+    if (!path[0] || !GetFileAttributesExW(path, GetFileExInfoStandard, &fad)) return false;
+    *mt = fad.ftLastWriteTime;
+    return true;
+}
+
 void PollLuaFile()
 {
     const DWORD now = GetTickCount();
-    if (now - g_lastPollMs < 100) return;
-    g_lastPollMs = now;
-
-    char buf[2048];
     FILETIME mt = {};
-    if (!ReadSmallFile(L"native-pov.txt", buf, sizeof(buf), &mt)) {
-        g_lua.on = false;
+    if (!LuaFileMtime(&mt)) {
+        if (now - g_lastPollMs > 100) { g_lastPollMs = now; g_lua.on = false; }
         return;
     }
     if (CompareFileTime(&mt, &g_lastMtime) == 0) {
@@ -171,6 +186,13 @@ void PollLuaFile()
         if (now - g_lua.readTick > 2000) g_lua.active = false;
         return;
     }
+    g_lastPollMs = now;
+
+    char buf[2048];
+    if (!ReadSmallFile(L"native-pov.txt", buf, sizeof(buf), &mt)) return;
+    // Lua writes the line in one go and ends it with " t=<ms>"; a read that
+    // caught a half-written file is retried next frame (mtime not taken).
+    if (!std::strstr(buf, " t=")) return;
     g_lastMtime = mt;
 
     LuaState s;
@@ -183,6 +205,11 @@ void PollLuaFile()
     s.pivotUp   = ValF(buf, "pivot_up", s.pivotUp);
     s.downFwd   = ValF(buf, "down_fwd", s.downFwd);
     s.dump      = ValI(buf, "dump", 0);
+    s.anchor    = ValI(buf, "anchor", 1);
+    s.jumpSeq   = ValI(buf, "jump_seq", g_lua.jumpSeq);
+    s.jumpMs    = ValF(buf, "jump_ms", 0);
+    s.jumpH     = ValF(buf, "jump_h", 0);
+    s.jumpK     = ValF(buf, "jump_k", 2);
     s.sockBone  = ValI(buf, "sock", -1);
     s.skelBones = ValI(buf, "skel", 0);
     s.root[0]   = ValF(buf, "rootx", 0);
@@ -199,6 +226,9 @@ void PollLuaFile()
             m = end;
             if (*m == ',') ++m;
         }
+    }
+    if (const char* v = FindVal(buf, "visual")) {
+        s.visual = static_cast<uintptr_t>(std::strtoull(v, nullptr, 16));
     }
     s.readTick = now;
     g_lua = s;
@@ -395,20 +425,377 @@ void Select(bool dumpToLog)
                      best.fromSocket ? "(socket)" : "(top)", best.count, best.frac);
 }
 
-bool HeadWorld(float out[3])
-{
-    if (!g_sel.valid) return false;
-    // The mesh list from Lua must still contain our mesh (character swap,
-    // equipment change, reload all invalidate it).
-    bool present = false;
-    for (int i = 0; i < g_lua.numMeshes; ++i) if (g_lua.meshes[i] == g_sel.mesh) present = true;
-    if (!present) { g_sel.valid = false; return false; }
+// ---------------------------------------------------------------------
+// Head bone from the live Granny world pose (docs/spikes/m1b-head-bone.md)
+//
+// MeshBinding +0xD0 u8 flags (bit0 = remapped), +0xB8 / +0xC0 Skeleton*
+// ("to" / "from"; the composite uses +0xC0 when remapped), +0xA0 / +0xA8
+// int* binding -> skeleton bone index.
+// Skeleton +0xD8 granny_skeleton*, +0xE0 granny_world_pose* (lazy).
+// granny_skeleton (packed): +0x08 int BoneCount, +0x0C granny_bone*.
+// granny_bone (packed, stride 0xA4): +0x00 char* Name, +0x50 InverseWorld4x4.
+// granny_world_pose (packed): +0x00 int count, +0x04 float(*)[16] World4x4
+// (row-vector 4x4: translation = floats 12..14). Pose[i] = IW(k) * W[k],
+// so W[k] is the bone's model-space transform the skin uses this frame.
+// ---------------------------------------------------------------------
+// Jump lift state (curve and UpdateJump further down).
+struct JumpLift {
+    bool          seen = false;  // first seq read is a sync, not a jump
+    int           seq = 0;
+    bool          active = false;
+    LARGE_INTEGER t0 = {};
+    float         durMs = 0, h = 0, k = 2;
+    float         lift = 0;      // this frame, metres
+};
+JumpLift g_jump;
 
-    uintptr_t arr = 0; int count = 0;
-    if (!ReadPoseHeader(g_sel.mesh, g_sel.poseSlot, arr, count) || g_sel.bone >= count) return false;
-    float mt[16] = {};
-    if (g_sel.space == 1 && !ReadMeshTransform(g_sel.mesh, mt)) return false;
-    return BoneWorld(arr, g_sel.bone, g_sel.layout, g_sel.space, mt, out);
+struct HeadSel {
+    bool      valid = false;
+    uintptr_t mb = 0;
+    uintptr_t skel = 0;
+    int       bone = -1;
+    char      name[32] = {};
+    int       xf = 0;              // model -> world source, see ModelToWorld
+    // Vertical eye offset learned from the signed-off pivot eye at rest,
+    // so switching to the bone anchor doesn't move the default eye height.
+    bool      calibrated = false;
+    int       calN = 0;
+    double    calSum = 0;
+    float     eyeUpAuto = 0;
+    // Stale-pose guard: a live head never stays bit-identical for long.
+    float     last[3] = {};
+    int       sameFrames = 0;
+};
+HeadSel g_head;
+DWORD   g_lastHeadResolveMs = 0;
+int     g_headFailLogged = 0;
+
+bool ReadU64Unaligned(uintptr_t addr, uintptr_t& out)
+{
+    return dag::safemem::ReadBytes(reinterpret_cast<void*>(addr), &out, sizeof(out));
+}
+
+bool ReadI32(uintptr_t addr, int& out)
+{
+    return dag::safemem::ReadBytes(reinterpret_cast<void*>(addr), &out, sizeof(out));
+}
+
+// Reads a C string 8 bytes at a time, falling back to single bytes, so a
+// short string at the end of a page doesn't fail the whole read.
+bool ReadCStr(uintptr_t p, char* out, size_t cap)
+{
+    size_t n = 0;
+    while (n + 1 < cap) {
+        char chunk[8];
+        if (dag::safemem::ReadBytes(reinterpret_cast<void*>(p + n), chunk, sizeof(chunk))) {
+            for (int i = 0; i < 8 && n + 1 < cap; ++i) {
+                out[n++] = chunk[i];
+                if (!chunk[i]) return true;
+            }
+        } else {
+            if (!dag::safemem::ReadBytes(reinterpret_cast<void*>(p + n), chunk, 1)) break;
+            out[n++] = chunk[0];
+            if (!chunk[0]) return true;
+        }
+    }
+    out[n < cap ? n : cap - 1] = 0;
+    return n > 0;
+}
+
+bool SkelOf(uintptr_t mb, uintptr_t& skel, uintptr_t& idxArr)
+{
+    uint8_t flags = 0;
+    if (!dag::safemem::ReadBytes(reinterpret_cast<void*>(mb + 0xD0), &flags, 1)) return false;
+    void* sk = nullptr; void* ix = nullptr;
+    if (!dag::safemem::ReadPtr(reinterpret_cast<void*>(mb), (flags & 1) ? 0xC0 : 0xB8, sk) || !sk) return false;
+    (void)dag::safemem::ReadPtr(reinterpret_cast<void*>(mb), (flags & 1) ? 0xA8 : 0xA0, ix);
+    skel = reinterpret_cast<uintptr_t>(sk);
+    idxArr = reinterpret_cast<uintptr_t>(ix);
+    return true;
+}
+
+bool GrannyBones(uintptr_t skel, uintptr_t& bones, int& n)
+{
+    void* g = nullptr;
+    if (!dag::safemem::ReadPtr(reinterpret_cast<void*>(skel), 0xD8, g) || !g) return false;
+    const uintptr_t gs = reinterpret_cast<uintptr_t>(g);
+    if (!ReadI32(gs + 0x08, n) || n <= 0 || n > kMaxBones) return false;
+    return ReadU64Unaligned(gs + 0x0C, bones) && bones != 0;
+}
+
+// Model-space 4x4 (row-vector) of skeleton bone k from the live world pose.
+bool WorldPoseBone(uintptr_t skel, int k, float m[16])
+{
+    void* wp = nullptr;
+    if (!dag::safemem::ReadPtr(reinterpret_cast<void*>(skel), 0xE0, wp) || !wp) return false;
+    const uintptr_t w = reinterpret_cast<uintptr_t>(wp);
+    int cnt = 0; uintptr_t arr = 0;
+    if (!ReadI32(w, cnt) || k < 0 || k >= cnt || cnt > kMaxBones) return false;
+    if (!ReadU64Unaligned(w + 4, arr) || !arr) return false;
+    if (!dag::safemem::ReadBytes(reinterpret_cast<void*>(arr + static_cast<uintptr_t>(k) * 64), m, 64)) return false;
+    for (int i = 0; i < 16; ++i) if (!std::isfinite(m[i])) return false;
+    return true;
+}
+
+// Once per selection: does InverseWorld(k) * W[k] reproduce the skinning
+// matrices in Pose1/Pose2? Logged only -- it proves the world pose is the
+// live source the skin is built from.
+void SelfCheck(uintptr_t mb, uintptr_t skel, uintptr_t idxArr, uintptr_t bones)
+{
+    float best = 1e9f; int bestSlot = -1, bestLayout = -1, tested = 0;
+    for (int slot = 0; slot < 2; ++slot) {
+        uintptr_t arr = 0; int count = 0;
+        if (!idxArr || !ReadPoseHeader(mb, slot, arr, count)) continue;
+        for (int layout = 0; layout < 2; ++layout) {
+            float worst = 0; int n = 0;
+            for (int i = 0; i < count && i < 8; ++i) {
+                int k = -1;
+                if (!ReadI32(idxArr + static_cast<uintptr_t>(i) * 4, k)) break;
+                float IW[16], W[16], P[12];
+                if (!dag::safemem::ReadBytes(reinterpret_cast<void*>(bones + static_cast<uintptr_t>(k) * 0xA4 + 0x50), IW, 64)) break;
+                if (!WorldPoseBone(skel, k, W)) break;
+                if (!dag::safemem::ReadBytes(reinterpret_cast<void*>(arr + static_cast<uintptr_t>(i) * 48), P, 48)) break;
+                float C[16];
+                for (int r = 0; r < 4; ++r)
+                    for (int c = 0; c < 4; ++c) {
+                        float v = 0;
+                        for (int j = 0; j < 4; ++j) v += IW[r * 4 + j] * W[j * 4 + c];
+                        C[r * 4 + c] = v;
+                    }
+                for (int e = 0; e < 12; ++e) {
+                    // layout 0: transposed 3x4 (row r = column r of C); layout 1: first 3 rows of C.
+                    const float cv = layout == 0 ? C[(e % 4) * 4 + (e / 4)] : C[e];
+                    const float d = std::fabs(cv - P[e]);
+                    if (d > worst) worst = d;
+                }
+                ++n;
+            }
+            if (n > 0) {
+                ++tested;
+                if (worst < best) { best = worst; bestSlot = slot; bestLayout = layout; }
+            }
+        }
+    }
+    dag::log::Writef("HEAD check: worldpose %s (max err %.5f, pose%d %s, %d combos)",
+                     tested == 0 ? "UNTESTED" : (best < 1e-3f ? "LIVE" : "MISMATCH"),
+                     tested ? best : 0.f, bestSlot + 1, bestLayout == 0 ? "transposed" : "direct", tested);
+}
+
+// ---------------------------------------------------------------------
+// Model -> world for the head bone. The world pose is model space; the
+// 2026-10-09 playtest showed MeshBinding+0x30 is NOT the world matrix (the
+// head came out at (-0.03, 1.75, 0.01) while the character stood at
+// (210, 21, 362)). Candidates, chosen once per selection by plausibility:
+//   0 object  the mesh's render object world TRS (MeshBinding+0x28 ->
+//             MoveableObject: +0x08 quat, +0x18 translate, +0x24 scale)
+//   1 visual  the player's root Visual world TRS (same layout)
+//   2 matrix  MeshBinding+0x30 (old path)
+//   3 none    pose already in world space
+// The render object and the Visual carry the body lift, so the head does too.
+// ---------------------------------------------------------------------
+const char* kXfNames[] = { "object", "visual", "matrix", "none" };
+
+bool ApplyTrs(uintptr_t obj, const float p[3], float out[3])
+{
+    float tr[10];
+    if (!obj || !dag::safemem::ReadBytes(reinterpret_cast<void*>(obj + 0x08), tr, sizeof(tr))) return false;
+    for (int i = 0; i < 10; ++i) if (!std::isfinite(tr[i])) return false;
+    float x = tr[0], y = tr[1], z = tr[2], w = tr[3];
+    const float ql = std::sqrt(x * x + y * y + z * z + w * w);
+    if (ql < 0.9f || ql > 1.1f) return false;
+    // glm stores x,y,z,w. A character's rotation is (nearly) yaw-only, so
+    // x and z are ~0; if instead slots 1 and 3 are ~0, the layout is w,x,y,z.
+    if ((std::fabs(tr[0]) > 0.05f || std::fabs(tr[2]) > 0.05f) &&
+        std::fabs(tr[1]) < 0.05f && std::fabs(tr[3]) < 0.05f) {
+        w = tr[0]; x = tr[1]; y = tr[2]; z = tr[3];
+    }
+    const float* t = tr + 4;
+    const float* sc = tr + 7;
+    const float v[3] = { p[0] * sc[0], p[1] * sc[1], p[2] * sc[2] };
+    // v' = v + w * c + q x c, with c = 2 * (q x v)
+    const float cx = 2.f * (y * v[2] - z * v[1]);
+    const float cy = 2.f * (z * v[0] - x * v[2]);
+    const float cz = 2.f * (x * v[1] - y * v[0]);
+    out[0] = v[0] + w * cx + (y * cz - z * cy) + t[0];
+    out[1] = v[1] + w * cy + (z * cx - x * cz) + t[1];
+    out[2] = v[2] + w * cz + (x * cy - y * cx) + t[2];
+    return Finite3(out);
+}
+
+bool ModelToWorld(int xf, uintptr_t mb, const float p[3], float out[3])
+{
+    switch (xf) {
+    case 0: {
+        void* obj = nullptr;
+        if (!dag::safemem::ReadPtr(reinterpret_cast<void*>(mb), 0x28, obj) || !obj) return false;
+        return ApplyTrs(reinterpret_cast<uintptr_t>(obj), p, out);
+    }
+    case 1:
+        return ApplyTrs(g_lua.visual, p, out);
+    case 2: {
+        float mt[16];
+        if (!ReadMeshTransform(mb, mt)) return false;
+        out[0] = mt[0] * p[0] + mt[4] * p[1] + mt[8]  * p[2] + mt[12];
+        out[1] = mt[1] * p[0] + mt[5] * p[1] + mt[9]  * p[2] + mt[13];
+        out[2] = mt[2] * p[0] + mt[6] * p[1] + mt[10] * p[2] + mt[14];
+        return Finite3(out);
+    }
+    default:
+        out[0] = p[0]; out[1] = p[1]; out[2] = p[2];
+        return Finite3(out);
+    }
+}
+
+// A head for a character whose feet are at g_lua.root (Lua's Transform).
+// `lift` is the body lift currently applied to the visual, if any.
+bool PlausibleHeadAt(const float h[3], float lift)
+{
+    const float dy = h[1] - g_lua.root[1] - lift;
+    const float dx = h[0] - g_lua.root[0], dz = h[2] - g_lua.root[2];
+    return dy > 1.0f && dy < 2.4f && std::sqrt(dx * dx + dz * dz) < 0.7f;
+}
+
+bool ResolveHead(bool dumpToLog)
+{
+    g_lastHeadResolveMs = GetTickCount();
+    static const char* kWant[] = { "Head_M", "Head", "Neck_M" };
+    for (int mi = 0; mi < g_lua.numMeshes; ++mi) {
+        const uintptr_t mb = g_lua.meshes[mi];
+        uintptr_t skel = 0, idxArr = 0, bones = 0; int n = 0;
+        if (!SkelOf(mb, skel, idxArr) || !GrannyBones(skel, bones, n)) continue;
+        int bestRank = 99, bestBone = -1; char bestName[32] = {};
+        for (int k = 0; k < n; ++k) {
+            uintptr_t np = 0; char nm[32];
+            if (!ReadU64Unaligned(bones + static_cast<uintptr_t>(k) * 0xA4, np) || !np) continue;
+            if (!ReadCStr(np, nm, sizeof(nm))) continue;
+            if (dumpToLog && (std::strstr(nm, "ead") || std::strstr(nm, "eck")))
+                dag::log::Writef("HEAD dump: mesh[%d] bone[%d] %s", mi, k, nm);
+            for (int r = 0; r < 3; ++r) {
+                if (r < bestRank && std::strcmp(nm, kWant[r]) == 0) {
+                    bestRank = r; bestBone = k;
+                    strncpy_s(bestName, nm, _TRUNCATE);
+                }
+            }
+        }
+        if (bestBone < 0) continue;
+        float W[16];
+        if (!WorldPoseBone(skel, bestBone, W)) continue;  // not animated yet
+
+        // Model -> world: first candidate that puts the head above the feet.
+        const float local[3] = { W[12], W[13], W[14] };
+        const float liftNow = dag::visuallift::BodyLiftActive() ? g_jump.lift : 0.f;
+        int xf = -1;
+        char tried[256]; int tl = 0; tried[0] = 0;
+        for (int c = 0; c < 4 && xf < 0; ++c) {
+            float o[3];
+            const bool ok = ModelToWorld(c, mb, local, o);
+            if (tl < 200) {
+                tl += std::snprintf(tried + tl, sizeof(tried) - tl, " %s=%s", kXfNames[c],
+                                    ok ? "" : "fail");
+                if (ok && tl < 200)
+                    tl += std::snprintf(tried + tl, sizeof(tried) - tl, "(%.2f,%.2f,%.2f)",
+                                        o[0] - g_lua.root[0], o[1] - g_lua.root[1], o[2] - g_lua.root[2]);
+            }
+            if (ok && PlausibleHeadAt(o, liftNow)) xf = c;
+        }
+        if (xf < 0) {
+            if (g_headFailLogged++ < 3)
+                dag::log::Writef("HEAD select: %s found but no model->world fits (rel to feet:%s)", bestName, tried);
+            continue;
+        }
+
+        // Same mesh as before (re-resolve after a hiccup): keep the calibration.
+        const bool keepCal = g_head.mb == mb && g_head.calibrated;
+        const float keptUp = g_head.eyeUpAuto;
+        g_head = HeadSel{};
+        g_head.valid = true; g_head.mb = mb; g_head.skel = skel; g_head.bone = bestBone;
+        g_head.xf = xf;
+        std::memcpy(g_head.name, bestName, sizeof(g_head.name));
+        if (keepCal) { g_head.calibrated = true; g_head.eyeUpAuto = keptUp; }
+        g_headFailLogged = 0;
+        dag::log::Writef("HEAD select: mesh[%d]=%p skel=%p bone[%d]=%s xf=%s bones=%d (rel to feet:%s)",
+                         mi, reinterpret_cast<void*>(mb), reinterpret_cast<void*>(skel), bestBone,
+                         bestName, kXfNames[xf], n, tried);
+        SelfCheck(mb, skel, idxArr, bones);
+        return true;
+    }
+    g_head.valid = false;
+    if (g_headFailLogged++ < 3) {
+        dag::log::Writef("HEAD select: no head bone in %d meshes (pivot anchor stays)", g_lua.numMeshes);
+    }
+    return false;
+}
+
+bool HeadBoneWorld(float out[3])
+{
+    if (!g_head.valid) return false;
+    bool present = false;
+    for (int i = 0; i < g_lua.numMeshes; ++i) if (g_lua.meshes[i] == g_head.mb) present = true;
+    if (!present) { g_head.valid = false; return false; }
+
+    float W[16];
+    if (!WorldPoseBone(g_head.skel, g_head.bone, W)) return false;
+    const float t[3] = { W[12], W[13], W[14] };
+    if (!ModelToWorld(g_head.xf, g_head.mb, t, out)) return false;
+
+    if (std::memcmp(out, g_head.last, sizeof(g_head.last)) == 0) {
+        if (++g_head.sameFrames == 120) {
+            dag::log::Writef("HEAD: pose frozen for 120 frames -- treating as stale, pivot anchor until it moves");
+        }
+    } else {
+        g_head.sameFrames = 0;
+        std::memcpy(g_head.last, out, sizeof(g_head.last));
+    }
+    return g_head.sameFrames < 120;
+}
+
+// ---------------------------------------------------------------------
+// Jump lift (visual only). Lua bumps jump_seq (Jump.lua); the curve
+// y = h * (1 - |2u - 1|^k) runs on QPC time from the frame we see it.
+// ---------------------------------------------------------------------
+double   g_qpcFreq = 0;
+
+double MsSince(const LARGE_INTEGER& t0)
+{
+    if (g_qpcFreq == 0) {
+        LARGE_INTEGER f; QueryPerformanceFrequency(&f);
+        g_qpcFreq = static_cast<double>(f.QuadPart);
+    }
+    LARGE_INTEGER n; QueryPerformanceCounter(&n);
+    return static_cast<double>(n.QuadPart - t0.QuadPart) * 1000.0 / g_qpcFreq;
+}
+
+void UpdateJump()
+{
+    if (g_lua.jumpSeq != g_jump.seq) {
+        const bool start = g_jump.seen && g_lua.jumpSeq != 0 && g_lua.jumpMs > 1.0f && g_lua.on && g_lua.active;
+        g_jump.seq = g_lua.jumpSeq;
+        g_jump.seen = true;
+        if (start) {
+            g_jump.active = true;
+            QueryPerformanceCounter(&g_jump.t0);
+            g_jump.durMs = g_lua.jumpMs;
+            g_jump.h = g_lua.jumpH;
+            g_jump.k = g_lua.jumpK < 1.0f ? 1.0f : g_lua.jumpK;
+            { int a, b, c; dag::visuallift::TakeStats(a, b, c); }  // reset per jump
+            dag::log::Writef("JUMP start seq=%d dur=%.0fms h=%.2f k=%.1f lift=%s",
+                             g_jump.seq, g_jump.durMs, g_jump.h, g_jump.k,
+                             dag::visuallift::BodyLiftActive() ? "body+camera" : "camera-only jump");
+        }
+    }
+    g_jump.lift = 0;
+    if (!g_jump.active) return;
+    const double ms = MsSince(g_jump.t0);
+    if (ms >= g_jump.durMs || !g_lua.on || !g_lua.active) {
+        g_jump.active = false;
+        int hw = 0, rw = 0, ew = 0;
+        dag::visuallift::TakeStats(hw, rw, ew);
+        dag::log::Writef("JUMP end seq=%d after %.0fms body writes: hook=%d refresh=%d external=%d",
+                         g_jump.seq, ms, hw, rw, ew);
+        return;
+    }
+    const float u = static_cast<float>(ms / g_jump.durMs);
+    g_jump.lift = g_jump.h * (1.0f - std::pow(std::fabs(2.0f * u - 1.0f), g_jump.k));
 }
 
 // ---------------------------------------------------------------------
@@ -592,11 +979,12 @@ void WriteStatus()
     const DWORD now = GetTickCount();
     if (now - g_lastStatusMs < 500) return;
     g_lastStatusMs = now;
-    char line[768];
+    char line[1024];
     const int len = std::snprintf(line, sizeof(line),
         "on=%d active=%d applied=%d src=%s rotOff=0x%X rotCal=%d sel=%d bone=%d%s mesh=%d pose%d layout%d %s "
         "eye=%.3f,%.3f,%.3f P=%.3f,%.3f,%.3f head=%.3f,%.3f,%.3f rot=%.3f,%.3f,%.3f "
-        "root=%.3f,%.3f,%.3f mouselook=%d toggled=%d filter=%d meshes=%d t=%u\n",
+        "root=%.3f,%.3f,%.3f mouselook=%d toggled=%d filter=%d meshes=%d "
+        "head=%s headBone=%d headCal=%d eyeUpAuto=%.3f lift=%.3f liftMode=%s jumpSeq=%d t=%u\n",
         g_lua.on ? 1 : 0, g_lua.active ? 1 : 0, g_status.applied ? 1 : 0, g_status.src,
         g_rotOff, g_rotLogged ? 1 : 0, g_sel.valid ? 1 : 0, g_sel.bone,
         g_sel.fromSocket ? "(socket)" : "(top)", g_sel.meshIdx, g_sel.poseSlot + 1, g_sel.layout,
@@ -607,7 +995,9 @@ void WriteStatus()
         g_status.rot[0], g_status.rot[1], g_status.rot[2],
         g_lua.root[0], g_lua.root[1], g_lua.root[2],
         g_mlWanted.load() ? 1 : 0, g_toggled.load() ? 1 : 0, g_filterInstalled ? 1 : 0,
-        g_lua.numMeshes, (unsigned)now);
+        g_lua.numMeshes,
+        g_head.valid ? g_head.name : "none", g_head.bone, g_head.calibrated ? 1 : 0, g_head.eyeUpAuto,
+        g_jump.lift, dag::visuallift::Mode(), g_jump.seq, (unsigned)now);
     WriteSmallFile(L"native-pov-status.txt", line, len);
 }
 
@@ -626,17 +1016,23 @@ void OnFrame(void* gameplayCam)
     if (g_lua.on != g_lastOn) {
         g_lastOn = g_lua.on;
         dag::log::Writef("POV: %s", g_lua.on ? "ON" : "OFF");
-        if (g_lua.on) g_sel.valid = false;  // fresh selection on every enable
+        if (g_lua.on) { g_sel.valid = false; g_head = HeadSel{}; }  // fresh selection on every enable
     }
 
     if (g_lua.on && g_lua.numMeshes > 0) {
         const DWORD now = GetTickCount();
         const bool dumpReq = (g_lua.dump != g_lastDump);
         if (dumpReq) g_lastDump = g_lua.dump;
-        if (dumpReq || (!g_sel.valid && now - g_lastSelectMs > 1000)) {
-            Select(dumpReq);
+        if (dumpReq) Select(true);  // legacy skinning-matrix dump (diagnostics only)
+        if (dumpReq || (!g_head.valid && now - g_lastHeadResolveMs > 1000)) {
+            ResolveHead(dumpReq);
         }
     }
+
+    UpdateJump();
+    dag::visuallift::SetVisual((g_lua.on && g_lua.active) ? g_lua.visual : 0);
+    dag::visuallift::SetLift(g_jump.lift);
+    dag::visuallift::Refresh();
     if (!g_lua.on) g_status.applied = false;
     WriteStatus();
 }
@@ -685,27 +1081,59 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
     float pivot[3];
     const bool pivotOk = ReadVec(cam, 0x24, pivot);
 
-    if (HeadWorld(head)) {
+    // The body lift (VisualLift) moves the mesh, so a head bone read from
+    // it already carries the lift; the pivot (TransformComponent) never does.
+    const bool bodyLift = dag::visuallift::BodyLiftActive();
+    const float lift = g_jump.lift;
+
+    if (g_lua.anchor && HeadBoneWorld(head)) {
         // Sanity: must be near the engine's own idea of where the character is.
         const bool sane = !pivotOk ||
             (std::fabs(head[0] - pivot[0]) < 2.0f && std::fabs(head[2] - pivot[2]) < 2.0f &&
-             std::fabs(head[1] - pivot[1]) < 2.5f);
-        if (sane) {
+             std::fabs(head[1] - pivot[1]) < 2.5f + lift);
+        if (!sane) {
+            if (++g_badFrames > 30) { g_head.valid = false; g_badFrames = 0; }
+        } else if (!g_head.calibrated) {
+            // Learn the eye height above the head bone from the signed-off
+            // pivot eye, at rest (no jump), then switch to the bone.
+            if (pivotOk && !g_jump.active) {
+                const float bodyY = head[1] - (bodyLift ? lift : 0.f);
+                g_head.calSum += static_cast<double>(pivot[1] + g_lua.pivotUp - bodyY);
+                if (++g_head.calN >= 30) {
+                    float up = static_cast<float>(g_head.calSum / g_head.calN);
+                    if (up < -0.30f || up > 0.40f) {
+                        dag::log::Writef("HEAD calibrate: eye offset %.3f out of range, using 0.10", up);
+                        up = 0.10f;
+                    }
+                    g_head.eyeUpAuto = up;
+                    g_head.calibrated = true;
+                    dag::log::Writef("HEAD calibrate: eye = %s + %.3f m (from pivot eye over 30 frames)",
+                                     g_head.name, up);
+                }
+            }
+        } else {
+            g_badFrames = 0;
             eye[0] = head[0] + fx * fwdTotal;
-            eye[1] = head[1] + g_lua.eyeUp;
+            // The head carries whatever lift is really on the body; add the
+            // rest so the camera always rises the full amount.
+            float missing = lift;
+            if (bodyLift) {
+                const float applied = dag::visuallift::AppliedLift();
+                missing = lift - (applied < 0.f ? 0.f : (applied > lift + 0.05f ? lift : applied));
+            }
+            eye[1] = head[1] + g_head.eyeUpAuto + g_lua.eyeUp + missing;
             eye[2] = head[2] + fz * fwdTotal;
-            src = "bone"; have = true; g_badFrames = 0;
-        } else if (++g_badFrames > 30) {
-            g_sel.valid = false;  // reselect next second
+            src = "bone"; have = true;
         }
     }
-    if (!have && g_sel.mesh) {
+    const uintptr_t meshForFallback = g_head.mb ? g_head.mb : g_sel.mesh;
+    if (!have && meshForFallback) {
         float mt[16];
-        if (ReadMeshTransform(g_sel.mesh, mt)) {
+        if (ReadMeshTransform(meshForFallback, mt)) {
             const float base[3] = { mt[12], mt[13], mt[14] };
             if (!pivotOk || (std::fabs(base[0] - pivot[0]) < 2.0f && std::fabs(base[2] - pivot[2]) < 2.0f)) {
                 eye[0] = base[0] + fx * fwdTotal;
-                eye[1] = base[1] + g_lua.eyeHeight;
+                eye[1] = base[1] + g_lua.eyeHeight + (bodyLift ? 0.f : lift);
                 eye[2] = base[2] + fz * fwdTotal;
                 src = "mesh"; have = true;
             }
@@ -714,7 +1142,7 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
     if (!have) {
         if (!pivotOk) return false;
         eye[0] = pivot[0] + fx * fwdTotal;
-        eye[1] = pivot[1] + g_lua.pivotUp;
+        eye[1] = pivot[1] + g_lua.pivotUp + lift;
         eye[2] = pivot[2] + fz * fwdTotal;
         src = "pivot";
     }

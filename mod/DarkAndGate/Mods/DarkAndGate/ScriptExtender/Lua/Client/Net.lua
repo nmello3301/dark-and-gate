@@ -5,6 +5,7 @@
 
 local Log = Ext.Require("Shared/Log.lua")
 local Net = Ext.Require("Shared/Net.lua")
+local Hitbox = Ext.Require("Shared/Hitbox.lua")
 
 local M = {}
 
@@ -20,8 +21,14 @@ function M.Ping(nonce)
     })
 end
 
-function M.PlayAnim(animId, speed)
-    send(Net.Channels.PlayAnimRequest, { animId = animId, speed = speed })
+-- dur: the clip's length in seconds (server watchdog flushes the Osiris
+-- queue once it should be over); nil = server default.
+function M.PlayAnim(animId, dur)
+    send(Net.Channels.PlayAnimRequest, { animId = animId, dur = dur })
+end
+
+function M.JumpStart(durMs, h, k)
+    send(Net.Channels.JumpStart, { durMs = durMs, h = h, k = k })
 end
 
 function M.CastSpell(spell, aim, targetUuid)
@@ -57,7 +64,12 @@ function M.Register()
         Log.Write(string.format("Client Net: PingReply nonce=%s roundtrip=%dms server_dt=%dms",
             tostring(msg.nonce), now - sent, reply - sent))
     end)
-    Log.Write("Client Net: PingReply listener registered")
+    -- Another player's jump: lift their hitbox locally for aim and melee.
+    Ext.RegisterNetListener(Net.Channels.JumpNotify, function(_, payload)
+        local ok, msg = pcall(Ext.Json.Parse, payload)
+        if ok and msg and msg.uuid then Hitbox.SetJump(msg.uuid, msg.durMs, msg.h, msg.k) end
+    end)
+    Log.Write("Client Net: PingReply + JumpNotify listeners registered")
 end
 
 return M

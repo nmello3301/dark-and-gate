@@ -36,6 +36,7 @@ local State  = Ext.Require("Client/Combat/State.lua")
 local Swing  = Ext.Require("Client/Combat/Swing.lua")
 local Hotbar = Ext.Require("Client/Combat/Hotbar.lua")
 local Spells = Ext.Require("Client/Combat/Spells.lua")
+local Jump   = Ext.Require("Client/Movement/Jump.lua")
 
 local M = {}
 
@@ -130,6 +131,22 @@ local KEY_TO_SLOT = {
 }
 local HOTBAR_TOGGLE_KEY = "H"
 
+-- Space = jump (Client/Movement/Jump.lua). The scancode name is expected
+-- to be "SPACE"; the first key whose name contains "space" is logged raw
+-- so the real name is on record, and that name is used from then on.
+local JUMP_KEY = "SPACE"
+local jumpKeyLogged = false
+local function isJumpKey(key)
+    if key == JUMP_KEY then return true end
+    if not jumpKeyLogged and key:lower():find("space", 1, true) then
+        jumpKeyLogged = true
+        Log.Write("Combat Input: jump key raw name = " .. key)
+        JUMP_KEY = key
+        return true
+    end
+    return false
+end
+
 local function onKey(event)
     local key   = tostring(event.Key or "")
     local evt   = tostring(event.Event or "")
@@ -147,6 +164,13 @@ local function onKey(event)
     end
 
     if not State.IsCombatActive() then return end
+
+    if isJumpKey(key) then
+        if evt == "KeyDown" and not event.Repeat then Jump.OnSpace() end
+        -- Block vanilla Space on both down and up.
+        prevent(event)
+        return
+    end
 
     local slot = KEY_TO_SLOT[key]
     if slot then
@@ -182,7 +206,7 @@ function M.Register()
         rawLog = (arg == "on" or arg == "1")
         Log.Write("Combat Input: raw input log " .. (rawLog and "ON" or "OFF"))
     end)
-    Log.Write("Combat Input: registered fix1 (LMB/RMB/1-0 + H hotbar; MMB off = UI mode)")
+    Log.Write("Combat Input: registered fix1 (LMB/RMB/1-0 + H hotbar + Space jump; MMB off = UI mode)")
 end
 
 return M

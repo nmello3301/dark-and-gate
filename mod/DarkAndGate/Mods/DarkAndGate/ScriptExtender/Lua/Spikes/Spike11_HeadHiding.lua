@@ -191,6 +191,51 @@ end
 -- config flag. apply() is otherwise private.
 M.Apply = apply
 
+-- 2026-10-09: the hide is a one-shot write, but the engine writes
+-- RenderPasses back now and then (the face showed for a moment while
+-- playing; most likely BG3's near-camera fade). Enforce() re-zeroes any
+-- hidden renderable that came back, without logging each one; NativeBridge
+-- calls it every 100 ms while the head is hidden. Re-hides are counted and
+-- logged (first 5, then every 50th) so we can see how often it happens.
+local reHides = 0
+local function enforceVisual(vis, label)
+    local okO, descs = pcall(function() return vis.ObjectDescs end)
+    if not okO or descs == nil then return end
+    for i, od in ipairs(descs) do
+        local okP, pl = pcall(function() return od.Renderable.PropertyList end)
+        if okP and pl then
+            local okR, cur = pcall(function() return pl.RenderPasses end)
+            if okR and cur ~= nil and fmt(cur) ~= fmt(0) and fmt(cur) ~= "RenderPass()" then
+                local key = label .. "#" .. tostring(i)
+                if savedPasses[key] == nil then savedPasses[key] = fmt(cur) end
+                pcall(function() pl.RenderPasses = 0 end)
+                reHides = reHides + 1
+                if reHides <= 5 or reHides % 50 == 0 then
+                    Log.Write(string.format("Spike11: re-hid %s od[%d] (was %s) total=%d",
+                        label, i, fmt(cur), reHides))
+                end
+            end
+        end
+    end
+end
+
+function M.Enforce()
+    -- Quiet lookup: findLocalChar() logs, and this runs every 100 ms.
+    local okE, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    local eh = okE and ents and ents[1] or nil
+    if not eh then return end
+    local ent = Ext.Entity.Get(eh); if ent == nil then return end
+    local root = ent.Visual and ent.Visual.Visual or nil
+    if root and root.Attachments then
+        for i, att in ipairs(root.Attachments) do
+            local name = templateName(att.Visual)
+            if matchesHidePattern(name) then
+                enforceVisual(att.Visual, string.format("root.att[%d] %s", i, tostring(name)))
+            end
+        end
+    end
+end
+
 function M.Register()
     Ext.RegisterConsoleCommand("dag11_dump", function() dump() end)
     Ext.RegisterConsoleCommand("dag11_hide", function() apply(true) end)

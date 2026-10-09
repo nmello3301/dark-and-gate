@@ -65,6 +65,12 @@ Net.Channels = {
     -- Server echoes the result so client.log shows "Dummy: spawned ..." or
     -- "Dummy: no template matched; top candidates ...".
     SpawnDummyReply   = "DAG_SpawnDummyReply",
+
+    -- First-person jump (visual lift). Client -> server: { durMs, h, k }.
+    -- The server lifts the jumper's hitbox (Shared/Hitbox.lua) and relays
+    -- JumpNotify { uuid, durMs, h, k } to every other client.
+    JumpStart         = "DAG_JumpStart",
+    JumpNotify        = "DAG_JumpNotify",
 }
 
 -- Every channel both sides care about. Both server and client must register
@@ -84,6 +90,8 @@ Net.AllChannels = {
     Net.Channels.CombatIntent,
     Net.Channels.SpawnDummy,
     Net.Channels.SpawnDummyReply,
+    Net.Channels.JumpStart,
+    Net.Channels.JumpNotify,
 }
 
 return Net

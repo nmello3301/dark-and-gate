@@ -18,6 +18,7 @@
 --     world ray misses, so a ground cast always has a point.
 
 local Log = Ext.Require("Shared/Log.lua")
+local Hitbox = Ext.Require("Shared/Hitbox.lua")
 
 local M = {}
 
@@ -331,29 +332,42 @@ end
 -- ---------------------------------------------------------------------
 -- Cone targeting
 -- ---------------------------------------------------------------------
--- Each character is a vertical body from feet + 0.3 m to feet + 1.5 m;
--- the angle is measured to the closest of 5 points on it.
-local BODY = { 0.3, 0.6, 0.9, 1.2, 1.5 }
+-- Each character is a cylinder hitbox (Shared/Hitbox.lua, data/hitbox.lua)
+-- that rises with the character's jump. A ray that hits the cylinder wins
+-- outright (angle 0); otherwise the angle is measured to the closest of 7
+-- points on its axis and must be inside the cone. Distance is measured to
+-- the cylinder's surface, not its axis.
+local AXIS_SAMPLES = 7
 function M.ConeTarget(eye, fwd, maxDist, halfDeg)
     local cosMax = math.cos(math.rad(halfDeg))
+    local t = now()
     local best
     for _, c in ipairs(M.Characters()) do
+        local cyl = Hitbox.Cylinder(c.uuid, c.feet, t)
         local cBest
-        for _, h in ipairs(BODY) do
-            local px, py, pz = c.feet[1], c.feet[2] + h, c.feet[3]
-            local dx, dy, dz = px - eye[1], py - eye[2], pz - eye[3]
-            local d = math.sqrt(dx * dx + dy * dy + dz * dz)
-            if d > 1e-3 and d <= maxDist then
-                local cosA = (dx * fwd[1] + dy * fwd[2] + dz * fwd[3]) / d
-                if cosA >= cosMax and (not cBest or cosA > cBest.cosA) then
-                    cBest = { cosA = cosA, pos = { px, py, pz }, d = d }
+        local rd = Hitbox.RayHit(cyl, eye, fwd, maxDist)
+        if rd then
+            cBest = { cosA = 1, pos = { eye[1] + fwd[1] * rd, eye[2] + fwd[2] * rd, eye[3] + fwd[3] * rd }, d = rd }
+        else
+            for i = 0, AXIS_SAMPLES - 1 do
+                local py = cyl.y0 + 0.1 + (cyl.y1 - cyl.y0 - 0.15) * i / (AXIS_SAMPLES - 1)
+                local px, pz = cyl.x, cyl.z
+                local dx, dy, dz = px - eye[1], py - eye[2], pz - eye[3]
+                local d = math.sqrt(dx * dx + dy * dy + dz * dz)
+                local surf = math.max(0, d - cyl.r)
+                if d > 1e-3 and surf <= maxDist then
+                    local cosA = (dx * fwd[1] + dy * fwd[2] + dz * fwd[3]) / d
+                    if cosA >= cosMax and (not cBest or cosA > cBest.cosA) then
+                        cBest = { cosA = cosA, pos = { px, py, pz }, d = surf }
+                    end
                 end
             end
         end
         if cBest then
             local ang = math.deg(math.acos(math.min(1, cBest.cosA)))
             if not best or ang < best.angle - 0.5 or (math.abs(ang - best.angle) <= 0.5 and cBest.d < best.distance) then
-                best = { targetUuid = c.uuid, pos = cBest.pos, distance = cBest.d, angle = ang }
+                best = { targetUuid = c.uuid, pos = cBest.pos, distance = cBest.d, angle = ang,
+                         zone = Hitbox.Zone(cyl, cBest.pos[2]), lift = cyl.lift }
             end
         end
     end
@@ -384,15 +398,11 @@ function M.FanClosestCharacter(eye, forward, reach, yawDeg, _pitchDeg, _rays, _n
     return M.MeleeTarget(eye, forward, reach + 0.5, math.max(35, (yawDeg or 90) / 2))
 end
 
--- Hit zone from hit height above the target's feet.
+-- Hit zone from the hit height on the target's cylinder hitbox.
 function M.ClassifyZone(targetUuid, hitY)
     for _, c in ipairs(nearList) do
         if c.uuid == targetUuid and c.feet then
-            -- Head zones need the target's real height (M2: bone reads);
-            -- until then only low hits count as limbs.
-            local dy = (hitY or 0) - c.feet[2]
-            if dy < 0.5 then return "limbs" end
-            return "torso"
+            return Hitbox.Zone(Hitbox.Cylinder(c.uuid, c.feet), hitY or c.feet[2])
         end
     end
     return "torso"

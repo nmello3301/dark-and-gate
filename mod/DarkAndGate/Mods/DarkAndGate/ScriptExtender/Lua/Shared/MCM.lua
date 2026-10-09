@@ -34,6 +34,15 @@ function MCM.DefineBool(key, default, label)
     end
 end
 
+function MCM.DefineNumber(key, default, label, min, max)
+    defs[key] = { kind = "number", default = default, label = label, min = min, max = max }
+    values[key] = default
+    local api = tryMcm()
+    if api and type(api.RegisterSetting) == "function" then
+        pcall(api.RegisterSetting, "DarkAndGate", key, "number", default, label)
+    end
+end
+
 function MCM.Get(key)
     local api = tryMcm()
     if api and type(api.GetSetting) == "function" then
@@ -44,6 +53,11 @@ function MCM.Get(key)
 end
 
 function MCM.Set(key, value)
+    local d = defs[key]
+    if d and d.kind == "number" and type(value) == "number" then
+        if d.min and value < d.min then value = d.min end
+        if d.max and value > d.max then value = d.max end
+    end
     values[key] = value
     local api = tryMcm()
     if api and type(api.SetSetting) == "function" then

@@ -8,8 +8,13 @@
 //   character's MeshBinding objects (from tostring() of SE userdata).
 //
 // The DLL, every frame:
-//   1. Reads the head bone's world position straight out of the
-//      MeshBinding's Pose array (read-only, SEH-guarded).
+//   1. Reads the head bone (Head_M) from the skeleton's live Granny world
+//      pose, reached through the MeshBinding (read-only, SEH-guarded; see
+//      docs/spikes/m1b-head-bone.md). The eye height above the bone is
+//      calibrated once from the pivot eye at rest, so the default view
+//      height is unchanged. !dag_pov_anchor pivot switches back to the
+//      engine pivot. Jump lift (VisualLift.h) is added on the pivot path,
+//      and on the bone path only when the body lift isn't live.
 //   2. In the vt[0x58] commit hook (the one call proven to reach the
 //      screen), sets BOTH the eye (newPos) and every candidate look-at
 //      field on the camera to a consistent pair:
@@ -24,7 +29,7 @@
 //      starts the engine's own Camera Rotate, the release is swallowed,
 //      the next press ends it.
 //
-// Fallbacks, in order: head bone -> mesh world transform + eye height
+// Fallbacks, in order: head bone (once calibrated) -> mesh world transform + eye height
 // -> engine desired pivot (cam+0x24) + offset. Each frame picks the
 // first that validates, so a bad pose read can never move the camera
 // somewhere absurd.

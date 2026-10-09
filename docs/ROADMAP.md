@@ -128,8 +128,12 @@ Lessons recorded for the next pass: `Ext.Require` only works at load time; `hit.
 
 ### Known issues (M1b)
 
+- **WASD dead after LMB spam** (reproducible, 3 fast clicks): queued `Osi.PlayAnimation` tasks stalled the Osiris queue. Fix written 2026-10-09 (queue purge before each clip + watchdog + swing recovery gate); `!dag_unstick` remains the manual escape. Awaiting playtest.
+- **First swing animation only plays on the second LMB** (damage lands on the first): queue purge now runs before every clip (2026-10-09), awaiting playtest.
+- **Jump while walking showed no lift** with the head-bone camera: the camera now adds any lift the body is missing; the DLL re-lifts the body when an engine write bypasses the hooks and logs `body writes: hook/refresh/external` per jump.
+- **Face shows for a moment** while playing: the engine writes the hidden head's `RenderPasses` back; a 100 ms re-hide enforcer (logged) written 2026-10-09.
 - **Turn-based takes over** as soon as an enemy turns hostile — the real-time loop (Brawl import) is the fix. Until then swing animations are skipped in turn-based combat; `!dag_unstick` clears a stuck action queue.
-- **Attack animations move Gale ahead of the camera**: the camera follows the engine pivot, not the body. Needs the head-bone anchor (see Archived) — now a real polish item, not just nice-to-have.
+- **Attack animations move Gale ahead of the camera**: the camera follows the engine pivot, not the body. Head-bone anchor written 2026-10-09 (`Head_M` via the Granny world pose, [m1b-head-bone.md](spikes/m1b-head-bone.md)); awaiting playtest.
 - Camera can dip under the map while casting in turn-based (moot once combat is real-time).
 - Rare frames of Gale's head showing while walking.
 - All 3 swings use the same clip (`HUM_M_Rig_DFLT_CMBT_Melee_RHand_01_Attack`); per-swing clips and timing come with the animation pass.
@@ -144,6 +148,9 @@ Lessons recorded for the next pass: `Ext.Require` only works at load time; `hit.
 - [x] Interim hit check: camera-relative swing arc (cone + line of sight), torso / limb zones, server-validated damage. *(2026-10-08)*
 - [ ] Blade-path hit check, with head / torso / limb zones. Uses `GetBoneWorldPos`.
 - [ ] **AI melee goes through our swing + blade-path system, not BG3 attack rolls.** `Pick.decideActionOnTarget` adapted so melee choices resolve through the swing scheduler, not `Osi.UseSpell`.
+- [ ] **First-person movement: floaty Space jump** (visual lift of body + camera, BG3 jump clips in phases, `data/movement.lua`). Written 2026-10-09, awaiting playtest.
+- [ ] **Cylinder hitboxes** for every character (aim, melee, server validation), lifted while jumping. Written 2026-10-09, awaiting playtest.
+- [ ] **Head-bone camera anchor** (`Head_M` from the live Granny world pose; fixes the camera falling behind Gale during attacks). Written 2026-10-09, awaiting playtest.
 - [ ] Blocking and parry: **custom animations**; block only with a shield equipped, parry only with a weapon that can parry (decided 2026-10-08).
 - [x] Fire Bolt aimed at the crosshair (character aim assist, or ground / object point). *(2026-10-08)*
 - [x] Fireball cast at the crosshair. *(2026-10-08)*
@@ -208,7 +215,7 @@ Lessons recorded for the next pass: `Ext.Require` only works at load time; `hit.
 
 Native plugin exports that would have gone into M1a but are not blocking M1b. Each line names what was learned and what the next session would start from.
 
-- [ ] **Head-bone anchor for the camera.** M1a reaches the body `Pose` array through the MeshBinding addresses passed from Lua (`Pose1`/`Pose2`, 65 bones body, 83 head). The matrices are 3×4 model-space skinning matrices (`M = ModelSpaceCurrent × inverse(ModelSpaceBind)`), not bone positions — need the bind-pose model-space positions **and** the skeleton→binding bone index map before a bone position falls out as `worldPos = ObjectTransform × (M × bindPos)`. For M1b the engine-anchor camera is tight enough; head bob and leaning are polish, not blockers.
+- [ ] **Head-bone anchor for the camera.** *(Un-archived 2026-10-09: solved without bind pose via the skeleton's Granny world pose, see M1b checklist.)* M1a reaches the body `Pose` array through the MeshBinding addresses passed from Lua (`Pose1`/`Pose2`, 65 bones body, 83 head). The matrices are 3×4 model-space skinning matrices (`M = ModelSpaceCurrent × inverse(ModelSpaceBind)`), not bone positions — need the bind-pose model-space positions **and** the skeleton→binding bone index map before a bone position falls out as `worldPos = ObjectTransform × (M × bindPos)`. For M1b the engine-anchor camera is tight enough; head bob and leaning are polish, not blockers.
 - [ ] **`GetBoneWorldPos(entity, boneName) → vec3`.** Same groundwork as the head-bone anchor. M1b's hit detection switches to a timed camera-relative swing arc (ray fan from the eye through the arc) which doesn't need a bone position, so this is unblocked but no longer on the critical path.
 - [ ] **`SetAnimPlaySpeed(entity, mult)` and `CancelAnim(entity)`.** No SE Lua exposure of the field, Granny internals not RE'd. Hit stop and chain-timing finesse are deferred (M1b uses fixed timings).
 - [ ] **`PushRagdoll(entity, vec3, force)`.** Directional death animations keyed on hit direction (M1b) cover the feel without a physics impulse.

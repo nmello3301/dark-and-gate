@@ -42,6 +42,7 @@ add_library(DarkAndGate SHARED
     src/Hooks/Camera.cpp
     src/Hooks/Mouselook.cpp
     src/Hooks/Pov.cpp
+    src/Hooks/VisualLift.cpp
     src/Hooks/Stubs.cpp
 )
 

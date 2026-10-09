@@ -268,8 +268,14 @@ function M.Register(side)
         local v = c:match("%[dag%.camera%][^%[]-hide_head%s*=%s*(%w+)")
         return v == "true" or v == "True" or v == "1"
     end
+    local lastEnforceMs = 0
     local function tickHeadHide()
         local now = Ext.Utils.MonotonicTime()
+        -- Keep the head hidden: the engine sometimes writes RenderPasses back.
+        if lastHideHead and now - lastEnforceMs >= 100 and Spike11 and Spike11.Enforce then
+            lastEnforceMs = now
+            pcall(Spike11.Enforce)
+        end
         if now - lastHideHeadPollMs < 500 then return end
         lastHideHeadPollMs = now
         local want = readHideHeadFlag()

@@ -61,6 +61,42 @@ handlers[Net.Channels.Ping] = function(payload, userId)
     Log.Write(string.format("Net: Ping from user=%d nonce=%s", userId, tostring(payload.nonce)))
 end
 
+-- 2026-10-09: Osi.PlayAnimation is a queued Osiris task. A new one queued
+-- behind a clip that is still playing (LMB spam, jump phases) stalls the
+-- character's task queue and WASD stops working until a reload. So:
+--   * before every PlayAnimation, purge + flush the character's Osiris
+--     queue (the new clip interrupts the old one instead of queueing);
+--   * a watchdog flushes the queue once more after the last clip should
+--     have ended (payload.dur seconds, default 1.5 s).
+local ANIM_DEFAULT_S = 1.5
+local ANIM_WATCHDOG_MS = 300
+local animState = {}   -- uuid -> { endsAt = ms }
+local queueFnsLogged = false
+
+local function clearOsirisQueue(uuid, why)
+    local results = {}
+    for _, fn in ipairs({ "PurgeOsirisQueue", "FlushOsirisQueue" }) do
+        local ok, err = pcall(function() return Osi[fn](uuid) end)
+        results[#results + 1] = fn .. "=" .. (ok and "ok" or tostring(err))
+    end
+    if not queueFnsLogged or why == "watchdog" then
+        queueFnsLogged = true
+        Log.Write(string.format("Net: Osiris queue cleared (%s) %s", why, table.concat(results, " ")))
+    end
+end
+
+local function animNow() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
+
+local function animWatchdog()
+    local t = animNow()
+    for uuid, st in pairs(animState) do
+        if t >= st.endsAt + ANIM_WATCHDOG_MS then
+            animState[uuid] = nil
+            enqueueOsi(function() clearOsirisQueue(uuid, "watchdog") end)
+        end
+    end
+end
+
 handlers[Net.Channels.PlayAnimRequest] = function(payload, userId)
     enqueueOsi(function()
         local uuid = userToCharacter(userId)
@@ -81,7 +117,14 @@ handlers[Net.Channels.PlayAnimRequest] = function(payload, userId)
             Log.Write("Net: PlayAnim skipped (in turn-based combat) anim=" .. tostring(payload.animId))
             return
         end
-        Log.Write(string.format("Net: PlayAnim uuid=%s anim=%s", uuid, tostring(payload.animId)))
+        local dur = tonumber(payload.dur) or ANIM_DEFAULT_S
+        if dur <= 0 then dur = ANIM_DEFAULT_S end
+        -- 2026-10-09 playtest: the first clip after a pause only played on
+        -- the second click (the second click's purge released it), so the
+        -- queue is cleared before EVERY clip, not only on interrupts.
+        clearOsirisQueue(uuid, animState[uuid] and "interrupt" or "before-play")
+        animState[uuid] = { endsAt = animNow() + dur * 1000 }
+        Log.Write(string.format("Net: PlayAnim uuid=%s anim=%s dur=%.2fs", uuid, tostring(payload.animId), dur))
         Osi.PlayAnimation(uuid, payload.animId, "")
     end)
 end
@@ -166,7 +209,25 @@ handlers[Net.Channels.HitStopRequest] = function(payload, userId)
     end)
 end
 
+-- First-person jump: lift the jumper's hitbox for the jump's duration and
+-- tell the other clients (their aim needs the lifted cylinder too).
+local Hitbox = Ext.Require("Shared/Hitbox.lua")
+handlers[Net.Channels.JumpStart] = function(payload, userId)
+    local t0 = animNow()
+    enqueueOsi(function()
+        local uuid = userToCharacter(userId)
+        if not uuid then return end
+        Hitbox.SetJump(uuid, payload.durMs, payload.h, payload.k, t0)
+        Log.Write(string.format("Net: Jump uuid=%s dur=%dms h=%.2f (hitbox lifted)",
+            uuid, tonumber(payload.durMs) or 0, tonumber(payload.h) or 0))
+        local msg = Ext.Json.Stringify({ uuid = uuid, durMs = payload.durMs, h = payload.h, k = payload.k })
+        local okB = pcall(function() Ext.Net.BroadcastMessage(Net.Channels.JumpNotify, msg, uuid) end)
+        if not okB then pcall(function() Ext.ServerNet.BroadcastMessage(Net.Channels.JumpNotify, msg, uuid) end) end
+    end)
+end
+
 function M.Register()
+    Ext.Events.Tick:Subscribe(function() pcall(animWatchdog) end)
     for channel, handler in pairs(handlers) do
         Ext.RegisterNetListener(channel, function(c, payload, userId)
             local ok, parsed = pcall(Ext.Json.Parse, payload)

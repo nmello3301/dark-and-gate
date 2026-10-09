@@ -70,3 +70,10 @@ CombatSwing.Register()
 CombatHotbar.Register()
 CombatHUD.Register()
 CombatDebug.Register()
+
+-- First-person movement: floaty Space jump (visual lift in the DLL,
+-- BG3's jump clips played in phases). See Client/Movement/Jump.lua.
+local JumpAnims = Ext.Require("Client/Movement/JumpAnims.lua")
+local Jump      = Ext.Require("Client/Movement/Jump.lua")
+JumpAnims.Register()
+Jump.Register()

@@ -65,6 +65,14 @@ Verified by spike 2 on 2026-10-08.
   - `hit.Position`, `hit.Normal` — same vec3 bug, read as `(0, 0, 0)`. Reconstruct Position from the ray; Normal needs the native plugin.
 - Sweep / Test variants exist (`SweepSphereClosest`, `SweepCapsuleClosest`, `TestBox`, `TestSphere`), same argument shape with an extra geometry parameter.
 
+### Visual world transform (client)
+
+From the SE v32 source (`Render.h:77`), not yet verified in-game: `Visual:SetWorldTranslate({x, y, z})` (also `SetWorldRotate`, `SetWorldScale`) is Lua-callable on `ent.Visual.Visual` and calls the Visual's vtable slot 2, which moves the whole character render (renderables and attachments). The engine re-writes it through slot 5 whenever the entity's `TransformComponent` changes, so a Lua write only holds while standing still. `!dag_lift_probe <m>` tests it. See [m1b-visual-lift.md](spikes/m1b-visual-lift.md).
+
+### Animation resources
+
+From the SE v32 source, not yet verified in-game: `Ext.Resource.Get(id, "Animation")` exposes `Duration` (seconds), `Looping`, `SourceFile` and `Events`. `JumpAnims.lua` reads `Duration` to time the jump phases; a `0` falls back to `data/movement.lua`.
+
 ### Input events (client)
 
 Verified by spike 1 on 2026-10-08.
