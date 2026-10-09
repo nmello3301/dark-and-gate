@@ -81,6 +81,13 @@ function M.Register()
         Spells.Cast(id)
     end)
 
+    -- fix5: if Gale gets stuck (can't walk) after an animation, this asks
+    -- the server to purge his action queue.
+    Ext.RegisterConsoleCommand("dag_unstick", function()
+        ClientNet.PlayAnim("__unstick__")
+        Log.Write("Unstick: requested (server purges Gale's action queue)")
+    end)
+
     -- Fire one swing on command (bypasses mouse-look gate so the user can
     -- test the swing path when stuck in UI mode).
     Ext.RegisterConsoleCommand("dag_swing_test", function()

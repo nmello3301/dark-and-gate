@@ -65,6 +65,22 @@ handlers[Net.Channels.PlayAnimRequest] = function(payload, userId)
     enqueueOsi(function()
         local uuid = userToCharacter(userId)
         if not uuid then Log.Write("Net: PlayAnim no character for user " .. userId); return end
+        -- fix5: "__unstick__" clears a stuck action queue (!dag_unstick).
+        if payload.animId == "__unstick__" then
+            for _, fn in ipairs({ "PurgeOsirisQueue", "FlushOsirisQueue", "StopAnimation" }) do
+                local ok, err = pcall(function() return Osi[fn](uuid) end)
+                Log.Write(string.format("Net: unstick Osi.%s ok=%s %s", fn, tostring(ok), ok and "" or tostring(err)))
+            end
+            return
+        end
+        -- fix5: in BG3 turn-based combat a scripted PlayAnimation on the
+        -- player queues an action that never finishes outside your turn,
+        -- which left Gale unable to walk. Skip swing anims while in combat.
+        local okC, inC = pcall(function() return Osi.IsInCombat(uuid) end)
+        if okC and tonumber(inC) == 1 then
+            Log.Write("Net: PlayAnim skipped (in turn-based combat) anim=" .. tostring(payload.animId))
+            return
+        end
         Log.Write(string.format("Net: PlayAnim uuid=%s anim=%s", uuid, tostring(payload.animId)))
         Osi.PlayAnimation(uuid, payload.animId, "")
     end)

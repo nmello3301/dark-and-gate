@@ -23,7 +23,7 @@ local ClientNet = Ext.Require("Client/Net.lua")
 
 local M = {}
 
-local CACHE_PATH = "DarkAndGate/anim-cache-v2.txt"   -- fix4: v2 scoring
+local CACHE_PATH = "DarkAndGate/anim-cache-v3.txt"   -- fix5: v3 scoring
 local STEP = 50                   -- inner iterations per tick (fix4: was 80)
 
 local cands = {}                  -- { key, res, file, score }
@@ -38,13 +38,23 @@ local function now() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
 -- (HUM_M_Rig_<weapon>_CMBT_Melee_RHand_NN_Attack...). Only real melee
 -- combat clips qualify; the player's own rig (hum_m_rig) and one-handed
 -- slashing (1HS) win; skills, dashes and other phases are pushed down.
-local EXCLUDE = { "_hit", "react", "dodge", "block", "parry", "loop", "idle", "death", "knock",
+-- fix5 (v3): BG3 splits a melee attack into _Antic / _Attack / _Recover
+-- (+ _Cancel); only the _Attack part is a swing. v2 picked a _Cancel clip
+-- and a zombie-rig clip. Now: basename must start with the player's rig
+-- (HUM_M_Rig_), must contain "_attack", and "_hit" is no longer excluded
+-- (it hid "..._Attack_Hit"-style names).
+local EXCLUDE = { "hitreact", "react", "dodge", "block", "parry", "loop", "idle", "death", "knock",
                   "downed", "prepare", "_end", "_start", "offhand", "lhand", "unarmed", "shield",
-                  "_add", "additive", "face", "_ik", "pose", "cine" }
+                  "_add", "additive", "face", "_ik", "pose", "cine", "cancel", "antic", "recover",
+                  "dash", "jump" }
+local RIG_PREFIX = "hum_m_rig_"
 
 local function score(file)
     local f = file:lower()
-    if not f:find("_cmbt_melee_", 1, true) then return nil end
+    local base = f:gsub("^.*/", "")
+    if base:sub(1, #RIG_PREFIX) ~= RIG_PREFIX then return nil end
+    if not f:find("_cmbt_", 1, true) or not f:find("_attack", 1, true) then return nil end
+    if not (f:find("melee", 1, true) or f:find("_1hs_", 1, true) or f:find("_dflt_", 1, true)) then return nil end
     for _, x in ipairs(EXCLUDE) do
         if f:find(x, 1, true) then return nil end
     end
@@ -53,8 +63,8 @@ local function score(file)
     if f:find("_1hs_", 1, true) then s = s + 5
     elseif f:find("_1hp_", 1, true) or f:find("_1hb_", 1, true) then s = s + 3 end
     if f:find("rhand", 1, true) then s = s + 2 end
-    if f:find("attack", 1, true) then s = s + 3 end
-    if f:find("dash", 1, true) or f:find("skill", 1, true) or f:find("jump", 1, true) then s = s - 6 end
+    if f:find("melee", 1, true) then s = s + 3 end
+    if f:find("skill", 1, true) then s = s - 6 end
     return s
 end
 
@@ -93,8 +103,9 @@ local function saveCache()
     pcall(Ext.IO.SaveFile, CACHE_PATH, table.concat(lines, "\n"))
 end
 
-local function loadCache()
-    local ok, s = pcall(Ext.IO.LoadFile, CACHE_PATH)
+local OLD_CACHE_PATH = "DarkAndGate/anim-cache-v2.txt"
+local function loadCache(path)
+    local ok, s = pcall(Ext.IO.LoadFile, path or CACHE_PATH)
     if not ok or not s or s == "" then return false end
     cands = {}
     for line in s:gmatch("[^\r\n]+") do
@@ -160,6 +171,11 @@ local function scanBody()
         n = n + 1
         if n % STEP == 0 then coroutine.yield() end
     end
+    if #found == 0 and #cands > 0 then
+        state = "done"
+        Log.Write("Anims: scan found nothing new -- keeping the interim picks")
+        return
+    end
     cands = found
     sortCands()
     saveCache()
@@ -176,6 +192,12 @@ function M.StartScan(force)
         Log.Write(string.format("Anims: %d cached candidates (%s); !dag_anim_scan to rescan", #cands, CACHE_PATH))
         autoPick()
         return
+    end
+    -- fix5: while the v3 scan runs, use whatever the v2 cache still
+    -- qualifies under v3 scoring so swings animate right away.
+    if not force and loadCache(OLD_CACHE_PATH) then
+        Log.Write(string.format("Anims: %d interim candidates from the v2 cache", #cands))
+        autoPick()
     end
     stats = { sets = 0, maps = 0, t0 = now() }
     state = "scanning"
