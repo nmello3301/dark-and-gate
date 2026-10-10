@@ -101,8 +101,10 @@ return {
         mode          = "real",   -- 2026-10-10 playtest: real jump approved
         strafe_sign   = -1,       -- A/D in the air (playtest: +1 was reversed)
         land_speed    = 3.0,      -- m/s, max fall speed handed back at the end of the curve
-        use_cast      = true,
-        phases        = { "cast", "ascend", "descend" },
+        -- 2026-10-10: no take-off windup (the Cast clip felt clunky; jumps
+        -- that skipped it felt much better) -> ascend, descend only.
+        use_cast      = false,
+        phases        = { "ascend", "descend" },
         max_clip_rate = 1.6,
         anims = {
             cast    = { key = "f49c1788-7819-481f-9b83-2344d708e682", dur = 0.600 },
