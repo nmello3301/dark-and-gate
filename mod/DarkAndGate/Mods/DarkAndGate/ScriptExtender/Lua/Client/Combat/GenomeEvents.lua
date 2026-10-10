@@ -1,237 +1,79 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
--- BG3's spell animation event (docs/spikes/spell-anims-native.md).
+-- BG3's spell animation events (docs/spikes/genome-capture.md).
 --
--- Vanilla casts don't use Osi.PlayAnimation: the client sends a gameplay
--- event to the character's animation blueprint (main spell event
--- ba293d56-..., 21 args: 6 animation mapping ids, 3 cast sets, 3 ids,
--- bools, enums, cast uuid, animation set). The blueprint copies the args
--- into SPELL_Prepare / SPELL_Loop / ... and plays them. No Osiris task, so
--- nothing roots the character. Full body (the vanilla graph has no upper
--- body layer): legs hold the cast pose while walking (accepted 2026-10-10).
+-- Vanilla casts don't use Osi.PlayAnimation: the client sends gameplay
+-- events to the character's animation blueprint, which plays the clips. No
+-- Osiris task, so nothing roots the character. Full body (the vanilla graph
+-- has no upper body layer): legs hold the cast pose while walking (accepted
+-- 2026-10-10).
 --
--- The arg order isn't decoded statically, so it is captured from a real
--- vanilla cast:
---   !dag_genome_events on   log every gameplay event for the player
---   ... cast Fire Bolt the vanilla way (POV off), then select it again and
---       cancel with right-click ...
---   !dag_genome_events off  saves DarkAndGate/genome-spell-template.txt:
---       the Fire Bolt event (args with their types) and the first other
---       event seen after it ended = cancel candidate.
--- Replay (Prepare.lua): the template with each arg that held one of Fire
--- Bolt's SpellAnimation ids swapped for the new spell's id of the same role.
+-- Layouts captured natively from a vanilla Fire Bolt (2026-10-10, capture
+-- round 2, native-genome-capture.txt):
+--   SELECT e8545375-...  9 args, sent when a spell is selected:
+--     0 AnimationSimpleName = prepare id (SpellAnimation slot 0)
+--     1, 2 AnimationSimpleName = null
+--     3 AnimationSimpleName = loop id (slot 4)
+--     4, 5 AnimationSimpleName = null
+--     6 Bool false, 7 Enum 0, 8 Enum 0
+--     The blueprint plays prepare, then holds loop.
+--   CANCEL e9db2a81-...  1 arg, sent on right-click cancel:
+--     0 AnimationSimpleName = the spell's slot 6 id (the un-prepare clip)
+--   CAST ba293d56-...  21 args with cast sets + recover; we don't send it,
+--     the engine does when the server's UseSpell runs.
+-- An empty Lua string becomes the null FixedString (SE CreateFixedString),
+-- the same value vanilla puts in unused slots.
+--
+--   !dag_genome_events on|off   native capture of every event to the
+--                               blueprint -> native-genome-capture.txt
 
-local Log       = Ext.Require("Shared/Log.lua")
-local SpellAnims = Ext.Require("Client/Combat/SpellAnims.lua")
-local spells    = Ext.Require("data/spells.lua")
-local FullPov   = Ext.Require("FullPov.lua")
+local Log     = Ext.Require("Shared/Log.lua")
+local spells  = Ext.Require("data/spells.lua")
+local FullPov = Ext.Require("FullPov.lua")
 
 local M = {}
 
-M.SPELL_EVENT = "ba293d56-e14d-4d62-8151-4d63f1257bcd"
-local SIDE = { ["0df4bd9f-9a34-4714-a7be-3bb6b7c6844d"] = true, ["96516143-3fb4-4838-aa83-654a6a3e76d9"] = true,
-               ["43b4462a-cdc9-478f-9f09-897127f39985"] = true }
-local TEMPLATE_PATH = "DarkAndGate/genome-spell-template.txt"
-local TEMPLATE_SPELL = "Projectile_FireBolt"
+M.SELECT_EVENT = "e8545375-1537-4eba-b045-0cee8a0ad64c"
+M.CANCEL_EVENT = "e9db2a81-877d-436f-8a8f-7b17e1d588d1"
 
-local logging = false
-local seen = {}          -- { t, name, args = { {Type, Value} } }
-local template = nil     -- { args = {...}, roles = { [argIndex] = "prepare"|... }, cancel = name|nil }
+local function asn(id) return { Type = "AnimationSimpleName", Value = id or "" } end
 
-local function player()
-    local ok, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
-    return ok and ents and ents[1] or nil
+local function handleHex(ent)
+    local ok, n = pcall(Ext.Utils.HandleToInteger, ent)
+    return ok and n and string.format("0x%016X", n) or tostring(ent)
 end
 
-local function str(v)
-    local ok, s = pcall(tostring, v)
-    return ok and s or "?"
+local function queue(ent, event, args)
+    return pcall(function() Ext.System.AnimationBlueprint:QueueGameplayEventToGenome(ent, event, args) end)
 end
 
--- Read this frame's queued events (best effort; fields logged once).
-local shapeLogged = false
-local function poll()
-    local okS, sing = pcall(Ext.Entity.GetAllEntitiesWithComponent, "AnimationGameplayEventsSingleton")
-    if not okS or not sing or not sing[1] then return end
-    local me = player()
-    local meKey = me and str(me) or nil
-    pcall(function()
-        local comp = sing[1].AnimationGameplayEventsSingleton
-        for _, e in pairs(comp.Events or comp) do
-            local ent = e.Entity
-            if not meKey or str(ent) == meKey then
-                local name = str(e.Event or e.Name)
-                local args = {}
-                pcall(function()
-                    for i, a in ipairs(e.Args or e.Parameters or {}) do
-                        args[i] = { Type = str(a.Type), Value = str(a.Value) }
-                    end
-                end)
-                seen[#seen + 1] = { t = tonumber(Ext.Timer.MonotonicTime()) or 0, name = name, args = args }
-                local parts = {}
-                for i, a in ipairs(args) do parts[#parts + 1] = string.format("%d:%s=%s", i - 1, a.Type, a.Value) end
-                Log.Write(string.format("Genome event %s args(%d) %s", name, #args, table.concat(parts, " ")))
-                if not shapeLogged then shapeLogged = true; Log.Write("Genome: event record fields read OK") end
-            end
-        end
-    end)
-end
-
-local function saveTemplate()
-    local fb = nil
-    for _, e in ipairs(seen) do if e.name == M.SPELL_EVENT and #e.args > 0 then fb = e; break end end
-    if not fb then Log.Write("Genome: no " .. M.SPELL_EVENT .. " event captured (cast Fire Bolt the vanilla way while logging)"); return end
-    -- Roles: which arg held which of Fire Bolt's SpellAnimation ids.
-    local slots = SpellAnims.Slots(TEMPLATE_SPELL)
-    local idRole = {}
-    for role, slot in pairs(SpellAnims.SLOTS) do if slots[slot] then idRole[slots[slot]:lower()] = role end end
-    local lines = { "# genome spell event template (captured from " .. TEMPLATE_SPELL .. ")" }
-    for i, a in ipairs(fb.args) do
-        local role = idRole[a.Value:lower()] or "-"
-        lines[#lines + 1] = string.format("arg|%d|%s|%s|%s", i - 1, a.Type, a.Value, role)
-    end
-    -- Cancel candidate: the first non-spell, non-side event after the last
-    -- spell event of the capture.
-    local lastSpell = 0
-    for i, e in ipairs(seen) do if e.name == M.SPELL_EVENT then lastSpell = i end end
-    local cancel = nil
-    for i = lastSpell + 1, #seen do
-        local n = seen[i].name
-        if n ~= M.SPELL_EVENT and not SIDE[n] then cancel = n; break end
-    end
-    lines[#lines + 1] = "cancel|" .. (cancel or "-")
-    pcall(Ext.IO.SaveFile, TEMPLATE_PATH, table.concat(lines, "\n") .. "\n")
-    Log.Write(string.format("Genome: template saved (%d args, cancel=%s) -> %s", #fb.args, tostring(cancel), TEMPLATE_PATH))
-    template = nil
-end
-
-local function loadTemplate()
-    if template ~= nil then return template or nil end
-    template = false
-    local ok, s = pcall(Ext.IO.LoadFile, TEMPLATE_PATH)
-    if not ok or not s then return nil end
-    local t = { args = {}, roles = {}, cancel = nil }
-    for line in s:gmatch("[^\r\n]+") do
-        local i, ty, val, role = line:match("^arg|(%d+)|([^|]*)|([^|]*)|(.*)$")
-        if i then
-            t.args[tonumber(i) + 1] = { Type = ty, Value = val }
-            if role ~= "-" then t.roles[tonumber(i) + 1] = role end
-        end
-        local c = line:match("^cancel|(.*)$")
-        if c and c ~= "-" then t.cancel = c end
-    end
-    if #t.args > 0 then template = t end
-    return template or nil
-end
-function M.Template() return loadTemplate() end
-
--- Coerce a logged value back to what the Lua setter expects.
-local function value(a)
-    if a.Type == "Bool" then return a.Value == "true" end
-    local n = tonumber(a.Value)
-    if n and (a.Type == "Enum" or a.Type == "Int" or a.Type == "Float") then return n end
-    return a.Value
-end
-
-local probeArgs   -- defined with the probe below
-
--- Queue the spell event for `anims` (SpellAnims.For result). Returns ok, why.
+-- Play `anims` (SpellAnims.For result): prepare, then the held loop.
+-- Returns ok, how.
 function M.PlaySpell(ent, anims)
-    local t = loadTemplate()
-    local layout = spells.spell_anims and spells.spell_anims.event_slots
-    if not t and layout then
-        -- Slots found with !dag_genome_try (data/spells.lua event_slots).
-        local args = probeArgs(-1, "")
-        for role, idx in pairs(layout) do
-            if anims[role] and args[idx + 1] then args[idx + 1].Value = anims[role].key end
-        end
-        local ok, err = pcall(function() Ext.System.AnimationBlueprint:QueueGameplayEventToGenome(ent, M.SPELL_EVENT, args) end)
-        return ok, ok and "genome event (data slots)" or tostring(err)
-    end
-    if not t then return false, "no template and no data/spells.lua spell_anims.event_slots yet (find them with !dag_genome_try)" end
-    local args = {}
-    for i, a in ipairs(t.args) do
-        local v = value(a)
-        local role = t.roles[i]
-        if role and anims[role] then v = anims[role].key end
-        args[i] = { Type = a.Type, Value = v }
-    end
-    local ok, err = pcall(function()
-        Ext.System.AnimationBlueprint:QueueGameplayEventToGenome(ent, M.SPELL_EVENT, args)
-    end)
+    local prep, loop = anims.prepare and anims.prepare.key, anims.loop and anims.loop.key
+    if not prep and not loop then return false, "no prepare or loop id" end
+    local args = { asn(prep), asn(), asn(), asn(loop), asn(), asn(),
+        { Type = "Bool", Value = false }, { Type = "Enum", Value = 0 }, { Type = "Enum", Value = 0 } }
+    local ok, err = queue(ent, M.SELECT_EVENT, args)
     if not ok then return false, tostring(err) end
-    return true, "genome event"
+    return true, "select event to " .. handleHex(ent)
 end
 
-function M.Cancel(ent)
-    local t = loadTemplate()
-    if not t or not t.cancel then return false, "no cancel event captured" end
-    local ok, err = pcall(function() Ext.System.AnimationBlueprint:QueueGameplayEventToGenome(ent, t.cancel, {}) end)
-    return ok, ok and ("event " .. t.cancel) or tostring(err)
+-- Leave the prepare / loop with the spell's own un-prepare clip (slot 6,
+-- else the fallback family's).
+function M.Cancel(ent, anims)
+    local fb = spells.spell_anims and spells.spell_anims.fallback or {}
+    local id = (anims and anims.slot6) or fb.cancel
+    if not id then return false, "no cancel clip id" end
+    local ok, err = queue(ent, M.CANCEL_EVENT, { asn(id) })
+    if not ok then return false, tostring(err) end
+    return true, "cancel event " .. id:sub(1, 8) .. ((anims and anims.slot6) and "" or " (fallback)")
 end
-
--- Probe (2026-10-10): the to-genome queue is hidden from Lua, so the
--- vanilla args can't be captured there. Send the event with the documented
--- 21-arg type layout and our ids in chosen slots, and watch what plays.
---   !dag_genome_try all [role]   every AnimationSimpleName slot = role's id
---   !dag_genome_try <i> [role]   only slot i (0-based) = role's id
--- role = prepare (default) | loop | cast | recover (Fire Bolt's ids).
-local TYPES = { "AnimationSimpleName", "AnimationSimpleName", "AnimationSimpleName", "AnimationSimpleName",
-    "AnimationSimpleName", "AnimationSimpleName", "ShortNameSet", "ShortNameSet", "ShortNameSet",
-    "AnimationSimpleName", "AnimationSimpleName", "AnimationSimpleName", "Bool", "Bool", "Enum", "Bool",
-    "Enum", "Bool", "Enum", "FixedString", "AnimationSetID" }
-probeArgs = function(slot, id)
-    local args = {}
-    for i, ty in ipairs(TYPES) do
-        local v
-        if ty == "AnimationSimpleName" then v = ((slot == "all") or (tonumber(slot) == i - 1)) and id or ""
-        elseif ty == "Bool" then v = false
-        elseif ty == "Enum" then v = 0
-        else v = "" end
-        args[i] = { Type = ty, Value = v }
-    end
-    return args
-end
-M.ProbeArgs = probeArgs
 
 function M.Register()
-    Ext.RegisterConsoleCommand("dag_genome_try", function(_, slot, role, force)
-        -- 2026-10-10: guessed args CRASHED the game (native, in the queue
-        -- call). Disabled until the native capture gives the real layout.
-        if force ~= "force" then
-            Log.Write("Genome try: disabled (guessed args crash the game); capture the real event with !dag_genome_events first")
-            return
-        end
-        slot, role = slot or "all", role or "prepare"
-        local me = player()
-        if not me then return end
-        local a = SpellAnims.For("Projectile_FireBolt", me)
-        local id = a and a[role] and a[role].key
-        if not id then Log.Write("Genome try: no " .. role .. " id"); return end
-        for _, n in ipairs({ 21, 12 }) do
-            local args = probeArgs(slot, id)
-            while #args > n do table.remove(args) end
-            local ok, err = pcall(function()
-                Ext.System.AnimationBlueprint:QueueGameplayEventToGenome(me, M.SPELL_EVENT, args)
-            end)
-            Log.Write(string.format("Genome try: event %s slot=%s %s=%s (%d args) -> %s", M.SPELL_EVENT:sub(1, 8), slot, role,
-                id:sub(1, 8), n, ok and "queued (watch Gale)" or ("ERROR " .. tostring(err))))
-            if ok then break end
-        end
-    end)
-    Ext.Events.Tick:Subscribe(function() if logging then pcall(poll) end end)
     Ext.RegisterConsoleCommand("dag_genome_events", function(_, a)
-        if a == "on" or a == "1" then
-            logging, seen = true, {}
-            Log.Write("Genome: logging the player's animation gameplay events. Cast Fire Bolt vanilla, then select + right-click cancel, then !dag_genome_events off")
-            FullPov.SetGenomeCapture(true)
-            Log.Write("Genome: native capture ON -> native-genome-capture.txt")
-        else
-            logging = false
-            Log.Write(string.format("Genome: logging off, %d events", #seen))
-            FullPov.SetGenomeCapture(false)
-            Log.Write("Genome: native capture OFF")
-            saveTemplate()
-        end
+        local on = (a == "on" or a == "1")
+        FullPov.SetGenomeCapture(on)
+        Log.Write("Genome: native capture " .. (on and "ON -> native-genome-capture.txt" or "OFF"))
     end)
 end
 

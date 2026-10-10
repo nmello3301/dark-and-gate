@@ -83,7 +83,7 @@ function M.Stop(reason)
     else
         if c.inst then FullPov.SetClipRates(c.inst, nil) end
         if reason ~= "re-arm" and me then
-            local ok, how = GenomeEvents.Cancel(me)
+            local ok, how = GenomeEvents.Cancel(me, c.anims)
             Log.Write("Prepare: cancel via " .. (ok and how or ("none (" .. tostring(how) .. ")")))
         end
     end

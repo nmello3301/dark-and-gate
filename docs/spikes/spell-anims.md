@@ -1,6 +1,6 @@
 # Spell animations: which clips, and who plays them
 
-**Status:** 2026-10-10. Recording plus stats verified; the non-rooting playback path is being researched statically ([spell-anims-native.md](spell-anims-native.md)).
+**Status:** 2026-10-10. Recording plus stats verified; event layouts captured ([genome-capture.md](genome-capture.md)); playback by replaying BG3's select / cancel events is built, not verified in-game yet.
 
 ## The recording ([anim-record-2026-10-10.txt](../anim-record-2026-10-10.txt))
 
@@ -35,7 +35,7 @@ SpellAnimation "3ff87abf…,,;,,;38cdb41c…,,;85414f5f…,,;d8925ce4…,,;,,;ea
 | 3 | **recover** | `85414f5f` (recorded) |
 | 4 | **loop** | `d8925ce4` (recorded) |
 | 5 | (empty) | |
-| 6 | unknown, not played in the recording | `eadedcce` |
+| 6 | **cancel** (sent on right-click cancel; genome capture round 2) | `eadedcce` |
 | 7, 8 | (empty) | |
 
 - Fireball uses the same family.

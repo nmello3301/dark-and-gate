@@ -1,6 +1,6 @@
 # Native capture of the spell animation gameplay event (static RE)
 
-**Status:** round 1 run in-game (tail-jump hook); round 2 (queue entry detour, all events, ShortNameSet decode) static RE + built, not run yet. **Date:** 2026-10-10 · **Binary:** `bg3_dx11.exe` Patch 8 (image base `0x140000000`) · **SE:** v32 source in `reference/bg3se`.
+**Status:** round 1 run in-game (tail-jump hook); round 2 (queue entry detour, all events, ShortNameSet decode) run in-game 2026-10-10: select, cancel and cast layouts captured (see Round 2 result). **Date:** 2026-10-10 · **Binary:** `bg3_dx11.exe` Patch 8 (image base `0x140000000`) · **SE:** v32 source in `reference/bg3se`.
 **Method:** pefile + capstone on the exe bytes and Ghidra decompiles (read-only). Only names, RVAs and byte patterns are recorded here. Follows [spell-anims-native.md](spell-anims-native.md).
 
 Confidence tags: **[H]** instruction- or data-level evidence · **[M]** strong inference · **[L]** hypothesis.
@@ -165,3 +165,20 @@ What to look for (round 2):
 3. **Cancelling:** is any event queued? If so, which id and which `from=`?
 4. **`[SPELL]` args 6–8 `set=[…]`:** which mapping ids they hold. Expected: cast ids such as `38cdb41c…` / `cd5e5d4a…`.
 5. **Non-spell events:** volume per second and ids, to decide whether a filter is needed.
+
+## Round 2 result (in-game, queue entry detour)
+
+Vanilla Fire Bolt, normal camera: select, hold, right-click cancel, select again, cast. 763 events; the spell ones are below. Every spell event goes to **two** entities in the same frame (`0x01C0000100000F7B` and `0x02000001000000FE` in that session; only the first also gets the weapon-set events, so it is the character). **[H]**
+
+| Moment | Event | Args |
+| --- | --- | --- |
+| Select | `e8545375…` (from rva `0x4207EE3`) | 9: `0` ASN `3ff87abf…` (prepare, slot 0), `1–2` null, `3` ASN `d8925ce4…` (loop, slot 4), `4–5` null, `6` Bool false, `7` Enum 0, `8` Enum 0. **Confirms the [M] slot reading.** |
+| Select | `43b4462a…` | 1: FixedString, a per-selection uuid |
+| Cancel | `e9db2a81…` (from rva `0x4209963`) | 1: ASN `eadedcce…` = **SpellAnimation slot 6**, so slot 6 is the cancel (un-prepare) clip |
+| Cast | `ba293d56…` | 21: `0–5` null; `6` ShortNameSet `[38cdb41c…]` (cast); `7`, `8` ShortNameSet `[null]` (one null entry, not empty); `9` ASN `85414f5f…` (recover); `10–11` null; `12–17` Bool/Enum 0; `18` Enum -1; `19` FixedString = the select's uuid; `20` AnimationSetID null |
+
+Empty slots are the null FixedString (`0xFFFFFFFF`), which is what SE makes from an empty Lua string. No prepare event at cast time: the cast event follows the held loop.
+
+Probable cause of the `!dag_genome_try` crash **[L]**: it sent the cast event with empty ShortNameSets, where vanilla always sends one entry.
+
+**Replay** (`Client/Combat/GenomeEvents.lua`): the select event with the spell's own slot 0 / slot 4 ids, and the cancel event with its slot 6 id, queued from Lua with `QueueGameplayEventToGenome` on the controlled character. The cast event is left to the engine.

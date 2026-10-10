@@ -46,6 +46,7 @@ return {
             loop    = "d8925ce4-d6d9-400c-92f5-ad772ef7f178",
             cast    = "38cdb41c-2eec-4e03-bb31-83cff0346c35",
             recover = "85414f5f-b448-4dda-9370-1b6c4b38b561",
+            cancel  = "eadedcce-d01b-4fbb-a1ae-d218f13aa5d6",  -- slot 6, played on cancel
         },
         cast_rate = 1.0,           -- play rate of the cast clip (per spell: spells[id].cast_rate)
         fire_point = "cast_start", -- "cast_start" | "cast_event" (text-key, when found)

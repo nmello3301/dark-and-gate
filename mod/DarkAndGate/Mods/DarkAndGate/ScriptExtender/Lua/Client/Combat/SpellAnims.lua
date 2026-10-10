@@ -9,7 +9,8 @@
 --   2 cast      (..._Bard_Damage_01_Cast)
 --   3 recover   (..._Bard_Damage_01_Recover)
 --   4 loop      (..._Bard_01_Loop, the held prepare)
---   1, 5, 7, 8 empty on the spells checked; 6 set but not seen played yet
+--   6 cancel    (sent with the cancel event; genome capture 2026-10-10)
+--   1, 5, 7, 8 empty on the spells checked
 -- The ids are animation MAPPING ids: each character resolves them through
 -- its own AnimationSets (rig, weapon stance), so the same ids serve custom
 -- characters. A slot the character can't resolve falls back to the
