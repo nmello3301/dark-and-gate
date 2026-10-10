@@ -17,6 +17,7 @@
 #include "Hooks/Camera.h"
 #include "Hooks/Mouselook.h"
 #include "Hooks/MoveSpeed.h"
+#include "Watchdog.h"
 #include "Log.h"
 
 namespace {
@@ -91,6 +92,8 @@ BOOL APIENTRY DllMain(HMODULE /*module*/, DWORD reason, LPVOID /*reserved*/)
         // WASD ground speed lever (docs/spikes/move-speed.md); patched at
         // load, before the game's threads run that code.
         dag::movespeed::Install();
+        // Freeze reporter (FREEZE: lines in native.log if frames stop).
+        dag::watchdog::Start();
     } else if (reason == DLL_PROCESS_DETACH) {
         dag::log::Shutdown();
     }

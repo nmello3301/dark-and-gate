@@ -115,9 +115,11 @@ local nat = { at = -1e9, stroll = nil, run = nil, t = nil }
 local function readNatural(now)
     if now - nat.at < 500 then return end
     nat.at = now
-    nat.stroll = tonumber(FullPov.StatusValue("tmplStroll"))
-    nat.run    = tonumber(FullPov.StatusValue("tmplRun"))
-    nat.t      = tonumber(FullPov.StatusValue("walkT"))
+    local ok, s = pcall(Ext.IO.LoadFile, "DarkAndGate/native-pov-status.txt")
+    if not ok or not s then return end
+    nat.stroll = tonumber(s:match("%stmplStroll=([^%s]+)"))
+    nat.run    = tonumber(s:match("%stmplRun=([^%s]+)"))
+    nat.t      = tonumber(s:match("%swalkT=([^%s]+)"))
 end
 
 local S = {

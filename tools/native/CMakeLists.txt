@@ -39,6 +39,7 @@ add_library(DarkAndGate SHARED
     src/GroundTruth.cpp
     src/Log.cpp
     src/PatternScan.cpp
+    src/Watchdog.cpp
     src/Hooks/Camera.cpp
     src/Hooks/Mouselook.cpp
     src/Hooks/Pov.cpp

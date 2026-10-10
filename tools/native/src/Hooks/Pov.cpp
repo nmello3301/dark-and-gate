@@ -26,6 +26,7 @@
 
 #include "../Log.h"
 #include "../SafeMem.h"
+#include "../Watchdog.h"
 #include "VisualLift.h"
 #include "AnimRate.h"
 #include "MoveSpeed.h"
@@ -1065,6 +1066,8 @@ void WriteStatus()
 // ---------------------------------------------------------------------
 void OnFrame(void* gameplayCam)
 {
+    dag::watchdog::Frame();
+    dag::watchdog::Stage("OnFrame");
     g_gameplayCam = gameplayCam;
     PollLuaFile();
     TryInstallFilter();
@@ -1093,7 +1096,9 @@ void OnFrame(void* gameplayCam)
     dag::animrate::Set(g_lua.animInst, g_lua.animRate);
     dag::movespeed::Set(g_lua.moveWalk, g_lua.moveRun);
     if (!g_lua.on) g_status.applied = false;
+    dag::watchdog::Stage("WriteStatus");
     WriteStatus();
+    dag::watchdog::Stage("game (outside our frame hook)");
 }
 
 bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, CommitFn original)
