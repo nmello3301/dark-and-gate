@@ -14,15 +14,14 @@ Run `!dag_spell_anims Projectile_FireBolt`, then `Projectile_Fireball`, then `Ta
 - For each phase, expect `SpellAnims: Projectile_FireBolt prepare 3ff87abf in every set:` followed by one line per set / subset (clip name and length). Expect one for the staff.
 - Expect `SpellAnims: stance …, weapon set …`.
 
-## 1b. Casting set, normal camera (`!dag_prepare_test`)
+## 1b. Class casting set, normal camera (`!dag_prepare_test`)
 
 1. Run `!dag_prepare_test`, watch about 6 s, then run `!dag_prepare_test stop`.
-   - Expect `CastTags: added 1 casting tag(s): a865965f (…) -> set 745fbb35-…`.
-   - Expect `Prepare: start Projectile_FireBolt via select event … (stance …, casting set ready, after 0.0xs) -> prepare <clip> …`.
-   - After the stop and 1.2 s: `CastTags: removed 1 casting tag(s) (after clip)`.
-2. Compare with vanilla (select Fire Bolt from the vanilla hotbar).
+   - Expect `CastTags: class Wizard lvl N (classes: Wizard N (prio …)) -> added 1 casting tag(s): a865965f (…) -> set 745fbb35-…; force 745fbb35: prepended (6 -> 7 entries, first 745fbb35)`.
+   - Expect `Prepare: start … (…, casting set ready, after 0.0xs) -> prepare HUM_M_Rig_DFLT_SPL_Wizard_Damage_01_Prepare (…)`.
+   - After the stop and 1.2 s: `CastTags: removed 1 casting tag(s), forced sets: 745fbb35 removed (after clip)`.
 
-Tell me: is it now the vanilla pose (standing tall, left hand holding the right elbow, hand signs)?
+Tell me: is it the vanilla pose (gallery #14)?
 
 ## 2. Arm Fire Bolt standing (`!dag_full_pov on`, key 1)
 

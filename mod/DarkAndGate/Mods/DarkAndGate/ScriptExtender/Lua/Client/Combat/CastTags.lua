@@ -8,10 +8,19 @@
 -- puts its animation set (745fbb35, Dynamic) first in AnimationSet, and the
 -- spell's prepare / loop ids resolve there: Gale's own casting pose instead
 -- of the generic one.
--- Generic rule: every type-0 tag that has an OverrideType 1 waterfall entry
--- (and no type-1 copy yet) gets a type-1 copy while channelling. The copies
--- are removed after the cast (cast_hold_s) or cancel (cancel_hold_s), so the
--- cast / recover / stow clips also come from that set.
+-- The override sets are per class (gallery 2026-10-10: Cleric, Druid,
+-- Paladin, Ranger, Warlock, Wizard ... casting sets keyed by tags; the
+-- developer picked #14 Wizard_Damage_01_Prepare = 745fbb35 for Gale).
+-- Rule (developer, 2026-10-10): the casting set of the character's class
+-- with the MOST LEVELS (tie: higher ClassDescription.AnimationSetPriority,
+-- then the first class taken). Its subclass's tags are tried first, then
+-- the class's: the first tag with an OverrideType 1 waterfall entry gives
+-- the set(s). No class match -> fallback: every type-0 dynamic tag with an
+-- OverrideType 1 entry (what vanilla did for Gale).
+-- The type-1 tag copy is added like vanilla, and since the engine does not
+-- rebuild AnimationSet from a Lua-written tag, the set is also written
+-- first directly (force_set). Both are removed after the cast (cast_hold_s)
+-- or cancel (cancel_hold_s), so cast / recover / stow come from that set.
 -- Client-side and local, like the select event.
 --
 --   !dag_cast_tags [on|off]   apply / remove by hand (shows the idle change)
@@ -34,8 +43,69 @@ local function tagName(guid)
     return (ok and okN and n) and tostring(n) or "?"
 end
 
--- Tags to add and the sets they bring.
+local function classDesc(guid)
+    local ok, d = pcall(Ext.StaticData.Get, guid, "ClassDescription")
+    return ok and d or nil
+end
+
+local function guidsOf(list)
+    local out = {}
+    pcall(function() for _, g in ipairs(list) do out[#out + 1] = tostring(g) end end)
+    return out
+end
+
+-- The class whose casting set to use, or nil. Returns { name, level, tags }.
+local function topClass(ent)
+    local best = nil
+    local all = {}
+    pcall(function()
+        for i, c in ipairs(ent.Classes.Classes) do
+            local d = classDesc(c.ClassUUID)
+            local sd = (tostring(c.SubClassUUID) ~= "00000000-0000-0000-0000-000000000000") and classDesc(c.SubClassUUID) or nil
+            local e = {
+                name = d and tostring(d.Name) or tostring(c.ClassUUID):sub(1, 8),
+                sub = sd and tostring(sd.Name) or nil,
+                level = tonumber(c.Level) or 0,
+                prio = d and tonumber(d.AnimationSetPriority) or 0,
+                order = i,
+                tags = {},
+            }
+            -- Subclass tags first (more specific), then the class's.
+            if sd then for _, g in ipairs(guidsOf(sd.Tags)) do e.tags[#e.tags + 1] = g end end
+            if d then for _, g in ipairs(guidsOf(d.Tags)) do e.tags[#e.tags + 1] = g end end
+            all[#all + 1] = string.format("%s%s %d (prio %d)", e.name, e.sub and ("/" .. e.sub) or "", e.level, e.prio)
+            if not best or e.level > best.level or (e.level == best.level and e.prio > best.prio) then best = e end
+        end
+    end)
+    return best, table.concat(all, ", ")
+end
+
+local function type1Overrides(ent)
+    local by = {}
+    for _, o in ipairs(ent.AnimationWaterfall.Overrides) do
+        if tonumber(o.OverrideType) == 1 then
+            local g = tostring(o.AnimationTag)
+            by[g] = by[g] or {}
+            for _, e in ipairs(o.Overrides) do by[g][#by[g] + 1] = tostring(e.Resource) end
+        end
+    end
+    return by
+end
+
+-- Tags to add and the sets they bring, plus a description of the choice.
 local function candidates(ent)
+    local by = type1Overrides(ent)
+    local cls, all = topClass(ent)
+    if cls then
+        for _, g in ipairs(cls.tags) do
+            if by[g] then
+                return { { tag = g, sets = by[g] } },
+                    string.format("class %s%s lvl %d (classes: %s)", cls.name, cls.sub and ("/" .. cls.sub) or "", cls.level, all)
+            end
+        end
+    end
+    local why = cls and string.format("no casting set for class %s (classes: %s), fallback to dynamic tags", cls.name, all)
+        or "no Classes component, fallback to dynamic tags"
     local have0, have1 = {}, {}
     for _, t in ipairs(ent.DynamicAnimationTags.Tags) do
         local g = tostring(t.Tag)
@@ -51,7 +121,7 @@ local function candidates(ent)
             have1[g] = true
         end
     end
-    return out
+    return out, why
 end
 
 -- Put animation set `res` first in ent's AnimationSet (Dynamic, like the
@@ -115,7 +185,7 @@ function M.Apply(ent)
     if CT.enabled == false or not ent then return 0 end
     if added then removeNow("re-apply") end
     removeAt = nil
-    local ok, list = pcall(candidates, ent)
+    local ok, list, why = pcall(candidates, ent)
     if not ok then Log.Write("CastTags: ERROR reading tags/waterfall: " .. tostring(list)); return 0 end
     local a = { ent = ent, tags = {}, sets = {} }
     local parts = {}
@@ -148,7 +218,8 @@ function M.Apply(ent)
             end
         end
     end
-    Log.Write(string.format("CastTags: added %d casting tag(s)%s", #a.tags, #parts > 0 and (": " .. table.concat(parts, "; ")) or ""))
+    Log.Write(string.format("CastTags: %s -> added %d casting tag(s)%s", tostring(why), #a.tags,
+        #parts > 0 and (": " .. table.concat(parts, "; ")) or ""))
     return #a.tags
 end
 

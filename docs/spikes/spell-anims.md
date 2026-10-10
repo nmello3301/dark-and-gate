@@ -113,3 +113,20 @@ So the same node and mapping id resolve to a different clip. Something on the ch
 **Next round:**
 - `cast_tags.force_set` writes the override set into `AnimationSet.Entries` directly (`CastTags.PrependSet`). It is prepended as a Dynamic Visual entry, like the engine's own. Caveat: rewriting the entries from Lua loses their hidden per-entry tag pointers until the save is reloaded.
 - `!dag_spell_variants <spell> [gallery]` (`Client/AnimLib/SpellVariants.lua`) lists every distinct clip each phase id maps to across active, waterfall and override sets. `gallery` spawns one civilian per prepare variant, forces that variant's set first on it, and sends BG3's select event to it, so the developer can pick the vanilla pose by eye.
+
+## Gallery result: class casting sets (2026-10-10)
+
+`!dag_spell_variants Projectile_FireBolt gallery` gave 17 prepare variants. Each civilian got its set written first in `AnimationSet` (it started with 0 entries) and played its own variant, so the **direct write does change the resolution**.
+
+| # | Clip | From |
+| --- | --- | --- |
+| 1–4, 6, 7 | `VIO/DRM/LYR/DFLT/LUT/FLT_SPL_Bard_01_Prepare` | Gale's active sets (instrument variants) |
+| 5 | `DFLT_SPL_Sorcerer_Damage_01_Prepare` | active sets |
+| 8 | `DFLT_CMBT_Skill_Barbarian_01_Prepare` | override `0b9a711d` |
+| 9–13 | `Cleric / Druid / Paladin / Ranger / Warlock_Damage_01_Prepare` | override sets `12deb965 / 45545fc1 / 8e575d96 / dfb571ca / ac911282` |
+| **14** | **`DFLT_SPL_Wizard_Damage_01_Prepare`** | **override tag `a865965f` type 1 → `745fbb35`** (the developer's pick = vanilla) |
+| 15–17 | `1HSSH / 1HS / DWS_SPL_Bladesinger_Damage_01_Prepare` | `e082392a` |
+
+Our old resolution took the first active set, the Bard violin variant.
+
+**Rule** (DECISIONS 2026-10-10): use the casting set of the class with the most levels. Ties go to `AnimationSetPriority`, then the first class taken. Subclass tags are checked before class tags, and the first tag with an OverrideType 1 set wins. `CastTags.lua` forces that set first.
