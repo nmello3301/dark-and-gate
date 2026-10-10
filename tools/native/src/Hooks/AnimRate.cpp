@@ -57,6 +57,55 @@ struct RecNode { uintptr_t node; uint8_t val[16]; DWORD lastSeen; };
 constexpr int kRecNodes = 64;
 RecNode g_rec[kRecNodes] = {};
 
+// FixedString -> text. ls::gGlobalStringTable layout and index decode as
+// documented by the Script Extender (CoreLib BaseString.h/.inl, MIT):
+// sub = id & 0xF, bucket = (id >> 4) & 0xFFFF, entry = id >> 20; SubTable
+// stride 0x1200 with EntrySize +0x1088, EntriesPerBucket +0x1090,
+// NumBuckets +0x10C0, Buckets +0x1140; entry = 0x18-byte header + chars.
+uintptr_t g_gstPtr = 0;   // address of ls::gGlobalStringTable (a pointer)
+bool      g_gstTried = false;
+
+void FindStringTable()
+{
+    g_gstTried = true;
+    HMODULE mod = GetModuleHandleW(nullptr);
+    uint8_t* p = dag::patternscan::Find(mod,
+        "83 F8 FF 74 0B 8B C8 E8 ?? ?? ?? ?? 8B 44 24 58 8B 0B 83 F9 FF 74 20 89 4C 24 20 48 8B 0D ?? ?? ?? ?? 48 81 C1 00 C6 00 00");
+    if (!p) { dag::log::Writef("RATE: string table pattern not found (recorder shows raw ids)"); return; }
+    const int32_t disp = *reinterpret_cast<int32_t*>(p + 30);
+    g_gstPtr = reinterpret_cast<uintptr_t>(p + 34) + disp;
+    dag::log::Writef("RATE: global string table at rva 0x%llX",
+                     static_cast<unsigned long long>(g_gstPtr - reinterpret_cast<uintptr_t>(mod)));
+}
+
+bool FsText(uint32_t id, char* out, size_t cap)
+{
+    out[0] = 0;
+    if (id == 0xffffffffu || !g_gstPtr) return false;
+    __try {
+        const uint8_t* gst = *reinterpret_cast<uint8_t* const*>(g_gstPtr);
+        if (!gst) return false;
+        const uint32_t sub = id & 0xF, bucket = (id >> 4) & 0xFFFF, entry = id >> 20;
+        if (sub >= 11) return false;
+        const uint8_t* st = gst + static_cast<size_t>(sub) * 0x1200;
+        const uint64_t entrySize = *reinterpret_cast<const uint64_t*>(st + 0x1088);
+        const uint32_t perBucket = *reinterpret_cast<const uint32_t*>(st + 0x1090);
+        const uint32_t numBuckets = *reinterpret_cast<const uint32_t*>(st + 0x10C0);
+        const uint8_t* const* buckets = *reinterpret_cast<const uint8_t* const* const*>(st + 0x1140);
+        if (bucket >= numBuckets || entry >= perBucket || !buckets || entrySize < 0x19 || entrySize > 0x10000) return false;
+        const uint8_t* e = buckets[bucket] + static_cast<size_t>(entry) * entrySize;
+        const uint32_t len = *reinterpret_cast<const uint32_t*>(e + 8);
+        if (len == 0 || len > entrySize - 0x18 || len >= cap) return false;
+        std::memcpy(out, e + 0x18, len);
+        out[len] = 0;
+        for (uint32_t i = 0; i < len; ++i) if (static_cast<unsigned char>(out[i]) < 0x20) out[i] = '?';
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        out[0] = 0;
+        return false;
+    }
+}
+
 // Pointer to socket `s`'s variable value (16 bytes), or nullptr.
 uint8_t* SocketVar(uint8_t* ctx, int s)
 {
@@ -133,8 +182,11 @@ void RecordNodeLocked(void* node, uint8_t* ctx)
     std::snprintf(guid, sizeof(guid), "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
                   val[3], val[2], val[1], val[0], val[5], val[4], val[7], val[6],
                   val[8], val[9], val[10], val[11], val[12], val[13], val[14], val[15]);
-    std::fprintf(g_recFile, "t=%lu node=%p class=%s anim=%s raw=%s loop=%u rate=%.3f\n",
-                 now - g_recStart, node, NodeClass(node), guid, raw, loopV[0], rate);
+    uint32_t fsId = 0; std::memcpy(&fsId, val, 4);
+    char name[256];
+    if (!FsText(fsId, name, sizeof(name))) std::snprintf(name, sizeof(name), "-");
+    std::fprintf(g_recFile, "t=%lu node=%p class=%s anim=%s raw=%s loop=%u rate=%.3f name=%s\n",
+                 now - g_recStart, node, NodeClass(node), guid, raw, loopV[0], rate, name);
     std::fflush(g_recFile);
     ++g_recLines;
 }
@@ -270,6 +322,7 @@ void Record(uintptr_t instance)
         dag::log::Writef("RATE: animation recorder OFF (%ld lines in native-anim-rec.txt)", g_recLines);
     }
     if (!instance) return;
+    if (!g_gstTried) FindStringTable();
     wchar_t buf[MAX_PATH];
     const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
     if (n == 0 || n >= MAX_PATH) return;

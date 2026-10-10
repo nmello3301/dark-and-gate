@@ -54,6 +54,23 @@ bool                   g_loggedEngineThread = false;
 bool                   g_loggedRefreshThread = false;
 thread_local int       t_depth = 0;
 bool                   g_force = false;
+
+// Render objects of the player's meshes (SetObjects).
+constexpr int kMaxObj = 24;
+struct LiftObj {
+    uintptr_t p = 0;
+    float base[3] = {};
+    float written[3] = {};
+    bool  have = false;
+    float applied = 0;
+};
+LiftObj g_objs[kMaxObj];
+int     g_numObjs = 0;
+bool    g_objEnabled = true;
+int     g_objWrites = 0, g_objExt = 0;
+uintptr_t g_objVtLogged[8] = {};
+int     g_objVtLoggedN = 0;
+
 bool                   g_flip = false;
 
 bool Contains(const uintptr_t* list, int n, uintptr_t v)
@@ -215,6 +232,8 @@ bool Hooked(uintptr_t visual)
 
 }  // namespace
 
+namespace { void RefreshObjects(float lift); }
+
 void SetVisual(uintptr_t visual)
 {
     if (visual == g_visual.load()) return;
@@ -252,6 +271,7 @@ void SetLift(float lift)
 void Refresh()
 {
     const uint32_t frame = g_frame.fetch_add(1) + 1;
+    RefreshObjects(g_lift.load());
     const uintptr_t v = g_visual.load();
     if (!v || !g_origT) return;
     const float lift = g_lift.load();
@@ -299,6 +319,87 @@ void Refresh()
     g_lastApplied = lift;
     if (!external) ++g_statRefresh;
 }
+
+void SetObjects(const uintptr_t* objs, int n, bool enabled)
+{
+    g_objEnabled = enabled;
+    if (n > kMaxObj) n = kMaxObj;
+    // Keep state for objects that stay in the list.
+    LiftObj next[kMaxObj];
+    int m = 0;
+    for (int i = 0; i < n; ++i) {
+        if (!objs[i]) continue;
+        bool dup = false;
+        for (int j = 0; j < m; ++j) if (next[j].p == objs[i]) dup = true;
+        if (dup) continue;
+        LiftObj o;
+        o.p = objs[i];
+        for (int k = 0; k < g_numObjs; ++k) if (g_objs[k].p == objs[i]) o = g_objs[k];
+        next[m++] = o;
+    }
+    for (int i = 0; i < m; ++i) g_objs[i] = next[i];
+    g_numObjs = m;
+}
+
+void TakeObjectStats(int& writes, int& external, int& objects)
+{
+    writes = g_objWrites; external = g_objExt; objects = g_numObjs;
+    g_objWrites = g_objExt = 0;
+}
+
+namespace {
+using SetTranslateFn = void(__fastcall*)(void* self, const float* t);
+
+// The object's own SetWorldTranslate (slot 2), if it looks sane.
+SetTranslateFn ObjSetter(uintptr_t obj)
+{
+    void* vt = nullptr;
+    if (!dag::safemem::ReadPtr(reinterpret_cast<void*>(obj), 0, vt) || !vt) return nullptr;
+    uintptr_t slot2 = 0;
+    if (!dag::safemem::ReadBytes(reinterpret_cast<uint8_t*>(vt) + 16, &slot2, sizeof(slot2))) return nullptr;
+    if (!InModule(slot2)) return nullptr;
+    const uintptr_t v = reinterpret_cast<uintptr_t>(vt);
+    bool logged = false;
+    for (int i = 0; i < g_objVtLoggedN; ++i) if (g_objVtLogged[i] == v) logged = true;
+    if (!logged && g_objVtLoggedN < 8) {
+        g_objVtLogged[g_objVtLoggedN++] = v;
+        const uintptr_t mod = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+        dag::log::Writef("LIFT: render object vtable rva 0x%llX, SetWorldTranslate rva 0x%llX (%s the Visual's)",
+                         static_cast<unsigned long long>(v - mod), static_cast<unsigned long long>(slot2 - mod),
+                         slot2 == reinterpret_cast<uintptr_t>(g_origT) ? "same as" : "differs from");
+    }
+    return reinterpret_cast<SetTranslateFn>(slot2);
+}
+
+void RefreshObjects(float lift)
+{
+    for (int i = 0; i < g_numObjs; ++i) {
+        LiftObj& o = g_objs[i];
+        float cur[3];
+        if (!dag::safemem::ReadFloat3(reinterpret_cast<void*>(o.p), 0x18, cur)) continue;
+        const bool want = g_objEnabled && lift != 0.f;
+        if (!o.have || o.applied == 0.f) {
+            // Not lifted by us: what's there is the engine's position.
+            std::memcpy(o.base, cur, sizeof(cur));
+            o.have = true;
+        } else if (std::fabs(cur[0] - o.written[0]) > 1e-4f || std::fabs(cur[1] - o.written[1]) > 1e-4f ||
+                   std::fabs(cur[2] - o.written[2]) > 1e-4f) {
+            // The engine moved it since our write: new base.
+            std::memcpy(o.base, cur, sizeof(cur));
+            ++g_objExt;
+        }
+        if (!want && o.applied == 0.f) continue;
+        SetTranslateFn set = ObjSetter(o.p);
+        if (!set) continue;
+        const float l = want ? lift : 0.f;
+        const float t[3] = { o.base[0], o.base[1] + l, o.base[2] };
+        __try { set(reinterpret_cast<void*>(o.p), t); } __except (EXCEPTION_EXECUTE_HANDLER) { continue; }
+        std::memcpy(o.written, t, sizeof(t));
+        o.applied = l;
+        if (l != 0.f) ++g_objWrites;
+    }
+}
+}  // namespace
 
 void SetForce(bool on) { g_force = on; }
 bool Forced() { return g_force; }

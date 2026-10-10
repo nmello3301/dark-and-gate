@@ -38,6 +38,16 @@ void Refresh();
 void SetForce(bool on);
 bool Forced();
 
+// 2026-10-10 10x-jump test: the root Visual carried the full lift but the
+// head bone rose 0.26 of 5.5 m -- what is drawn is the per-mesh render
+// objects (MeshBinding+0x28, rf::RenderableObject), which the lift never
+// reached. Every frame, each of these objects is moved to its engine
+// position + lift through its own SetWorldTranslate (vtable slot 2,
+// MoveableObject). n = 0 or enabled = false stops it (objects restored).
+void SetObjects(const uintptr_t* objs, int n, bool enabled);
+// Per-jump object stats: lifted writes, engine rewrites seen, objects.
+void TakeObjectStats(int& writes, int& external, int& objects);
+
 // True when the vtable hooks are live on the current Visual, i.e. the
 // whole body (and so the head bone) carries the lift.
 bool BodyLiftActive();

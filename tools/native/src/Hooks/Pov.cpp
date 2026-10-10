@@ -161,6 +161,7 @@ struct LuaState {
     float     smooth   = 0.f;  // head-bone smoothing 0..0.9 (0 = raw pose)
     float     moveWalk = 1.f;  // WASD speed multipliers (MoveSpeed.cpp)
     float     moveRun  = 1.f;
+    bool      liftObjects = true;  // lift the meshes' render objects too (VisualLift)
     DWORD readTick  = 0;
 };
 
@@ -248,6 +249,7 @@ void PollLuaFile()
     if (s.smooth > 0.9f) s.smooth = 0.9f;
     s.moveWalk = ValF(buf, "move_walk", 1.f);
     s.moveRun  = ValF(buf, "move_run", 1.f);
+    s.liftObjects = ValI(buf, "lift_objects", 1) != 0;
     if (const char* v = FindVal(buf, "visual")) {
         s.visual = static_cast<uintptr_t>(std::strtoull(v, nullptr, 16));
     }
@@ -830,7 +832,7 @@ void UpdateJump()
             g_jump.durMs = g_lua.jumpMs;
             g_jump.h = g_lua.jumpH;
             g_jump.k = g_lua.jumpK < 1.0f ? 1.0f : g_lua.jumpK;
-            { int a, b, c; dag::visuallift::TakeStats(a, b, c); }  // reset per jump
+            { int a, b, c; dag::visuallift::TakeStats(a, b, c); dag::visuallift::TakeObjectStats(a, b, c); }  // reset per jump
             g_jls = JumpLiftStats{};
             dag::log::Writef("JUMP start seq=%d dur=%.0fms h=%.2f k=%.1f lift=%s",
                              g_jump.seq, g_jump.durMs, g_jump.h, g_jump.k,
@@ -846,6 +848,10 @@ void UpdateJump()
         dag::visuallift::TakeStats(hw, rw, ew);
         dag::log::Writef("JUMP end seq=%d after %.0fms body writes: hook=%d refresh=%d external=%d",
                          g_jump.seq, ms, hw, rw, ew);
+        int ow = 0, oe = 0, on = 0;
+        dag::visuallift::TakeObjectStats(ow, oe, on);
+        dag::log::Writef("JUMP objects seq=%d render objects=%d lifted writes=%d engine rewrites=%d (lift_objects=%d)",
+                         g_jump.seq, on, ow, oe, g_lua.liftObjects ? 1 : 0);
         const bool body = dag::visuallift::BodyLiftActive();
         const char* srcName = !body ? "camera-only"
             : (g_jls.fillFrames * 10 > g_jls.frames ? "body+camera-fill" : "body");
@@ -1103,6 +1109,18 @@ void OnFrame(void* gameplayCam)
     UpdateJump();
     dag::visuallift::SetVisual((g_lua.on && g_lua.active) ? g_lua.visual : 0);
     dag::visuallift::SetLift(g_jump.lift);
+    {
+        // The meshes' render objects (MeshBinding+0x28) carry the drawn body.
+        uintptr_t objs[kMaxMeshes]; int n = 0;
+        if (g_lua.on && g_lua.active) {
+            for (int i = 0; i < g_lua.numMeshes; ++i) {
+                void* o = nullptr;
+                if (dag::safemem::ReadPtr(reinterpret_cast<void*>(g_lua.meshes[i]), 0x28, o) && o)
+                    objs[n++] = reinterpret_cast<uintptr_t>(o);
+            }
+        }
+        dag::visuallift::SetObjects(objs, n, g_lua.liftObjects);
+    }
     dag::visuallift::Refresh();
     dag::animrate::Set(g_lua.animInst, g_lua.animRate);
     dag::animrate::Record(g_lua.recInst);

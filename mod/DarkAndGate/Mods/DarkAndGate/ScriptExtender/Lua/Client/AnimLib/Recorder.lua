@@ -67,8 +67,12 @@ local function resolveAll()
     for line in s:gmatch("[^\r\n]+") do
         local t, cls, id, raw, loop, rate = line:match("^t=(%d+) node=%S+ class=(%S+) anim=(%S+) raw=(%S+) loop=(%d+) rate=(%S+)")
         if t then
-            rows[#rows + 1] = { t = tonumber(t), cls = cls, id = id, raw = raw, loop = loop, rate = rate }
-            wanted[id] = true
+            -- 2026-10-10: the input is a FixedString (the DLL decodes it as
+            -- name=); a GUID-looking name is a mapping / resource id.
+            local name = line:match(" name=(.*)$") or "-"
+            local key = name:match("^%x+%-%x+%-%x+%-%x+%-%x+$") and name or nil
+            rows[#rows + 1] = { t = tonumber(t), cls = cls, id = key or id, name = name, raw = raw, loop = loop, rate = rate }
+            wanted[key or id] = true
         end
     end
     local ent = player()
@@ -85,7 +89,8 @@ local function resolveAll()
                 c = { kind = "mapping", file = file, dur = dur }
             else
                 file, dur = resourceFile(r.id)
-                c = file and { kind = "resource", file = file, dur = dur } or { kind = "?", file = "raw " .. r.raw, dur = 0 }
+                c = file and { kind = "resource", file = file, dur = dur }
+                    or { kind = (r.name ~= "-" and "name" or "?"), file = (r.name ~= "-" and r.name or ("raw " .. r.raw)), dur = 0 }
             end
             cache[r.id] = c
         end
