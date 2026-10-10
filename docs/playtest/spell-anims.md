@@ -4,6 +4,16 @@ Console: `client` first, then the commands. Logs: client.log / server.log, `Scri
 
 How it plays: arming a spell replays BG3's own **select** event with that spell's prepare and loop clips. The prepare is stretched to the cast time, then the loop holds. LMB lets the engine play cast → recover. Cancel replays BG3's **cancel** event with the spell's un-prepare clip. Layouts were captured from your vanilla Fire Bolt ([genome-capture.md](../spikes/genome-capture.md)).
 
+## 0. Vanilla effect reference (normal camera, POV off)
+
+1. Run `!dag_spell_fx_watch on`.
+   - Expect `SpellFx: watch ON …`.
+2. Select **Fire Bolt** from the vanilla hotbar, hold about 2 s, then right-click cancel.
+3. Select it again and cast it at a goblin or the ground. Wait 3 s.
+4. Run `!dag_spell_fx_watch off`.
+   - Expect `SpellFx watch: +0x… c88e9cfa-… (Projectile_FireBolt.PrepareEffect) src=… bones=…` at select.
+   - Expect a matching `-0x… after N s` at cancel and again at cast.
+
 ## 1. Resolution
 
 Run `!dag_spell_anims Projectile_FireBolt`, then `Projectile_Fireball`, then `Target_MistyStep`.
@@ -23,7 +33,10 @@ Run `!dag_spell_anims Projectile_FireBolt`, then `Projectile_Fireball`, then `Ta
 | Loop at READY | `Prepare: Projectile_FireBolt READY after 2.0xs -> loop …` |
 | LMB: cast → fires → recover → idle | `Prepare: stop Projectile_FireBolt (cast) … (was READY)`; server `SpellCast: CAST …`; then `Prepare: release guard over` |
 
-Tell me: does Gale play the Fire Bolt prepare and then the loop? Does the prepare end right as READY shows? Is there a second prepare after LMB?
+| Hand fire + prepare sound, then the loop sound | `SpellFx: start Projectile_FireBolt: effect c88e9cfa -> 0x…, sound Spell_Prepare_… -> true, sound …_Loop -> true` |
+| Fire and loop sound end at LMB; vanilla cast fire / sound play | `SpellFx: stop Projectile_FireBolt (cast) effect destroyed true, sounds stopped ok` |
+
+Tell me: does Gale play the Fire Bolt prepare and then the loop? Does the prepare end right as READY shows? Is there a second prepare after LMB? Are the hand fire and the sounds there, and do they look and sound like vanilla?
 
 ## 3. Same while walking and running
 
@@ -40,7 +53,8 @@ Tell me: is movement free, and how does the slide look?
 
 ## 5. Cancel: arm then RMB; arm then key 1 again
 
-- Expect `Prepare: cancel via cancel event eadedcce`, then `Prepare: stop … (cancel-rmb|cancel-key)`.
+- Expect `SpellFx: stop … (cancel-rmb|cancel-key) effect destroyed true, sounds stopped ok`.
+- Then `Prepare: cancel via cancel event eadedcce`, then `Prepare: stop … (cancel-rmb|cancel-key)`.
 
 Tell me: does Gale leave the pose cleanly, like a vanilla right-click cancel?
 

@@ -48,6 +48,12 @@ return {
             recover = "85414f5f-b448-4dda-9370-1b6c4b38b561",
             cancel  = "eadedcce-d01b-4fbb-a1ae-d218f13aa5d6",  -- slot 6, played on cancel
         },
+        -- Prepare VFX + sounds from the spell's stats (PrepareEffect,
+        -- PrepareSound, PrepareLoopSound), played while channelling
+        -- (Client/Combat/SpellFx.lua). stop_sounds: at cast / cancel, stop
+        -- the sounds on the caster's sound object (also cuts any other
+        -- sound playing on it at that instant).
+        fx = { effect = true, sounds = true, stop_sounds = true },
         cast_rate = 1.0,           -- play rate of the cast clip (per spell: spells[id].cast_rate)
         fire_point = "cast_start", -- "cast_start" | "cast_event" (text-key, when found)
     },

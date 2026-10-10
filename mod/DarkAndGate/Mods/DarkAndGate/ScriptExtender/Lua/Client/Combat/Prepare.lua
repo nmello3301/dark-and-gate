@@ -15,6 +15,8 @@
 -- clips are fast-forwarded (x guard_rate) in case the engine's UseSpell
 -- replays them; logged by the DLL as "RATE: clip rates ...".
 --
+-- Prepare VFX + sounds (the spell's PrepareEffect / PrepareSound /
+-- PrepareLoopSound) run alongside: SpellFx.lua.
 -- The channel is an action (Actions.lua): the jump clips wait for it.
 -- Commands: !dag_prepare_anims on|off.
 
@@ -24,6 +26,7 @@ local State        = Ext.Require("Client/Combat/State.lua")
 local FullPov      = Ext.Require("FullPov.lua")
 local SpellAnims   = Ext.Require("Client/Combat/SpellAnims.lua")
 local GenomeEvents = Ext.Require("Client/Combat/GenomeEvents.lua")
+local SpellFx      = Ext.Require("Client/Combat/SpellFx.lua")
 local movement     = Ext.Require("data/movement.lua")
 
 local M = {}
@@ -64,6 +67,7 @@ function M.Start(spell)
     Log.Write(string.format("Prepare: start %s via %s -> prepare %s (%.2fs clip at x%.2f = %.2fs cast time), loop %s, rig %s%s",
         spell, ok and how or ("FAILED: " .. tostring(how)), prep and prep.file or "none", prep and prep.dur or 0, rate, castTime,
         anims.loop and anims.loop.file or "none", anims.rig, anims.fallback and " [fallback anims]" or ""))
+    SpellFx.Start(spell, me)
 end
 
 -- reason: "cast" (release), "cancel-rmb", "cancel-key", "cast aborted", "re-arm".
@@ -72,6 +76,7 @@ function M.Stop(reason)
     local c = cur
     cur = nil
     local me = player()
+    SpellFx.Stop(reason)
     if reason == "cast" then
         -- Guard: fast-forward the engine's own prepare / loop if UseSpell
         -- replays them; the cast and recover play at normal speed.
@@ -110,6 +115,7 @@ end
 function M.Register()
     Ext.Events.Tick:Subscribe(function() pcall(tick) end)
     GenomeEvents.Register()
+    SpellFx.Register()
     Ext.RegisterConsoleCommand("dag_prepare_anims", function(_, a)
         if a == "off" or a == "0" then enabled = false; M.Stop("cancel-key")
         elseif a == "on" or a == "1" then enabled = true end
