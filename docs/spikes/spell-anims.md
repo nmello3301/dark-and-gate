@@ -82,3 +82,10 @@ Playtest: the replayed select event animated Gale, but not with the same prepare
 - The graph runs the **same clips on the same nodes**, so the select replay is exact.
 - The genome capture also shows vanilla sends the select event to the targeting-preview dummies (`…233A1` / `…233B1`, with a `Private Parts` event). That is preview only.
 - **Open:** what the developer sees as "a different animation". Candidates: the first-person view (camera following the head bone, head hidden), or something outside PlayAnimation nodes (look-at / aim, blend layers). Next test: `!dag_prepare_test` runs our channel with the normal camera, for a direct comparison.
+
+**Third-person check (playtest, 2026-10-10):** `!dag_prepare_test` with the normal camera is **clearly a different clip**.
+
+- **Vanilla:** standing tall, feet a little wide, facing the aim point, fire in the right hand, left hand holding the right elbow, hand signs every ~3 s.
+- **Ours:** low sideways stance, legs spread, left hand extended as if aiming, right hand cocked like a throw, occasional forward flinch.
+
+So the same node and mapping id resolve to a different clip. Something on the character that vanilla targeting sets steers the resolution: a blueprint variable, animation tag or set override. Probe: `!dag_anim_state <label> [delay]` (`Client/AnimLib/AnimState.lua`) snapshots blueprint variables (named), DynamicAnimationTags / AnimationWaterfall / AnimationSet / overrides, the component list and a full component dump, for a vanilla vs ours diff.

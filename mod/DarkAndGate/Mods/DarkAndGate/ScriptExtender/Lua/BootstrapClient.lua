@@ -92,3 +92,4 @@ local AnimBrowser = Ext.Require("Client/AnimLib/Browser.lua")
 AnimBrowser.Register()
 -- !dag_anim_record on|off: which clips BG3 itself plays on the player.
 Ext.Require("Client/AnimLib/Recorder.lua").Register()
+Ext.Require("Client/AnimLib/AnimState.lua").Register()
