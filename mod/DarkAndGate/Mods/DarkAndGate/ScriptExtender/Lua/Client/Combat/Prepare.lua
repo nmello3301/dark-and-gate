@@ -154,6 +154,13 @@ function M.Register()
     Ext.Events.Tick:Subscribe(function() pcall(tick) end)
     GenomeEvents.Register()
     SpellFx.Register()
+    -- Debug: run our channel without POV / the hotbar, to compare it with
+    -- vanilla from the normal camera. !dag_prepare_test [spell] | stop
+    Ext.RegisterConsoleCommand("dag_prepare_test", function(_, a)
+        if a == "stop" then M.Stop("cancel-key"); return end
+        Log.Write("Prepare: TEST channel " .. (a or "Projectile_FireBolt") .. " (no POV; !dag_prepare_test stop to cancel)")
+        M.Start(a or "Projectile_FireBolt")
+    end)
     Ext.RegisterConsoleCommand("dag_prepare_anims", function(_, a)
         if a == "off" or a == "0" then enabled = false; M.Stop("cancel-key")
         elseif a == "on" or a == "1" then enabled = true end

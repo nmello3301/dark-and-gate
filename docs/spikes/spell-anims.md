@@ -68,3 +68,17 @@ Playtest: the replayed select event animated Gale, but not with the same prepare
 - `!dag_spell_anims <spell>` now lists every clip an id maps to in each set / subset, plus the current stance. Our duration still comes from the first match, so the stretch can be slightly off until the staff clip is identified.
 
 **Result (playtest, 2026-10-10): wrong.** Vanilla doesn't draw the staff; Gale does hand gestures with the fire. Our version still shows a different animation even with the staff drawn. The draw is now off (`unsheath.enabled = false`, the code is kept). Next: record vanilla and ours in the same session (`!dag_anim_record` gives the graph node, its class and the mapping id) and compare.
+
+## Side-by-side recording (2026-10-10)
+
+`!dag_anim_record` with a vanilla select and then ours, in one session (the second was cast, not cancelled):
+
+| | Vanilla | Ours |
+| --- | --- | --- |
+| Prepare `3ff87abf` | node `…CDA0`, FromActiveSet | node `…CDA0`, FromActiveSet |
+| Loop `d8925ce4` | node `…CE20`, FromActiveSet, +0.94 s | node `…CE20`, FromActiveSet, +1.56 s |
+| Other PlayAnimation nodes during the prepare | LayeredTurn L/R (turning toward the cursor) | none until the cast |
+
+- The graph runs the **same clips on the same nodes**, so the select replay is exact.
+- The genome capture also shows vanilla sends the select event to the targeting-preview dummies (`…233A1` / `…233B1`, with a `Private Parts` event). That is preview only.
+- **Open:** what the developer sees as "a different animation". Candidates: the first-person view (camera following the head bone, head hidden), or something outside PlayAnimation nodes (look-at / aim, blend layers). Next test: `!dag_prepare_test` runs our channel with the normal camera, for a direct comparison.
