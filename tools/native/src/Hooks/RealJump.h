@@ -35,6 +35,10 @@ void SetStrafeSign(float s);
 // at most: a gentle touchdown instead of the curve's steep end.
 void SetLandSpeed(float vmax);
 
+// Height above the feet of the sideways wall check (one sweep, chest level:
+// low rocks and debris don't stop the jump).
+void SetWallHeight(float h);
+
 // Start a real jump now (game thread). Returns false (and logs why) if the
 // engine state couldn't be entered; the caller then falls back to the
 // visual lift. curve: y = h * (1 - |2u - 1|^k), u = t / durMs.

@@ -396,7 +396,7 @@ function M.Register()
     Ext.RegisterConsoleCommand("dag_jump_strafe_flip", function()
         Log.Write("Jump: A/D in the air flipped, strafe_sign = " .. tostring(FullPov.FlipStrafe()))
     end)
-    FullPov.SetRealJumpTuning(D.strafe_sign, D.land_speed)
+    FullPov.SetRealJumpTuning(D.strafe_sign, D.land_speed, D.wall_check_m)
     if D.mode == "real" then FullPov.SetJumpMode("real") end
 
     Ext.RegisterConsoleCommand("dag_jump_moving_anims", function(_, x)

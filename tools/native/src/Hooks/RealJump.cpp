@@ -64,6 +64,7 @@ std::atomic<void*> g_char{ nullptr };
 float g_camFwd[2] = { 0.f, 1.f };
 float g_strafeSign = 1.f;
 float g_landSpeed = 3.f;
+float g_wallH = 1.3f;
 
 // Physics scene from the falling Update's ground probe call.
 using ProbeFn = void*(__fastcall*)(void* out, void* grid, void* scene, float* pos, float radius, float extraUp);
@@ -243,7 +244,8 @@ uint64_t __fastcall HookUpdate(uint8_t* st, uint8_t* gameTime)
         g_j.vel[0] = dir[0] * speed;
         g_j.vel[1] = dir[1] * speed;
     }
-    // Walls: sweep the step at knee and head height; blocked = stop.
+    // Walls: sweep the step at chest height (2026-10-10: knee height caught
+    // rocks and debris); blocked = stop.
     {
         const float sx = g_j.vel[0] * dt, sz = g_j.vel[1] * dt;
         const float sl = std::sqrt(sx * sx + sz * sz);
@@ -251,7 +253,7 @@ uint64_t __fastcall HookUpdate(uint8_t* st, uint8_t* gameTime)
             const float nx = sx / sl, nz = sz / sl;
             const float reach = sl + 0.35f;
             bool blocked = false;
-            for (float hh : { 0.45f, 1.5f }) {
+            for (float hh : { g_wallH }) {
                 const float from[3] = { g_j.pos[0], g_j.pos[1] + hh, g_j.pos[2] };
                 const float to[3] = { from[0] + nx * reach, from[1], from[2] + nz * reach };
                 float d;
@@ -404,6 +406,7 @@ void NoteCharacter(void* character)
 
 void SetStrafeSign(float s) { g_strafeSign = s < 0.f ? -1.f : 1.f; }
 void SetLandSpeed(float vmax) { if (vmax > 0.1f && vmax < 50.f) g_landSpeed = vmax; }
+void SetWallHeight(float h) { if (h > 0.2f && h < 3.f) g_wallH = h; }
 
 void MeasureFrame()
 {
