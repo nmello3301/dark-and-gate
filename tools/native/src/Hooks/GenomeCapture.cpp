@@ -9,9 +9,14 @@
 // through a chain of tail-called fillers (args 20..0, back to front). The
 // last filler tail-jumps into the AnimationBlueprintSystem queue
 //   void Queue(AnimationBlueprintSystem*, EntityHandle const*, Event*)
-// which moves the event into GameplayEventsToGenome under its lock. We
-// patch that one tail jump: our thunk sees the fully built event, logs it
-// and then calls the queue unchanged. Nothing is written to the event.
+// which moves the event into GameplayEventsToGenome under its lock. The
+// queue has ~110 callers (every client gameplay event for the blueprint),
+// so we detour its entry: the first instruction `mov [rsp+10h], rbx` (5
+// bytes, not RIP-relative, not a branch) is stolen into a trampoline.
+// Every queued event is logged with the caller's return address, then
+// the original runs unchanged. Nothing is written to the event. If the
+// entry bytes differ we fall back to the old single-site hook on the spell
+// builder's tail jump.
 
 #include "GenomeCapture.h"
 
@@ -22,6 +27,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <intrin.h>
 
 #include "../Log.h"
 #include "../PatternScan.h"
@@ -48,18 +54,49 @@ constexpr const char* kQueuePattern =
     "48 89 5C 24 10 56 57 41 56 48 81 EC C0 01 00 00 48 8B 05 ?? ?? ?? ?? "
     "48 33 C4 48 89 84 24 B0 01 00 00";
 
-// Main spell event (blueprint node with 21 outputs, docs/spikes/spell-anims-native.md).
-constexpr const char* kSpellEvent = "ba293d56-e14d-4d62-8151-4d63f1257bcd";
+// First instruction of the queue, stolen by the entry detour.
+constexpr uint8_t kQueueEntry[5] = {0x48, 0x89, 0x5C, 0x24, 0x10};  // mov [rsp+10h], rbx
+
+// Spell-area events queued by the client spell code (static RE, see
+// docs/spikes/genome-capture.md), matched on the first 8 hex digits.
+struct KnownEvent { const char* prefix; const char* tag; };
+constexpr KnownEvent kKnownEvents[] = {
+    {"ba293d56", " [SPELL]"},       // cast/recover, 22 args (builder 0x4208030)
+    {"e8545375", " [SPELL-PREP]"},  // prepare/loop, 9 args (builder 0x4207c40)
+    {"43b4462a", " [SPELL-SIDE]"},  // 0x4209360, after both builders
+    {"96516143", " [SPELL-SIDE]"},  // 0x4209520 chain, 3 args
+    {"0df4bd9f", " [SPELL-SIDE]"},  // 0x4209660 chain, 4 args
+    {"c7bf6c94", " [SPELL-SIDE]"},  // 0x4208d60
+    {"4694fea0", " [SPELL-SIDE]"},  // 0x4209060
+    {"e9db2a81", " [SPELL-SIDE]"},  // 0x4209830, 1 FS arg
+};
+
+const char* TagFor(const char* evName)
+{
+    for (const KnownEvent& k : kKnownEvents) {
+        if (std::strncmp(evName, k.prefix, 8) == 0) return k.tag;
+    }
+    return "";
+}
+
+// Distinct event ids announced in native.log (first occurrence each).
+constexpr int kMaxSeen = 128;
 
 constexpr int    kNumArgs     = 22;
 constexpr size_t kArgsOff     = 0x10;  // first GenomeVariant in the event object
 constexpr size_t kVarSize     = 0x10;
 constexpr size_t kTypeNameOff = 0x50;  // GenomeVarTypeDesc::TypeName (FixedString)
-constexpr int    kSetDump     = 8;     // qwords dumped behind a set-like Value
+constexpr uint32_t kSetMax    = 64;    // sanity cap on ShortNameSet size
+// vtable of gn::TGenomeSet<FixedString> (rva, Patch 8; logged as a check only).
+constexpr unsigned long long kGenomeSetFsVtRva = 0x564F008;
 
 using QueueFn = void(__fastcall*)(void* system, const uint64_t* entity, uint8_t* evt);
 
-QueueFn           g_orig = nullptr;
+QueueFn volatile  g_orig = nullptr;  // trampoline (entry detour) or the queue itself (tail-jump hook)
+uintptr_t         g_modBase = 0;
+bool              g_entryDetour = false;
+uint32_t          g_seen[kMaxSeen];  // guarded by g_lock
+int               g_seenCount = 0;
 std::atomic<bool> g_on{false};
 std::atomic<long> g_count{0};
 std::atomic<bool> g_hasPending{false};
@@ -108,8 +145,9 @@ void FsOrDash(uint32_t id, char* out, size_t cap)
 }
 
 // One event -> one line for the capture file and a short summary.
-void FormatEvent(const uint64_t* entity, const uint8_t* evt, char* line, size_t cap,
-                 char* summary, size_t scap)
+// Returns the event's FixedString id (for the native.log first-seen filter).
+uint32_t FormatEvent(const uint64_t* entity, const uint8_t* evt, uintptr_t caller, char* line,
+                     size_t cap, char* summary, size_t scap)
 {
     size_t len = 0;
     const uintptr_t base = reinterpret_cast<uintptr_t>(evt);
@@ -118,7 +156,9 @@ void FormatEvent(const uint64_t* entity, const uint8_t* evt, char* line, size_t 
     ReadU32(base, &evId);
     char evName[128];
     FsOrDash(evId, evName, sizeof(evName));
-    const bool spell = std::strcmp(evName, kSpellEvent) == 0;
+    const char* tag = TagFor(evName);
+    const unsigned long long from =
+        (caller > g_modBase && g_modBase) ? caller - g_modBase : static_cast<unsigned long long>(caller);
 
     uint64_t ent = 0;
     ReadU64(reinterpret_cast<uintptr_t>(entity), &ent);
@@ -130,11 +170,11 @@ void FormatEvent(const uint64_t* entity, const uint8_t* evt, char* line, size_t 
     }
 
     const long n = ++g_count;
-    Append(line, cap, &len, "t=%llu #%ld%s ev=%s (0x%08X) ent=0x%016llX args=%d",
-           static_cast<unsigned long long>(GetTickCount64()), n, spell ? " [SPELL]" : "",
-           evName, evId, static_cast<unsigned long long>(ent), typed);
-    std::snprintf(summary, scap, "GENOME: #%ld%s ev=%s ent=0x%llX args=%d", n,
-                  spell ? " [SPELL]" : "", evName, static_cast<unsigned long long>(ent), typed);
+    Append(line, cap, &len, "t=%llu #%ld%s ev=%s (0x%08X) from=rva 0x%llX ent=0x%016llX args=%d",
+           static_cast<unsigned long long>(GetTickCount64()), n, tag, evName, evId, from,
+           static_cast<unsigned long long>(ent), typed);
+    std::snprintf(summary, scap, "GENOME: #%ld%s ev=%s from=0x%llX ent=0x%llX args=%d", n, tag,
+                  evName, from, static_cast<unsigned long long>(ent), typed);
 
     for (int i = 0; i < kNumArgs; ++i) {
         const uintptr_t var = base + kArgsOff + i * kVarSize;
@@ -165,48 +205,73 @@ void FormatEvent(const uint64_t* entity, const uint8_t* evt, char* line, size_t 
             Append(line, cap, &len, " deref=%s", deref);
         }
 
-        // Set-like types (ShortNameSet...): dump what Value points at, and
-        // try the first qword as an array of FixedStrings.
+        // Set types (ShortNameSet = gn::TGenomeSet<FixedString>): Value is a
+        // heap object { vtable; bool IsOwned @+8; Values* @+0x10 } and
+        // Values is { u32* Buf; u32 Capacity @+8; u32 Size @+0xC }. Ids are
+        // u32 FixedString indices, 0xFFFFFFFF = null. Read-only, no add-ref.
         if (std::strstr(typeName, "Set") && PlausiblePtr(value)) {
-            Append(line, cap, &len, " q=[");
-            uint64_t q[kSetDump] = {};
-            int got = 0;
-            for (; got < kSetDump; ++got) {
-                if (!ReadU64(value + got * 8, &q[got])) break;
-                Append(line, cap, &len, "%s%llX", got ? " " : "", static_cast<unsigned long long>(q[got]));
-            }
-            Append(line, cap, &len, "]");
-            if (got > 0 && PlausiblePtr(q[0])) {
-                Append(line, cap, &len, " fs0=[");
-                for (int k = 0; k < kSetDump; ++k) {
-                    uint32_t id = 0;
-                    if (!ReadU32(q[0] + k * 4, &id)) break;
-                    char txt[96];
-                    FsOrDash(id, txt, sizeof(txt));
+            uint64_t vt = 0, owned = 0, vs = 0;
+            ReadU64(value, &vt);
+            ReadU64(value + 8, &owned);
+            ReadU64(value + 0x10, &vs);
+            const unsigned long long vtRva =
+                (vt > g_modBase && g_modBase) ? vt - g_modBase : static_cast<unsigned long long>(vt);
+            Append(line, cap, &len, " vt=rva 0x%llX%s owned=%u", vtRva,
+                   vtRva == kGenomeSetFsVtRva ? "" : "(unexpected)", static_cast<unsigned>(owned & 0xFF));
+            uint64_t buf = 0;
+            uint32_t capacity = 0, size = 0;
+            if (!vs) {
+                Append(line, cap, &len, " set=[] (no Values)");
+            } else if (!PlausiblePtr(vs) || !ReadU64(vs, &buf) || !ReadU32(vs + 8, &capacity) ||
+                       !ReadU32(vs + 0xC, &size)) {
+                Append(line, cap, &len, " set=<unreadable Values 0x%llX>", static_cast<unsigned long long>(vs));
+            } else if (size > capacity || size > kSetMax || (size && !PlausiblePtr(buf))) {
+                Append(line, cap, &len, " set=<implausible n=%u cap=%u buf=0x%llX>", size, capacity,
+                       static_cast<unsigned long long>(buf));
+            } else {
+                Append(line, cap, &len, " n=%u cap=%u set=[", size, capacity);
+                for (uint32_t k = 0; k < size; ++k) {
+                    uint32_t id = 0xffffffffu;
+                    char txt[128];
+                    if (!ReadU32(buf + k * 4, &id)) std::snprintf(txt, sizeof(txt), "<unreadable>");
+                    else if (id == 0xffffffffu) std::snprintf(txt, sizeof(txt), "null");
+                    else FsOrDash(id, txt, sizeof(txt));
                     Append(line, cap, &len, "%s%s", k ? " " : "", txt);
                 }
                 Append(line, cap, &len, "]");
             }
         }
     }
+    return evId;
 }
 
-void Capture(const uint64_t* entity, const uint8_t* evt)
+void Capture(const uint64_t* entity, const uint8_t* evt, uintptr_t caller)
 {
     char line[12288];
     char summary[256];
     line[0] = 0;
     summary[0] = 0;
-    FormatEvent(entity, evt, line, sizeof(line), summary, sizeof(summary));
+    const uint32_t evId = FormatEvent(entity, evt, caller, line, sizeof(line), summary, sizeof(summary));
+    const bool spell = std::strstr(summary, "[SPELL") != nullptr;
 
     AcquireSRWLockExclusive(&g_lock);
-    if (g_file) {
+    if (g_file) {  // flushed once per frame in DrainPending
         std::fputs(line, g_file);
         std::fputc('\n', g_file);
-        std::fflush(g_file);
+    }
+    // native.log gets spell events and the first occurrence of every other
+    // event id; the capture file has everything.
+    bool announce = spell;
+    if (!announce) {
+        bool seen = false;
+        for (int i = 0; i < g_seenCount && !seen; ++i) seen = g_seen[i] == evId;
+        if (!seen && g_seenCount < kMaxSeen) {
+            g_seen[g_seenCount++] = evId;
+            announce = true;
+        }
     }
     const size_t sl = std::strlen(summary);
-    if (g_pendingLen + sl + 2 < sizeof(g_pending)) {
+    if (announce && g_pendingLen + sl + 2 < sizeof(g_pending)) {
         std::memcpy(g_pending + g_pendingLen, summary, sl);
         g_pendingLen += sl;
         g_pending[g_pendingLen++] = '\n';
@@ -216,10 +281,24 @@ void Capture(const uint64_t* entity, const uint8_t* evt)
     ReleaseSRWLockExclusive(&g_lock);
 }
 
-// Runs as the queue function itself (the filler tail-jumped here).
-void __fastcall QueueThunk(void* system, const uint64_t* entity, uint8_t* evt)
+// Entry detour: runs instead of the queue for every caller. The return
+// address is the caller's (the stub reached us with a jmp), or for a
+// tail-jumping caller the caller's caller.
+__declspec(noinline) void __fastcall QueueDetour(void* system, const uint64_t* entity, uint8_t* evt)
 {
-    if (g_on.load(std::memory_order_relaxed) && entity && evt) Capture(entity, evt);
+    if (g_on.load(std::memory_order_relaxed) && entity && evt) {
+        Capture(entity, evt, reinterpret_cast<uintptr_t>(_ReturnAddress()));
+    }
+    g_orig(system, entity, evt);
+}
+
+// Fallback: runs as the queue itself, reached from the spell builder's
+// patched tail jump only.
+__declspec(noinline) void __fastcall QueueThunk(void* system, const uint64_t* entity, uint8_t* evt)
+{
+    if (g_on.load(std::memory_order_relaxed) && entity && evt) {
+        Capture(entity, evt, reinterpret_cast<uintptr_t>(_ReturnAddress()));
+    }
     g_orig(system, entity, evt);
 }
 
@@ -239,6 +318,11 @@ FILE* OpenCaptureFile()
 
 void DrainPending()
 {
+    if (g_on.load(std::memory_order_relaxed)) {
+        AcquireSRWLockExclusive(&g_lock);
+        if (g_file) std::fflush(g_file);
+        ReleaseSRWLockExclusive(&g_lock);
+    }
     if (!g_hasPending.load(std::memory_order_acquire)) return;
     char local[sizeof(g_pending)];
     AcquireSRWLockExclusive(&g_lock);
@@ -258,33 +342,60 @@ bool g_wasOn = false;  // frame thread only
 
 }  // namespace
 
-void Install()
+namespace {
+
+// Old single-site hook: the spell builder's tail jump into the queue.
+bool InstallTailJump(HMODULE mod, uint8_t* queue)
 {
-    HMODULE mod = GetModuleHandleW(nullptr);
     uint8_t* p = dag::patternscan::Find(mod, kJmpPattern);
     if (!p) {
         dag::log::Writef("GENOME: tail-jump pattern not found (capture unavailable)");
-        return;
+        return false;
     }
     uint8_t* site = p + kJmpOffset;
     int32_t disp = 0;
     std::memcpy(&disp, site + 1, sizeof(disp));
     uint8_t* target = site + 5 + disp;
-    uint8_t* queue = dag::patternscan::Find(mod, kQueuePattern);
-    if (!queue || queue != target) {
-        dag::log::Writef("GENOME: jump target is not the blueprint queue (target rva 0x%llX, queue %s), not patched",
-                         static_cast<unsigned long long>(target - reinterpret_cast<uint8_t*>(mod)),
-                         queue ? "elsewhere" : "not found");
-        return;
+    if (target != queue) {
+        dag::log::Writef("GENOME: tail jump does not target the queue (rva 0x%llX), not patched",
+                         static_cast<unsigned long long>(target - reinterpret_cast<uint8_t*>(mod)));
+        return false;
     }
     g_orig = reinterpret_cast<QueueFn>(target);  // set before the patch goes live
     if (!dag::patternscan::InstallFarJmp5(site, reinterpret_cast<void*>(&QueueThunk))) {
-        dag::log::Writef("GENOME: patch failed (no near stub), capture unavailable");
+        g_orig = nullptr;
+        dag::log::Writef("GENOME: tail-jump patch failed (no near stub), capture unavailable");
+        return false;
+    }
+    dag::log::Writef("GENOME: fallback hook on the spell tail jump at rva 0x%llX (spell events only)",
+                     static_cast<unsigned long long>(site - reinterpret_cast<uint8_t*>(mod)));
+    return true;
+}
+
+}  // namespace
+
+void Install()
+{
+    HMODULE mod = GetModuleHandleW(nullptr);
+    g_modBase = reinterpret_cast<uintptr_t>(mod);
+    uint8_t* queue = dag::patternscan::Find(mod, kQueuePattern);
+    if (!queue) {
+        dag::log::Writef("GENOME: blueprint queue prologue not found (capture unavailable)");
         return;
     }
-    dag::log::Writef("GENOME: capture hook at rva 0x%llX -> queue rva 0x%llX",
-                     static_cast<unsigned long long>(site - reinterpret_cast<uint8_t*>(mod)),
-                     static_cast<unsigned long long>(target - reinterpret_cast<uint8_t*>(mod)));
+    // Entry detour first; it sees every caller, so the tail-jump hook is
+    // not installed with it (no double logging).
+    // g_orig is written by the helper before the entry is patched.
+    if (dag::patternscan::InstallEntryDetour(queue, kQueueEntry, sizeof(kQueueEntry),
+                                             reinterpret_cast<void*>(&QueueDetour),
+                                             reinterpret_cast<void* volatile*>(&g_orig))) {
+        g_entryDetour = true;
+        dag::log::Writef("GENOME: entry detour on the blueprint queue at rva 0x%llX (all events)",
+                         static_cast<unsigned long long>(queue - reinterpret_cast<uint8_t*>(mod)));
+        return;
+    }
+    dag::log::Writef("GENOME: entry detour refused (prologue bytes differ or no near memory)");
+    InstallTailJump(mod, queue);
 }
 
 void SetCapture(bool on)
@@ -299,9 +410,13 @@ void SetCapture(bool on)
             g_file = f;
             ReleaseSRWLockExclusive(&g_lock);
             g_count = 0;
+            AcquireSRWLockExclusive(&g_lock);
+            g_seenCount = 0;
+            ReleaseSRWLockExclusive(&g_lock);
             g_on = (f != nullptr) && g_orig != nullptr;
-            dag::log::Writef("GENOME: capture ON (%s)", !g_orig ? "hook not installed"
-                             : f ? "native-genome-capture.txt" : "could not open file");
+            dag::log::Writef("GENOME: capture ON (%s, %s)", !g_orig ? "hook not installed"
+                             : f ? "native-genome-capture.txt" : "could not open file",
+                             g_entryDetour ? "all events via queue entry detour" : "spell tail jump only");
         } else {
             g_on = false;
             AcquireSRWLockExclusive(&g_lock);

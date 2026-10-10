@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Capture of the spell animation gameplay event (Genome) the client
-// spell-cast code queues for the animation blueprint. Read-only: logs the
-// event name, entity and the 22 GenomeVariant args, then lets the engine
-// queue it unchanged. See docs/spikes/genome-capture.md (static RE,
+// Capture of every gameplay event (Genome) the client queues for the
+// animation blueprint, spell events tagged. Read-only: logs the event
+// name, caller, entity and the 22 GenomeVariant args (ShortNameSets
+// decoded), then lets the engine queue it unchanged. See docs/spikes/genome-capture.md (static RE,
 // bg3_dx11.exe Patch 8).
 
 #pragma once
 
 namespace dag::genomecapture {
 
-// Pattern-scans and patches the builder's tail jump into the blueprint
-// queue. Always installed; logs nothing until SetCapture(true). Call once
+// Detours the blueprint queue entry (rva 0x3bd4b90); falls back to the
+// spell builder's tail jump if the entry bytes differ. Always installed; logs nothing until SetCapture(true). Call once
 // at DLL load.
 void Install();
 

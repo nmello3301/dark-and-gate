@@ -6,6 +6,8 @@
 
 #include <cctype>
 #include <cstdlib>
+#include <cstring>
+#include <intrin.h>
 #include <vector>
 
 namespace dag::patternscan {
@@ -246,6 +248,63 @@ uint8_t* InstallFarJmp5(uint8_t* jmpSite, void* newTarget)
     VirtualProtect(jmpSite, 5, oldProtect, &tmp);
     FlushInstructionCache(GetCurrentProcess(), jmpSite, 5);
     return oldTarget;
+}
+
+bool InstallEntryDetour(uint8_t* fn, const uint8_t* expected, size_t stolenLen, void* hook,
+                        void* volatile* trampolineOut)
+{
+    if (!fn || !expected || !hook || !trampolineOut || stolenLen < 5 || stolenLen > 8) return false;
+    if (std::memcmp(fn, expected, stolenLen) != 0) return false;  // someone patched it, or another build
+
+    // Layout of the 64-byte block (one allocation, near fn):
+    //   +0x00 trampoline: <stolen bytes> FF 25 00 00 00 00 <abs64 fn+stolenLen>
+    //   +0x20 hook stub:  48 B8 <abs64 hook> FF E0
+    constexpr size_t kBlock = 64;
+    uint8_t* block = AllocNearRWX(fn, kBlock);
+    if (!block) return false;
+    std::memset(block, 0xCC, kBlock);
+    uint8_t* tramp = block;
+    std::memcpy(tramp, fn, stolenLen);
+    tramp[stolenLen + 0] = 0xFF;
+    tramp[stolenLen + 1] = 0x25;
+    std::memset(tramp + stolenLen + 2, 0, 4);
+    const uint64_t resume = reinterpret_cast<uint64_t>(fn + stolenLen);
+    std::memcpy(tramp + stolenLen + 6, &resume, sizeof(resume));
+    uint8_t* stub = block + 0x20;
+    stub[0] = 0x48;
+    stub[1] = 0xB8;
+    std::memcpy(stub + 2, &hook, sizeof(void*));
+    stub[10] = 0xFF;
+    stub[11] = 0xE0;
+    FlushInstructionCache(GetCurrentProcess(), block, kBlock);
+    *trampolineOut = tramp;
+    MemoryBarrier();
+
+    // New first 8 bytes: E9 rel32 to the stub, NOPs over the rest of the
+    // stolen bytes, original bytes after them.
+    uint8_t patch[8];
+    std::memcpy(patch, fn, 8);
+    const int32_t disp = static_cast<int32_t>(stub - (fn + 5));
+    patch[0] = 0xE9;
+    std::memcpy(patch + 1, &disp, sizeof(disp));
+    for (size_t i = 5; i < stolenLen; ++i) patch[i] = 0x90;
+
+    DWORD oldProtect = 0;
+    if (!VirtualProtect(fn, 8, PAGE_EXECUTE_READWRITE, &oldProtect)) {
+        *trampolineOut = nullptr;
+        return false;
+    }
+    if ((reinterpret_cast<uintptr_t>(fn) & 7) == 0) {
+        int64_t v;
+        std::memcpy(&v, patch, sizeof(v));
+        _InterlockedExchange64(reinterpret_cast<volatile long long*>(fn), v);  // no torn instruction
+    } else {
+        std::memcpy(fn, patch, 8);
+    }
+    DWORD tmp = 0;
+    VirtualProtect(fn, 8, oldProtect, &tmp);
+    FlushInstructionCache(GetCurrentProcess(), fn, 8);
+    return true;
 }
 
 }  // namespace dag::patternscan

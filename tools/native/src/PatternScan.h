@@ -54,4 +54,18 @@ uint8_t* InstallFarCall5(uint8_t* callSite, void* newTarget);
 // or no stub could be allocated in range.
 uint8_t* InstallFarJmp5(uint8_t* jmpSite, void* newTarget);
 
+// Inline detour at a function entry. The first `stolenLen` bytes (5..8,
+// whole instructions) must equal `expected`; they must not be
+// RIP-relative or a branch (the caller proves this statically and passes
+// the exact bytes, so a patched or different build is refused). Builds a
+// trampoline near `fn` (stolen bytes + `jmp [rip] -> fn+stolenLen`) and a
+// `mov rax, hook; jmp rax` stub, then writes `E9 -> stub` (+ NOP pad) at
+// `fn` with one aligned 8-byte interlocked store when `fn` is 8-aligned.
+// The trampoline (call it as the original function) is stored in
+// `*trampolineOut` BEFORE the entry is patched, so a hook running on
+// another thread never sees it unset. Returns false (and leaves the code
+// alone) if the bytes differ or no memory could be allocated in range.
+bool InstallEntryDetour(uint8_t* fn, const uint8_t* expected, size_t stolenLen, void* hook,
+                        void* volatile* trampolineOut);
+
 }  // namespace dag::patternscan
