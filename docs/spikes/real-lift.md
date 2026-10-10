@@ -240,3 +240,11 @@ Lever **L1** in `tools/native/src/Hooks/RealJump.cpp`, behind `!dag_jump_mode re
 - **Character:** the `ecl::Character*` comes from the MoveSpeed template-fetch hook (the WASD character), validated by vtable `0x56576A0`. So you must move once before the first real jump.
 - **While a real jump runs:** the visual lift, the camera lift and the server hitbox lift are off, because the real position carries all of them.
 - **Logs:** `RJUMP start …`, `RJUMP end … re-seeds=…`, `RJUMP landed early …`.
+
+## Collision and landing (2026-10-10, second pass, unverified)
+
+- **Physics scene:** the falling Update's call to `GroundProbe` (`0x141bd7480`, unique pattern `4C 8B 42 30 4C 8D 4D 60 48 8B 92 80 00 00 00 48 8D 4D 70 F3 0F 11 74 24 28 F3 0F 11 44 24 20 E8`, +31) is patched to learn the physics scene (r8).
+- **Sweep:** `scene->vt[0x50](scene, float radius, vec3* from, vec3* to, Result*, 5, 0x20, 0x8100080, 1, -1, -1)`, read from GroundProbe. `Result` is 0x40 bytes; distance at +0x18, `FLT_MAX` = no hit.
+- **Walls:** sphere r = 0.25, swept along the frame's step + 0.35 m at feet + 0.45 m and feet + 1.5 m. A hit stops horizontal motion (`RJUMP wall …`).
+- **Ceiling:** while rising, a sweep from head (feet + 1.6 m) to the next head height + 0.15 m. A hit hands the state back with vy = 0, so the engine's gravity takes over (`RJUMP ceiling …`).
+- **Landing:** hand-back fall speed capped (`jump.land_speed`, 3 m/s; the k = 3 curve ends at about 13 m/s). Lua clears the last jump clip at touchdown (`__stop__`).

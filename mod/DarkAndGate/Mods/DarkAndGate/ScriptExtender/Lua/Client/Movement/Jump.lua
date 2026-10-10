@@ -214,7 +214,7 @@ function M.OnSpace()
         clipsWhy = "off (!dag_jump_play_anims)"
     elseif moving and J.movingPolicy == "off" then
         clipsOn, clipsWhy = false, "off on moving jumps (policy off)"
-    elseif moving and J.movingPolicy == "auto" and J.rootedSeen then
+    elseif moving and J.movingPolicy == "auto" and J.rootedSeen and FullPov.JumpMode() ~= "real" then
         clipsOn, clipsWhy = false, "off on moving jumps (a clip rooted the walk earlier)"
     else
         clipsWhy = moving and ("on, moving (policy " .. J.movingPolicy .. ")") or "on"
@@ -239,7 +239,9 @@ function M.OnSpace()
     J.landPending = nil
     J.rate = nil
     J.rootCheck = nil
-    if clipsOn and moving and J.movingPolicy == "auto" and not J.movingChecked and #J.events > 0 then
+    -- Real jump: the DLL owns the horizontal motion, so a clip can't root it.
+    if clipsOn and moving and J.movingPolicy == "auto" and not J.movingChecked and #J.events > 0
+        and FullPov.JumpMode() ~= "real" then
         J.rootCheck = { at = now + 450, v0 = speed.v }
     end
     State.jumping = true
@@ -330,6 +332,12 @@ local function tick()
         State.jumping = false
         J.readyAt = now + D.cooldown_s * 1000
         if J.rate then Actions.SetBaseRate("jump", 1.0) end
+        -- Real jump: the last clip (descend) is still an Osiris task at
+        -- touchdown and held the character ("stuck in the landing"); end it
+        -- now unless an action (swing / cast) owns the body.
+        if FullPov.JumpMode() == "real" and J.rate and not Actions.Busy() then
+            ClientNet.PlayAnim("__stop__")
+        end
         local landWait = ""
         if suspended and J.rate and not J.landPlayed and J.P and J.P.land then
             J.landPending = { at = now }
@@ -388,6 +396,7 @@ function M.Register()
     Ext.RegisterConsoleCommand("dag_jump_strafe_flip", function()
         Log.Write("Jump: A/D in the air flipped, strafe_sign = " .. tostring(FullPov.FlipStrafe()))
     end)
+    FullPov.SetRealJumpTuning(D.strafe_sign, D.land_speed)
     if D.mode == "real" then FullPov.SetJumpMode("real") end
 
     Ext.RegisterConsoleCommand("dag_jump_moving_anims", function(_, x)

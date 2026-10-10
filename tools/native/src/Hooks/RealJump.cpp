@@ -12,6 +12,15 @@
 // (MoveTo / Idle), +0x40 layer 1 (Falling / Climbing).
 // State vtable: [1] GetType, [2] Enter, [3] Continue, [4] Update,
 // [5] CanExit, [6] Exit.
+//
+// Collision (2026-10-10): the engine's falling has no sideways or ceiling
+// check. Its ground probe (0x141196c70, called from the falling Update at
+// 0x141bd7480) sweeps a sphere through the physics scene:
+//   scene->vt[0x50](scene, float radius, vec3* from, vec3* to, Result* r,
+//                   5, 0x20, mask 0x8100080, 1, -1, -1)
+//   Result (0x40 bytes): +0x18 float distance, FLT_MAX = no hit.
+// We patch that call to learn the scene, then sweep sideways (knee, head)
+// and upward (while rising) with the same call.
 
 #include "RealJump.h"
 
@@ -54,6 +63,39 @@ char       g_why[128] = "not installed";
 std::atomic<void*> g_char{ nullptr };
 float g_camFwd[2] = { 0.f, 1.f };
 float g_strafeSign = 1.f;
+float g_landSpeed = 3.f;
+
+// Physics scene from the falling Update's ground probe call.
+using ProbeFn = void*(__fastcall*)(void* out, void* grid, void* scene, float* pos, float radius, float extraUp);
+using SweepFn = void(__fastcall*)(void* scene, float radius, const float* from, const float* to, uint8_t* result,
+                                  int a6, int a7, uint32_t mask, int a9, int a10, int a11);
+ProbeFn g_origProbe = nullptr;
+std::atomic<void*> g_scene{ nullptr };
+constexpr const char* kProbeCallPattern =
+    "4C 8B 42 30 4C 8D 4D 60 48 8B 92 80 00 00 00 48 8D 4D 70 F3 0F 11 74 24 28 F3 0F 11 44 24 20 E8";
+
+void* __fastcall HookProbe(void* out, void* grid, void* scene, float* pos, float radius, float extraUp)
+{
+    if (scene) g_scene.store(scene, std::memory_order_relaxed);
+    return g_origProbe(out, grid, scene, pos, radius, extraUp);
+}
+
+// Sphere sweep from -> to; true + distance on a hit.
+bool Sweep(const float from[3], const float to[3], float radius, float& dist)
+{
+    void* scene = g_scene.load(std::memory_order_relaxed);
+    if (!scene) return false;
+    __try {
+        auto fn = reinterpret_cast<SweepFn>(*reinterpret_cast<uintptr_t*>(*reinterpret_cast<uintptr_t*>(scene) + 0x50));
+        alignas(16) uint8_t res[0x40] = {};
+        *reinterpret_cast<float*>(res + 0x18) = 3.402823466e38f;
+        fn(scene, radius, from, to, res, 5, 0x20, 0x8100080u, 1, -1, -1);
+        dist = *reinterpret_cast<float*>(res + 0x18);
+        return dist < 3.0e38f && std::fabs(dist) > 1e-4f;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
 
 struct Jump {
     bool     active = false;     // we steer
@@ -68,6 +110,8 @@ struct Jump {
     float    lastY = 0;
     int      frames = 0, reseeds = 0;
     float    wrote[3] = {};      // Start we wrote (re-seed detection)
+    int      walls = 0;          // frames the sideways move was blocked
+    bool     bonked = false;
 } g_j;
 
 // Horizontal velocity of the character, measured per frame (for inertia).
@@ -199,22 +243,69 @@ uint64_t __fastcall HookUpdate(uint8_t* st, uint8_t* gameTime)
         g_j.vel[0] = dir[0] * speed;
         g_j.vel[1] = dir[1] * speed;
     }
-    g_j.pos[0] += g_j.vel[0] * dt;
-    g_j.pos[2] += g_j.vel[1] * dt;
+    // Walls: sweep the step at knee and head height; blocked = stop.
+    {
+        const float sx = g_j.vel[0] * dt, sz = g_j.vel[1] * dt;
+        const float sl = std::sqrt(sx * sx + sz * sz);
+        if (sl > 1e-5f) {
+            const float nx = sx / sl, nz = sz / sl;
+            const float reach = sl + 0.35f;
+            bool blocked = false;
+            for (float hh : { 0.45f, 1.5f }) {
+                const float from[3] = { g_j.pos[0], g_j.pos[1] + hh, g_j.pos[2] };
+                const float to[3] = { from[0] + nx * reach, from[1], from[2] + nz * reach };
+                float d;
+                if (Sweep(from, to, 0.25f, d)) { blocked = true; break; }
+            }
+            if (blocked) {
+                if (g_j.walls++ == 0)
+                    dag::log::Writef("RJUMP wall seq=%d at u=%.2f -> horizontal motion stopped", g_j.seq, u);
+                g_j.vel[0] = g_j.vel[1] = 0.f;
+            } else {
+                g_j.pos[0] += sx;
+                g_j.pos[2] += sz;
+            }
+        }
+    }
+
+    // Ceiling: rising into something = bonk, the engine's gravity takes over.
+    if (u < 1.f && !g_j.bonked) {
+        const float yNext = g_j.start[1] + Curve(u);
+        if (yNext > g_j.pos[1] + 1e-4f) {
+            const float from[3] = { g_j.pos[0], g_j.pos[1] + 1.6f, g_j.pos[2] };
+            const float to[3] = { from[0], yNext + 1.6f + 0.15f, from[2] };
+            float d;
+            if (Sweep(from, to, 0.25f, d)) {
+                g_j.bonked = true;
+                const float p[3] = { g_j.pos[0], g_j.pos[1], g_j.pos[2] };
+                std::memcpy(st + 0x1C, p, 12);
+                const float v[3] = { g_j.vel[0], 0.f, g_j.vel[1] };
+                std::memcpy(st + 0x28, v, 12);
+                *reinterpret_cast<float*>(st + 0x48) = 0.f;
+                g_j.active = false;
+                dag::log::Writef("RJUMP ceiling seq=%d at u=%.2f y=%.2f -> falls from here (%d frames, walls=%d)",
+                                 g_j.seq, u, g_j.pos[1], g_j.frames, g_j.walls);
+                return g_origUpdate(st, gameTime);
+            }
+        }
+    }
 
     if (u >= 1.f) {
-        // Curve done: hand back to the engine with our momentum and the
-        // curve's final downward speed; it falls / lands by itself.
+        // Curve done: hand back to the engine with our momentum and a
+        // gentle fall speed (the curve's own end is ~13 m/s at k=3, which
+        // landed hard); it falls on / lands by itself.
         const float du = 0.01f;
-        const float vy = (Curve(1.f - du) - Curve(1.f - 2 * du)) / (du * g_j.durMs / 1000.f);
+        float vy = (Curve(1.f - du) - Curve(1.f - 2 * du)) / (du * g_j.durMs / 1000.f);
+        if (vy < -g_landSpeed) vy = -g_landSpeed;
         const float p[3] = { g_j.pos[0], g_j.start[1] + 0.001f, g_j.pos[2] };
         std::memcpy(st + 0x1C, p, 12);
         const float v[3] = { g_j.vel[0], vy < 0.f ? vy : -1.f, g_j.vel[1] };
         std::memcpy(st + 0x28, v, 12);
         *reinterpret_cast<float*>(st + 0x48) = 0.f;
         g_j.active = false;
-        dag::log::Writef("RJUMP end seq=%d steered %d frames, re-seeds=%d, handed back vy=%.2f at (%.2f,%.2f,%.2f)",
-                         g_j.seq, g_j.frames, g_j.reseeds, v[1], p[0], p[1], p[2]);
+        dag::log::Writef("RJUMP end seq=%d steered %d frames, re-seeds=%d, walls=%d, handed back vy=%.2f at (%.2f,%.2f,%.2f) scene=%s",
+                         g_j.seq, g_j.frames, g_j.reseeds, g_j.walls, v[1], p[0], p[1], p[2],
+                         g_scene.load() ? "yes" : "NO (no wall/ceiling checks)");
         return g_origUpdate(st, gameTime);
     }
 
@@ -288,6 +379,17 @@ void Install()
     }
     g_getState = reinterpret_cast<GetStateFn>(gs);
     g_counter = reinterpret_cast<int*>(g_base + kCounterRva);
+    if (uint8_t* pc = dag::patternscan::Find(mod, kProbeCallPattern)) {
+        uint8_t* call = pc + 31;
+        uint8_t* prev = dag::patternscan::InstallFarCall5(call, reinterpret_cast<void*>(&HookProbe));
+        if (prev) {
+            g_origProbe = reinterpret_cast<ProbeFn>(prev);
+            dag::log::Writef("RJUMP: falling ground-probe call hooked at rva 0x%llX (physics scene for wall/ceiling checks)",
+                             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(call) - g_base));
+        }
+    } else {
+        dag::log::Writef("RJUMP: ground-probe call pattern not found -> no wall/ceiling checks");
+    }
     strcpy_s(g_why, "ready");
     dag::log::Writef("RJUMP: GetState at rva 0x%llX", static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(gs) - g_base));
 }
@@ -301,6 +403,7 @@ void NoteCharacter(void* character)
 }
 
 void SetStrafeSign(float s) { g_strafeSign = s < 0.f ? -1.f : 1.f; }
+void SetLandSpeed(float vmax) { if (vmax > 0.1f && vmax < 50.f) g_landSpeed = vmax; }
 
 void MeasureFrame()
 {

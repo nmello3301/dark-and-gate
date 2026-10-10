@@ -165,6 +165,7 @@ struct LuaState {
     bool      liftObjects = true;  // lift the meshes' render objects too (VisualLift)
     int       jumpMode = 0;        // 0 visual lift, 1 real (RealJump.cpp)
     float     strafeSign = 1.f;
+    float     landSpeed = 3.f;
     DWORD readTick  = 0;
 };
 
@@ -255,6 +256,7 @@ void PollLuaFile()
     s.liftObjects = ValI(buf, "lift_objects", 1) != 0;
     s.jumpMode = ValI(buf, "jump_mode", 0);
     s.strafeSign = ValF(buf, "strafe_sign", 1.f);
+    s.landSpeed = ValF(buf, "rj_land_speed", 3.f);
     if (const char* v = FindVal(buf, "visual")) {
         s.visual = static_cast<uintptr_t>(std::strtoull(v, nullptr, 16));
     }
@@ -843,6 +845,7 @@ void UpdateJump()
             g_jump.real = false;
             if (g_lua.jumpMode == 1) {
                 dag::realjump::SetStrafeSign(g_lua.strafeSign);
+                dag::realjump::SetLandSpeed(g_lua.landSpeed);
                 g_jump.real = dag::realjump::Start(g_jump.durMs, g_jump.h, g_jump.k, nullptr, g_jump.seq);
             }
             dag::log::Writef("JUMP start seq=%d dur=%.0fms h=%.2f k=%.1f lift=%s",

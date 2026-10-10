@@ -31,6 +31,10 @@ void MeasureFrame();
 // +1 / -1: which way A/D steer in the air (checked in-game).
 void SetStrafeSign(float s);
 
+// Fall speed (m/s, positive) the curve hands back to the engine at the end,
+// at most: a gentle touchdown instead of the curve's steep end.
+void SetLandSpeed(float vmax);
+
 // Start a real jump now (game thread). Returns false (and logs why) if the
 // engine state couldn't be entered; the caller then falls back to the
 // visual lift. curve: y = h * (1 - |2u - 1|^k), u = t / durMs.

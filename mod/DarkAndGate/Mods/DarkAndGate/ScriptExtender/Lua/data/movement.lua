@@ -28,6 +28,10 @@
 --                   BG3's falling state (RealJump.cpp, 2026-10-10, being
 --                   tested): body, camera, hitbox and collision together,
 --                   lands on what is under it. !dag_jump_mode real|visual.
+--   strafe_sign     +1 / -1: A/D steering direction in the air (real mode).
+--   land_speed      real mode: the curve ends steep (~13 m/s at k=3), which
+--                   landed hard and stuck; the engine gets at most this fall
+--                   speed for the touchdown.
 --   max_clip_rate   the clips are fitted to the airtime (rate = clip time /
 --                   airtime, 1.73 s of clips into 1.28 s = x1.35); capped here.
 --   anims           BG3 animation-mapping ids for the JumpFlight phases (found by
@@ -86,7 +90,7 @@
 return {
     jump = {
         enabled       = true,
-        height_m      = 0.55,
+        height_m      = 0.80,   -- 2026-10-10: a little bigger (was 0.55)
         clip_air_s    = 0.80,
         duration_mult = 1.60,
         min_air_s     = 0.30,
@@ -94,7 +98,9 @@ return {
         apex_flatness = 3.0,
         cooldown_s    = 0.15,
         land_lead_s   = 0.05,
-        mode          = "visual",
+        mode          = "real",   -- 2026-10-10 playtest: real jump approved
+        strafe_sign   = -1,       -- A/D in the air (playtest: +1 was reversed)
+        land_speed    = 3.0,      -- m/s, max fall speed handed back at the end of the curve
         use_cast      = true,
         phases        = { "cast", "ascend", "descend" },
         max_clip_rate = 1.6,
