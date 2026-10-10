@@ -67,7 +67,9 @@
 -- prepare: spell prepare loop while a hotbar spell is armed
 -- (Client/Combat/Prepare.lua). The clip ids come from the spell's own
 -- SpellAnimation stats (slot 0 = prepare, slot 1 = loop; logged per spell).
---   enabled         on/off (also !dag_prepare_anims on|off).
+--   enabled         on/off (also !dag_prepare_anims on|off). OFF since
+--                   2026-10-10: the clip (Osi.PlayAnimation) blocked all
+--                   movement while casting; animation comes in a later pass.
 --   loop_fallback   mapping id looped when the spell has no loop clip
 --                   (nil = hold after the prepare clip). The DFLT melee loop
 --                   from the 2026-10-09 picks is a candidate.
@@ -117,7 +119,7 @@ return {
         resume_skip_s = 0.25,
     },
     prepare = {
-        enabled          = true,
+        enabled          = false,
         loop_fallback    = nil,
         refresh_margin_s = 0.05,
         unknown_dur_s    = 1.0,

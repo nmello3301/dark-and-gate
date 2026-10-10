@@ -21,6 +21,7 @@ local spells    = Ext.Require("data/spells.lua")
 local Actions   = Ext.Require("Client/Combat/Actions.lua")
 local Prepare   = Ext.Require("Client/Combat/Prepare.lua")
 local airAction = Ext.Require("data/movement.lua").air_action
+local Movement  = Ext.Require("Client/Movement/Movement.lua")
 
 local M = {}
 
@@ -129,6 +130,17 @@ end
 
 function M.Register()
     Ext.Events.Tick:Subscribe(function() pcall(tick) end)
+    -- Casting slows the caster on the ground (data/spells.lua
+    -- casting_speed_mult); ready-to-release and airborne are full speed.
+    local wasSlowed = false
+    Movement.AddModifier("casting", function()
+        local slowed = State.armedSpell ~= nil and M.ReadyIn(State.armedSpell) > 0 and not State.jumping
+        if slowed ~= wasSlowed then
+            wasSlowed = slowed
+            Log.Write(string.format("Spells: casting slow %s (x%.2f)", slowed and "ON" or "off", spells.casting_speed_mult or 1))
+        end
+        return slowed and (spells.casting_speed_mult or 1.0) or 1.0
+    end)
 end
 
 return M

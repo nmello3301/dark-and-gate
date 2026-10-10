@@ -18,6 +18,10 @@ return {
     -- The server accepts a release this much earlier than cast_time_s
     -- (network latency between the arm and the cast messages).
     cast_time_tolerance_s = 0.25,
+    -- While the cast time runs (spell selected, not ready yet) and the
+    -- caster is on the ground, movement speed x this (Movement modifier
+    -- "casting"). Once the spell is ready to release: full speed.
+    casting_speed_mult = 0.7,
 
     -- Shooting spells (unlimited_range = true) fly toward the crosshair at
     -- any distance: the aim point is up to aim_far_m away along the view,

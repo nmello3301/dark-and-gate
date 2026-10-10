@@ -172,6 +172,8 @@ Lessons recorded for the next pass: `Ext.Require` only works at load time; `hit.
 - [x] Standing jump. *(verified 2026-10-09)* Clips now cast → ascend → descend fitted to the airtime (x1.35); the Recover clip is dropped (developer: unneeded).
 - [ ] Swing / cast / spell prepare loop in the air take priority over the jump clips; the arc continues; landing waits for the action.
 - [ ] Spell prepare loop while a spell is armed (ids from the spell's `SpellAnimation` stats); LMB casts, RMB / same key cancels to idle.
+- [x] Channelled casting, straight-line aim, unlimited range, momentum in the air. *(verified 2026-10-10: "spells feel great, aim feels perfect")*
+- [ ] **Casting slows instead of blocking** (2026-10-10): the prepare animation is off for now (it stopped all movement); while the cast time runs on the ground, speed x0.7 (`casting_speed_mult`, Movement modifier "casting"); ready to release = full speed. Next pass: casting animation without rooting.
 - [ ] **Channelled casting** (2026-10-09): selecting a hotbar spell starts casting (prepare animation, priority over the jump clips); held indefinitely; LMB releases only after the cast time (`data/spells.lua` `cast_time_s = 2.0`, server-checked via `SpellArm`). Later: cast time scaled by character traits.
 - [ ] **Shooting spells have no max range**: aim point up to 100 m along the crosshair, spell `TargetRadius` raised to 100 at stats load (`Shared/SpellRange.lua`).
 - [ ] **Straight-line spell aim** (2026-10-10): one ray from the eye along the crosshair; first hit wins (character hitbox cylinder exactly on the line, else world, else the point 100 m out). No cone assist, no ground-plane / 18 m "ahead" fallback. HUD shows `character|world|far <distance>` from the same function.
