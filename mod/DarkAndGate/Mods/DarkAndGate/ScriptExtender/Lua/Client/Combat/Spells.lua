@@ -38,6 +38,11 @@ function M.Cast(spellId)
     local far = def.unlimited_range
     local range = far and (spells.aim_far_m or 100) or (def.range_m or 30.0)
 
+    -- Shooting spells: straight down the crosshair line, nothing else
+    -- (Aim.SpellAim). A character on the line is the target; otherwise the
+    -- world point or the far point along the line.
+    local straight = far and kind ~= "self" and Aim.SpellAim(range) or nil
+
     local payload = {
         withMana = true,
         spell    = spellId,
@@ -50,6 +55,18 @@ function M.Cast(spellId)
     -- ground point. GroundPoint never fails while the camera is readable.
     if kind == "self" then
         payload.targetUuid = "__self__"
+    elseif far then
+        if not straight then
+            Log.Write("Spells: camera not readable -- aborting " .. spellId)
+            return
+        end
+        local p = straight.pos
+        if straight.target and kind == "target" then payload.targetUuid = straight.target end
+        payload.hitPoint = { x = p[1], y = p[2], z = p[3] }
+        Log.Write(string.format("Spells: %s aim %s %.1f m at (%.2f,%.2f,%.2f) from eye (%.2f,%.2f,%.2f) dir (%.3f,%.3f,%.3f)%s",
+            spellId, straight.via, straight.distance, p[1], p[2], p[3],
+            straight.eye[1], straight.eye[2], straight.eye[3], straight.fwd[1], straight.fwd[2], straight.fwd[3],
+            straight.target and (" target " .. straight.target) or ""))
     else
         local t = (kind == "target") and Aim.TargetAtCrosshair(range) or nil
         if t then

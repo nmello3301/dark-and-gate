@@ -174,6 +174,10 @@ Lessons recorded for the next pass: `Ext.Require` only works at load time; `hit.
 - [ ] Spell prepare loop while a spell is armed (ids from the spell's `SpellAnimation` stats); LMB casts, RMB / same key cancels to idle.
 - [ ] **Channelled casting** (2026-10-09): selecting a hotbar spell starts casting (prepare animation, priority over the jump clips); held indefinitely; LMB releases only after the cast time (`data/spells.lua` `cast_time_s = 2.0`, server-checked via `SpellArm`). Later: cast time scaled by character traits.
 - [ ] **Shooting spells have no max range**: aim point up to 100 m along the crosshair, spell `TargetRadius` raised to 100 at stats load (`Shared/SpellRange.lua`).
+- [ ] **Straight-line spell aim** (2026-10-10): one ray from the eye along the crosshair; first hit wins (character hitbox cylinder exactly on the line, else world, else the point 100 m out). No cone assist, no ground-plane / 18 m "ahead" fallback. HUD shows `character|world|far <distance>` from the same function.
+- [ ] **Momentum kept when arming in the air**: the prepare clip (an Osiris PlayAnimation, which stops the walk) waits for the landing while airborne and moving.
+- [ ] Spell prepare animations are the wrong clips (developer, 2026-10-10; fix later): check the logged `SpellAnimation` slot order.
+- **Known limitation:** any scripted clip (`Osi.PlayAnimation`) stops WASD movement on the ground too (jump clips, prepare loop). Animation playback that doesn't go through Osiris (native) would fix it; not scheduled.
 - [ ] First swing animates on a single click; single-click chain 1→2→3. **2026-10-09: cause found** — the auto-picked swing-1 clip was BG3's ranged attack (no clip in melee stances), so click 1 played nothing and click 2 (swing 2) did. Swings 1–3 now use the developer's picks (RHand, LHand, RHand) via `data/anim_tags.lua`; ranged clips excluded from the auto-pick.
 - [ ] Blocking and parry: **custom animations**; block only with a shield equipped, parry only with a weapon that can parry (decided 2026-10-08).
 - [x] Fire Bolt aimed at the crosshair (character aim assist, or ground / object point). *(2026-10-08)*

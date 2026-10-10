@@ -22,6 +22,7 @@ local Log       = Ext.Require("Shared/Log.lua")
 local ClientNet = Ext.Require("Client/Net.lua")
 local Actions   = Ext.Require("Client/Combat/Actions.lua")
 local movement  = Ext.Require("data/movement.lua")
+local Jump      = Ext.Require("Client/Movement/Jump.lua")
 
 local M = {}
 
@@ -168,6 +169,14 @@ function M.Start(spell)
     local t = nowMs()
     cur = { spell = spell, i = i, t0 = t, loops = 0 }
     Actions.Hold("prepare")
+    -- 2026-10-10: armed in the air while moving, the clip (an Osiris
+    -- PlayAnimation task) stopped the walk and the jump lost its momentum.
+    -- Keep the momentum: the clip starts when the jump lands.
+    if Jump.AirborneMoving() then
+        cur.deferred = true
+        Log.Write("Prepare: " .. spell .. " armed in the air while moving -- animation waits for the landing (momentum kept)")
+        return
+    end
     local first = i.prepare or i.loop
     playClip(first, i.prepare and "prepare" or "loop")
     local d = first.dur or P.unknown_dur_s
@@ -191,6 +200,15 @@ end
 function M.Active() return cur ~= nil end
 
 local function tick()
+    if cur and cur.deferred and not Jump.Airborne() then
+        cur.deferred = false
+        local i = cur.i
+        local first = i.prepare or i.loop
+        playClip(first, i.prepare and "prepare" or "loop")
+        local d = first.dur or P.unknown_dur_s
+        cur.nextAt = nowMs() + math.max(0.1, d - P.refresh_margin_s) * 1000
+        Log.Write("Prepare: " .. cur.spell .. " landed -> " .. cur.phase .. " " .. first.key)
+    end
     if not cur or not cur.nextAt then return end
     local t = nowMs()
     if t < cur.nextAt then return end

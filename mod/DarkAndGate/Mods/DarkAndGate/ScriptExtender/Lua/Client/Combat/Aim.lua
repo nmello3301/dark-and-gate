@@ -241,6 +241,40 @@ function M.AimPoint(maxDist)
     return { eye[1] + fwd[1] * maxDist, eye[2] + fwd[2] * maxDist, eye[3] + fwd[3] * maxDist }, maxDist, "far"
 end
 
+-- Spell aim, 2026-10-10: ONE straight line from the eye (the head-anchored
+-- first-person camera) along the crosshair. The first thing on that line
+-- wins: a character's hitbox cylinder (exact ray test, no cone assist), else
+-- the world surface, else the point maxDist along the line (sky / far).
+-- No ground-plane or "ahead" fallbacks. Returns
+--   { pos, distance, via = "character" | "world" | "far", target = uuid?, eye, fwd } or nil.
+function M.SpellAim(maxDist)
+    maxDist = maxDist or 100.0
+    local eye, fwd = readInvView()
+    if not eye then return nil end
+    -- Start the world ray 0.4 m out so it can't hit our own body.
+    local nudge = 0.4
+    local from = { eye[1] + fwd[1] * nudge, eye[2] + fwd[2] * nudge, eye[3] + fwd[3] * nudge }
+    local dw = M.WorldRay(from, fwd, maxDist - nudge)
+    local dWorld = dw and (dw + nudge) or nil
+    local limit = dWorld or maxDist
+    local best, bestD
+    local t = now()
+    local selfUuid = M.SelfUuid()
+    for _, c in ipairs(M.Characters()) do
+        if c.uuid ~= selfUuid then
+            local cyl = Hitbox.Cylinder(c.uuid, c.feet, t)
+            local d = Hitbox.RayHit(cyl, eye, fwd, limit)
+            if d and d > 0.3 and (not bestD or d < bestD) then best, bestD = c, d end
+        end
+    end
+    local d, via = limit, dWorld and "world" or "far"
+    if best then d, via = bestD, "character" end
+    return {
+        pos = { eye[1] + fwd[1] * d, eye[2] + fwd[2] * d, eye[3] + fwd[3] * d },
+        distance = d, via = via, target = best and best.uuid or nil, eye = eye, fwd = fwd,
+    }
+end
+
 -- Back-compat for older callers: { eye, forward, hit = { pos, distance } }.
 function M.CrosshairRay(maxDist, _includeChars)
     local eye, fwd = readInvView()
@@ -264,7 +298,7 @@ end
 -- ---------------------------------------------------------------------
 -- Characters (incremental scan)
 -- ---------------------------------------------------------------------
-local NEAR_M = 70.0           -- keep characters within this radius
+local NEAR_M = 100.0          -- keep characters within this radius (spell aim reaches 100 m)
 local SLICE = 48              -- entities examined per tick
 local LIST_REFRESH_MS = 3000  -- re-fetch the entity list this often
 

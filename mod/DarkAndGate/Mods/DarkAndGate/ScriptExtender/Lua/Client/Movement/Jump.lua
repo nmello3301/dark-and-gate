@@ -189,6 +189,13 @@ local function sampleSpeed(now)
     speed.at = now
 end
 
+-- Airborne with horizontal momentum? (Prepare.lua defers its clip: an
+-- Osi.PlayAnimation clip stops the walk, which killed the jump's inertia.)
+function M.AirborneMoving()
+    return J.active and (J.moving or moveKeysHeld()) and true or false
+end
+function M.Airborne() return J.active end
+
 function M.OnSpace()
     if not cfg("enabled") then return end
     local now = nowMs()
@@ -200,6 +207,7 @@ function M.OnSpace()
     local P = {}
     for _, ph in ipairs(D.phases or { "cast", "ascend", "hang", "descend", "land" }) do P[ph] = JumpAnims.Pick(ph) end
     local moving = speed.v >= (D.moving_speed or 0.8)
+    J.moving = moving
     local clipsWhy
     local clipsOn = cfg("play_anims")
     if not clipsOn then
