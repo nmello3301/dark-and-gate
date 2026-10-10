@@ -30,6 +30,7 @@
 #include "VisualLift.h"
 #include "AnimRate.h"
 #include "MoveSpeed.h"
+#include "RealJump.h"
 
 namespace dag::pov {
 
@@ -162,6 +163,8 @@ struct LuaState {
     float     moveWalk = 1.f;  // WASD speed multipliers (MoveSpeed.cpp)
     float     moveRun  = 1.f;
     bool      liftObjects = true;  // lift the meshes' render objects too (VisualLift)
+    int       jumpMode = 0;        // 0 visual lift, 1 real (RealJump.cpp)
+    float     strafeSign = 1.f;
     DWORD readTick  = 0;
 };
 
@@ -250,6 +253,8 @@ void PollLuaFile()
     s.moveWalk = ValF(buf, "move_walk", 1.f);
     s.moveRun  = ValF(buf, "move_run", 1.f);
     s.liftObjects = ValI(buf, "lift_objects", 1) != 0;
+    s.jumpMode = ValI(buf, "jump_mode", 0);
+    s.strafeSign = ValF(buf, "strafe_sign", 1.f);
     if (const char* v = FindVal(buf, "visual")) {
         s.visual = static_cast<uintptr_t>(std::strtoull(v, nullptr, 16));
     }
@@ -469,6 +474,7 @@ struct JumpLift {
     LARGE_INTEGER t0 = {};
     float         durMs = 0, h = 0, k = 2;
     float         lift = 0;      // this frame, metres
+    bool          real = false;  // the real position carries it (RealJump)
 };
 JumpLift g_jump;
 
@@ -834,9 +840,15 @@ void UpdateJump()
             g_jump.k = g_lua.jumpK < 1.0f ? 1.0f : g_lua.jumpK;
             { int a, b, c; dag::visuallift::TakeStats(a, b, c); dag::visuallift::TakeObjectStats(a, b, c); }  // reset per jump
             g_jls = JumpLiftStats{};
+            g_jump.real = false;
+            if (g_lua.jumpMode == 1) {
+                dag::realjump::SetStrafeSign(g_lua.strafeSign);
+                g_jump.real = dag::realjump::Start(g_jump.durMs, g_jump.h, g_jump.k, nullptr, g_jump.seq);
+            }
             dag::log::Writef("JUMP start seq=%d dur=%.0fms h=%.2f k=%.1f lift=%s",
                              g_jump.seq, g_jump.durMs, g_jump.h, g_jump.k,
-                             dag::visuallift::BodyLiftActive() ? "body+camera" : "camera-only jump");
+                             g_jump.real ? "REAL position (RealJump)"
+                             : (dag::visuallift::BodyLiftActive() ? "body+camera" : "camera-only jump"));
         }
     }
     g_jump.lift = 0;
@@ -1108,7 +1120,9 @@ void OnFrame(void* gameplayCam)
 
     UpdateJump();
     dag::visuallift::SetVisual((g_lua.on && g_lua.active) ? g_lua.visual : 0);
-    dag::visuallift::SetLift(g_jump.lift);
+    // A real jump moves the character itself: no visual lift on top.
+    dag::realjump::MeasureFrame();
+    dag::visuallift::SetLift(g_jump.real ? 0.f : g_jump.lift);
     {
         // The meshes' render objects (MeshBinding+0x28) carry the drawn body.
         uintptr_t objs[kMaxMeshes]; int n = 0;
@@ -1160,6 +1174,7 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
     const float fh = std::sqrt(fx * fx + fz * fz);
     if (fh > 0.05f) { fx /= fh; fz /= fh; s_fx = fx; s_fz = fz; }
     else            { fx = s_fx; fz = s_fz; }
+    dag::realjump::SetCameraForward(fx, fz);
 
     // Looking down: slide the eye forward (up to downFwd metres when
     // looking straight down) so the view clears the neck/collar.
@@ -1178,7 +1193,7 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
     // The body lift (VisualLift) moves the mesh, so a head bone read from
     // it already carries the lift; the pivot (TransformComponent) never does.
     const bool bodyLift = dag::visuallift::BodyLiftActive();
-    const float lift = g_jump.lift;
+    const float lift = g_jump.real ? 0.f : g_jump.lift;   // real jump: the pivot itself rises
 
     if (g_lua.anchor && HeadBoneWorld(head)) {
         // Sanity: must be near the engine's own idea of where the character is.

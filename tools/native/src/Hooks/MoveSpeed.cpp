@@ -24,6 +24,7 @@
 
 #include "../Log.h"
 #include "../PatternScan.h"
+#include "RealJump.h"
 
 namespace dag::movespeed {
 
@@ -63,6 +64,7 @@ uint8_t* __fastcall Hook(void* character, void* a2, void* a3, void* a4, uint8_t 
 {
     uint8_t* t = g_orig(character, a2, a3, a4, flag);
     g_calls.fetch_add(1, std::memory_order_relaxed);
+    dag::realjump::NoteCharacter(character);
     const float wm = g_walk.load(std::memory_order_relaxed);
     const float rm = g_runM.load(std::memory_order_relaxed);
     float S = 0, R = 0;

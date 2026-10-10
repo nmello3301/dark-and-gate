@@ -245,7 +245,9 @@ function M.OnSpace()
     State.jumping = true
 
     FullPov.Jump(J.seq, J.T, h, k)
-    ClientNet.JumpStart(J.T, h, k)
+    -- Real jump: the character's real position rises, so the hitbox follows
+    -- by itself; only the visual lift needs the hitbox lifted by hand.
+    ClientNet.JumpStart(J.T, FullPov.JumpMode() == "real" and 0 or h, k)
 
     -- Slow the jump clips to fit the airtime with the native per-character
     -- play rate (AnimRate.cpp, docs/spikes/anim-clock.md); reset on landing.
@@ -379,6 +381,15 @@ function M.Register()
         if tonumber(x) then MCM.Set("jump_height_m", tonumber(x)) end
         Log.Write(string.format("Jump: height=%.2fm", cfg("height_m")))
     end)
+    Ext.RegisterConsoleCommand("dag_jump_mode", function(_, x)
+        if x == "real" or x == "visual" then FullPov.SetJumpMode(x) end
+        Log.Write("Jump: mode = " .. FullPov.JumpMode() .. " (real = the character itself goes up; native.log RJUMP lines)")
+    end)
+    Ext.RegisterConsoleCommand("dag_jump_strafe_flip", function()
+        Log.Write("Jump: A/D in the air flipped, strafe_sign = " .. tostring(FullPov.FlipStrafe()))
+    end)
+    if D.mode == "real" then FullPov.SetJumpMode("real") end
+
     Ext.RegisterConsoleCommand("dag_jump_moving_anims", function(_, x)
         if x == "auto" or x == "on" or x == "off" then
             J.movingPolicy = x

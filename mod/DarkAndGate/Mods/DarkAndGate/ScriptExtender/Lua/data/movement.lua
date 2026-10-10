@@ -22,6 +22,12 @@
 --   phases          which clips a jump plays, in order. 2026-10-09 playtest:
 --                   the Recover (land) clip looked unneeded -> cast, ascend,
 --                   descend only; descend ends at touchdown.
+--   mode            "visual" = the DLL lifts the drawn body + camera (the
+--                   real position stays on the ground); "real" = the
+--                   character's real position follows the curve through
+--                   BG3's falling state (RealJump.cpp, 2026-10-10, being
+--                   tested): body, camera, hitbox and collision together,
+--                   lands on what is under it. !dag_jump_mode real|visual.
 --   max_clip_rate   the clips are fitted to the airtime (rate = clip time /
 --                   airtime, 1.73 s of clips into 1.28 s = x1.35); capped here.
 --   anims           BG3 animation-mapping ids for the JumpFlight phases (found by
@@ -88,6 +94,7 @@ return {
         apex_flatness = 3.0,
         cooldown_s    = 0.15,
         land_lead_s   = 0.05,
+        mode          = "visual",
         use_cast      = true,
         phases        = { "cast", "ascend", "descend" },
         max_clip_rate = 1.6,
