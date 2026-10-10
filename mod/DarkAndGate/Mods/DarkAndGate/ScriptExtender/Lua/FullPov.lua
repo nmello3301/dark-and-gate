@@ -14,7 +14,9 @@
 -- Commands (client console, C >>):
 --   !dag_full_pov [on|off]      toggle first-person POV
 --   !dag_pov_eye <up> <fwd> [look]  eye offset from the head bone, metres
---   !dag_pov_anchor [bone|pivot] camera on the head bone (default) or the engine pivot
+--   !dag_pov_anchor [head|pivot] camera on the head bone (default) or the engine pivot
+--                               ("bone" = "head"); prints the A/B status line
+--   !dag_pov_smooth <0..0.9>    light smoothing of the head bone (0 = raw, default)
 --   !dag_pov_down <m>           extra forward shift when looking straight down (default 0.20)
 --   !dag_pov_dump               DLL logs every pose candidate to native.log
 --   !dag_pov_status             print the DLL's POV status line
@@ -49,6 +51,13 @@ local S = {
     -- GenomeBlueprintInstance address and the rate; rate 1 = off.
     anim_inst = "0",
     anim_rate = 1.0,
+    -- Head-bone smoothing (0 = raw pose). Only if the CAM delta lines in
+    -- native.log show jitter (docs/playtest/movement-round.md step 1).
+    head_smooth = 0.0,
+    -- WASD speed multipliers for the DLL's ground-speed lever
+    -- (Client/Movement/Movement.lua, docs/spikes/move-speed.md).
+    move_walk = 1.0,
+    move_run = 1.0,
 }
 
 -- ---------------------------------------------------------------------
@@ -233,8 +242,8 @@ local function writeState()
     if S.on and USE_BONE_ANCHOR then refreshCache(e, now) end
 
     local line = string.format(
-        "on=%d active=%d anim_inst=%s anim_rate=%.3f visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
-        S.on and 1 or 0, active and 1 or 0, S.anim_inst, S.anim_rate, (S.on and cache.visual) or "0", S.anchor, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
+        "on=%d active=%d anim_inst=%s anim_rate=%.3f head_smooth=%.2f move_walk=%.3f move_run=%.3f visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
+        S.on and 1 or 0, active and 1 or 0, S.anim_inst, S.anim_rate, S.head_smooth, S.move_walk, S.move_run, (S.on and cache.visual) or "0", S.anchor, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
         S.jump_seq, math.floor(S.jump_ms + 0.5), S.jump_h, S.jump_k,
         S.dump, cache.sock or -1, cache.skel or 0, x, y, z,
         (S.on and #cache.meshes > 0) and table.concat(cache.meshes, ",") or "0",
@@ -297,6 +306,29 @@ function M.SetAnimRate(inst, rate)
 end
 M.AddrOf = function(o) return addrOf(o) end
 
+-- WASD speed multipliers (walk, run) for the DLL.
+function M.SetMove(walk, run)
+    if math.abs((walk or 1) - S.move_walk) < 1e-4 and math.abs((run or 1) - S.move_run) < 1e-4 then return end
+    S.move_walk, S.move_run = walk or 1.0, run or 1.0
+    lastWrite = 0
+    pcall(writeState)
+end
+
+-- One key=value from the DLL status line (nil if missing).
+function M.StatusValue(key)
+    local ok, s = pcall(Ext.IO.LoadFile, STATUS_PATH)
+    if not ok or not s then return nil end
+    return s:match("%s" .. key .. "=([^%s]+)") or s:match("^" .. key .. "=([^%s]+)")
+end
+
+local function abLine()
+    local st = readStatus() or ""
+    local function v(k) return st:match("[%s]" .. k .. "=([^%s]+)") or st:match("^" .. k .. "=([^%s]+)") or "?" end
+    return string.format("anchor=%s src=%s eye=%s head=%s delta=%s deltaMax=%s jerk=%s smooth=%s headCal=%s eyeUpAuto=%s",
+        v("anchor"), v("src"), v("eye"), v("head"), v("delta"), v("deltaMax"), v("jerk"), v("smooth"), v("headCal"), v("eyeUpAuto"))
+end
+M.ABLine = abLine
+
 -- Animation browser: third person while its window is open.
 function M.SetOn(on) setOn(on and true or false) end
 function M.IsOn() return S.on end
@@ -322,9 +354,20 @@ function M.Register()
 
     Ext.RegisterConsoleCommand("dag_pov_anchor", function(_, a)
         if a == "pivot" or a == "0" then S.anchor = 0
-        elseif a == "bone" or a == "1" then S.anchor = 1
+        elseif a == "head" or a == "bone" or a == "1" then S.anchor = 1
         else S.anchor = 1 - S.anchor end
-        Log.Write("FullPov: camera anchor = " .. (S.anchor == 1 and "head bone" or "engine pivot"))
+        lastWrite = 0
+        pcall(writeState)
+        Log.Write("FullPov: camera anchor = " .. (S.anchor == 1 and "head bone" or "engine pivot")
+            .. " | last DLL status: " .. abLine())
+    end)
+
+    Ext.RegisterConsoleCommand("dag_pov_smooth", function(_, x)
+        local v = tonumber(x)
+        if v then S.head_smooth = math.max(0, math.min(0.9, v)) end
+        lastWrite = 0
+        pcall(writeState)
+        Log.Write(string.format("FullPov: head smoothing = %.2f (0 = raw pose)", S.head_smooth))
     end)
 
     Ext.RegisterConsoleCommand("dag_pov_down", function(_, m)
@@ -353,9 +396,10 @@ function M.Register()
 
     Ext.RegisterConsoleCommand("dag_pov_status", function()
         Log.Write("FullPov status: " .. (readStatus() or "(no status file -- is DarkAndGate.dll loaded?)"))
+        Log.Write("FullPov A/B: " .. abLine())
     end)
 
-    Log.Write("FullPov: registered !dag_full_pov / !dag_pov_eye / !dag_pov_anchor / !dag_pov_down / !dag_pov_dump / !dag_pov_status")
+    Log.Write("FullPov: registered !dag_full_pov / !dag_pov_eye / !dag_pov_anchor / !dag_pov_smooth / !dag_pov_down / !dag_pov_dump / !dag_pov_status")
 end
 
 return M

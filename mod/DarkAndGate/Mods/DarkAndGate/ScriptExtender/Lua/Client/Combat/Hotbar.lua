@@ -10,6 +10,7 @@ local Log    = Ext.Require("Shared/Log.lua")
 local State  = Ext.Require("Client/Combat/State.lua")
 local Spells = Ext.Require("Client/Combat/Spells.lua")
 local spells = Ext.Require("data/spells.lua")
+local Prepare = Ext.Require("Client/Combat/Prepare.lua")
 
 local M = {}
 
@@ -43,11 +44,13 @@ function M.PressSlot(slot)
     if State.armedSpell == id then
         State.armedSpell = nil
         Log.Write("Hotbar: UNARMED " .. id .. " (same slot re-pressed)")
+        Prepare.Stop("cancel-key")
         return
     end
     State.armedSpell = id
     Log.Write(string.format("Hotbar: ARMED slot %d = %s (LMB to cast, RMB or same slot to cancel)",
         slot, id))
+    Prepare.Start(id)
 end
 
 function M.ToggleWindow()
@@ -93,6 +96,8 @@ end
 
 function M.Register()
     ensureDefault()
+    Prepare.Register()
+    Spells.Register()
     Ext.Events.Tick:Subscribe(function() pcall(render) end)
     Ext.RegisterConsoleCommand("dag_hotbar", function(_, slotArg, id)
         local slot = tonumber(slotArg)

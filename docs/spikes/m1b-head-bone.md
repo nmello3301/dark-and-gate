@@ -129,3 +129,11 @@ All reads go through `SafeMem` (SEH). Every pointer above is read-only.
 - The Skeleton pointer could also come straight from Lua (`tostring(slot.Skeleton)`),
   but deriving it from the MeshBinding needs no Lua change.
 - The same chain gives `GetBoneWorldPos(entity, boneName)` for weapon bones later.
+
+## A/B and steadiness stats (2026-10-09, movement round)
+
+- `!dag_pov_anchor head|pivot` (`bone` still works). Both anchors share the look-down slide; at rest the head eye equals the pivot eye through the calibrated `eyeUpAuto` (`eye_up` defaults to 0).
+- Every frame the DLL takes the eye's offset from the engine pivot, with the look-down slide and the jump lift removed. It logs every 3 s as `CAM delta anchor=… src=… frames=… avg=… max=… jerk=… smooth=… jump=…`. The same numbers are on the status line (`delta=`, `deltaMax=`, `jerk=`).
+- In pivot mode that offset is constant, so the numbers are ~0. In head mode they measure the head's motion relative to the body: `avg` / `max` per frame, and `jerk` = the largest second difference, which is where raw pose jitter shows.
+- `!dag_pov_smooth <0..0.9>` adds light exponential smoothing of the head's offset from the pivot. It is off by default and only needed if `jerk` / the playtest shows jitter.
+- Per jump: `JUMP lift seq=… liftSrc=body|body+camera-fill|camera-only anchor=… boneFrames=… bodyFrames=… fillFrames=… maxMissing=… maxBodyErr=…`.

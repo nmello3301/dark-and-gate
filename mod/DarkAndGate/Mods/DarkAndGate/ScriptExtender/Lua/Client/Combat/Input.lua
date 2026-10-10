@@ -37,6 +37,7 @@ local Swing  = Ext.Require("Client/Combat/Swing.lua")
 local Hotbar = Ext.Require("Client/Combat/Hotbar.lua")
 local Spells = Ext.Require("Client/Combat/Spells.lua")
 local Jump   = Ext.Require("Client/Movement/Jump.lua")
+local Prepare = Ext.Require("Client/Combat/Prepare.lua")
 
 local M = {}
 
@@ -97,7 +98,7 @@ local function onMouse(event)
                 local armed = State.armedSpell
                 State.armedSpell = nil
                 Log.Write("Combat: LMB casts armed spell " .. tostring(armed))
-                Spells.Cast(armed)
+                if not Spells.Cast(armed) then Prepare.Stop("cast aborted") end
             else
                 Swing.OnLMB()
             end
@@ -108,6 +109,7 @@ local function onMouse(event)
             if State.armedSpell then
                 Log.Write("Combat: canceled armed spell (RMB) was=" .. tostring(State.armedSpell))
                 State.armedSpell = nil
+                Prepare.Stop("cancel-rmb")
             else
                 State.blocking = true
                 Log.Write("Combat: block ON (stub, no DR applied)")

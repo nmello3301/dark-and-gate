@@ -161,4 +161,6 @@ void Set(uintptr_t instance, float rate)
 
 const char* State() { return g_why; }
 
+long Hits() { return g_hits.load(); }
+
 }  // namespace dag::animrate

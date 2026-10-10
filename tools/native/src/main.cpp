@@ -16,6 +16,7 @@
 #include "Config.h"
 #include "Hooks/Camera.h"
 #include "Hooks/Mouselook.h"
+#include "Hooks/MoveSpeed.h"
 #include "Log.h"
 
 namespace {
@@ -87,6 +88,9 @@ BOOL APIENTRY DllMain(HMODULE /*module*/, DWORD reason, LPVOID /*reserved*/)
         // vanilla — no crash path on load.
         dag::hooks::camera::Install();
         dag::hooks::mouselook::Install();
+        // WASD ground speed lever (docs/spikes/move-speed.md); patched at
+        // load, before the game's threads run that code.
+        dag::movespeed::Install();
     } else if (reason == DLL_PROCESS_DETACH) {
         dag::log::Shutdown();
     }

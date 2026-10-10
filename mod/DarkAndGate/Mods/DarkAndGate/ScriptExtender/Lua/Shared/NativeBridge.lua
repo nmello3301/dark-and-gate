@@ -268,13 +268,19 @@ function M.Register(side)
         local v = c:match("%[dag%.camera%][^%[]-hide_head%s*=%s*(%w+)")
         return v == "true" or v == "True" or v == "1"
     end
+    -- Keep the head hidden: the engine sometimes writes RenderPasses back.
+    -- Movement round (2026-10-09): a 1000 ms safety check (was 100 ms) plus
+    -- an immediate re-hide when the player's equipment or visual changes
+    -- (Spike11.WatchVisualEvents), which is when new head / helmet
+    -- renderables appear.
+    local ENFORCE_MS = 1000
     local lastEnforceMs = 0
     local function tickHeadHide()
         local now = Ext.Utils.MonotonicTime()
-        -- Keep the head hidden: the engine sometimes writes RenderPasses back.
-        if lastHideHead and now - lastEnforceMs >= 100 and Spike11 and Spike11.Enforce then
+        local due = Spike11 and Spike11.TakeEventRequest and Spike11.TakeEventRequest()
+        if lastHideHead and (due or now - lastEnforceMs >= ENFORCE_MS) and Spike11 and Spike11.Enforce then
             lastEnforceMs = now
-            pcall(Spike11.Enforce)
+            pcall(Spike11.Enforce, due)
         end
         if now - lastHideHeadPollMs < 500 then return end
         lastHideHeadPollMs = now

@@ -65,6 +65,9 @@ local CombatHotbar = Ext.Require("Client/Combat/Hotbar.lua")
 local CombatHUD    = Ext.Require("Client/Combat/HUD.lua")
 local CombatDebug  = Ext.Require("Client/Combat/Debug.lua")
 
+-- Actions (swing / cast / spell prepare loop) own the play rate and take
+-- priority over the jump clips.
+Ext.Require("Client/Combat/Actions.lua").Register()
 CombatInput.Register()
 CombatSwing.Register()
 CombatHotbar.Register()
@@ -77,6 +80,8 @@ local JumpAnims = Ext.Require("Client/Movement/JumpAnims.lua")
 local Jump      = Ext.Require("Client/Movement/Jump.lua")
 JumpAnims.Register()
 Jump.Register()
+-- WASD speed knob + locomotion rate sync (native lever, MoveSpeed.cpp).
+Ext.Require("Client/Movement/Movement.lua").Register()
 
 -- Animation browser + gallery (!dag_animlib). Tags picked there feed
 -- Swing.lua and the jump (Client/AnimLib/Tags.lua).

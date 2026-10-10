@@ -137,8 +137,9 @@ Lessons recorded for the next pass: `Ext.Require` only works at load time; `hit.
 
 - **WASD dead after LMB spam** (reproducible, 3 fast clicks): queued `Osi.PlayAnimation` tasks stalled the Osiris queue. Fix written 2026-10-09 (queue purge before each clip + watchdog + swing recovery gate); `!dag_unstick` remains the manual escape. Awaiting playtest.
 - **First swing animation only plays on the second LMB** (damage lands on the first): queue purge now runs before every clip (2026-10-09), awaiting playtest.
-- **Jump while walking showed no lift** with the head-bone camera: the camera now adds any lift the body is missing; the DLL re-lifts the body when an engine write bypasses the hooks and logs `body writes: hook/refresh/external` per jump.
-- **Face shows for a moment** while playing: the engine writes the hidden head's `RenderPasses` back; a 100 ms re-hide enforcer (logged) written 2026-10-09.
+- **Jump while walking showed no lift** with the head-bone camera: the camera now adds any lift the body is missing; the DLL re-lifts the body when an engine write bypasses the hooks and logs `body writes: hook/refresh/external` per jump, plus `JUMP lift … liftSrc=body|body+camera-fill|camera-only` (2026-10-09 movement round).
+- **Jump clips while moving:** `Osi.PlayAnimation` may stop the walk. `data.jump.moving_anims = "auto"` checks the first moving jump and skips clips on moving jumps if they root the walk (logged); awaiting playtest.
+- **Face shows for a moment** while playing: the engine writes the hidden head's `RenderPasses` back. Re-hide check every 1000 ms (was 100 ms) plus an immediate re-hide on the player's equipment / visual change events (helmet sub-visuals included), written 2026-10-09; playtest [movement-round.md](playtest/movement-round.md) step 6.
 - **Turn-based takes over** as soon as an enemy turns hostile — the real-time loop (Brawl import) is the fix. Until then swing animations are skipped in turn-based combat; `!dag_unstick` clears a stuck action queue.
 - **Attack animations move Gale ahead of the camera**: the camera follows the engine pivot, not the body. Head-bone anchor written 2026-10-09 (`Head_M` via the Granny world pose, [m1b-head-bone.md](spikes/m1b-head-bone.md)); awaiting playtest.
 - Camera can dip under the map while casting in turn-based (moot once combat is real-time).
@@ -158,6 +159,17 @@ Lessons recorded for the next pass: `Ext.Require` only works at load time; `hit.
 - [ ] **First-person movement: floaty Space jump** (visual lift of body + camera, BG3 jump clips in phases, `data/movement.lua`). Written 2026-10-09, awaiting playtest.
 - [ ] **Cylinder hitboxes** for every character (aim, melee, server validation), lifted while jumping. Written 2026-10-09, awaiting playtest.
 - [ ] **Head-bone camera anchor** (`Head_M` from the live Granny world pose; fixes the camera falling behind Gale during attacks). Written 2026-10-09, awaiting playtest.
+
+**Movement round (2026-10-09), written, awaiting playtest** ([playtest/movement-round.md](playtest/movement-round.md)):
+
+- [ ] Camera A/B: `!dag_pov_anchor head|pivot` identical at rest; head glued to the body walking / running / attacking / jumping. Per-frame `CAM delta` stats in native.log and on the status line; optional `!dag_pov_smooth` (off by default).
+- [ ] Walk by default, Left Shift toggles run (BG3WASD config; Shift+W autoforward unbound).
+- [ ] Speed knob: `move.walk_speed / run_speed / speed_mult` (`data/movement.lua`, MCM), `Movement.AddModifier / RemoveModifier`, `!dag_speed_mult / !dag_walk_speed / !dag_run_speed`. Native lever: the MoveController template fetch ([move-speed.md](spikes/move-speed.md)).
+- [ ] Locomotion clips play at the gait's speed multiplier (no foot sliding).
+- [ ] Jump while walking / running keeps the movement and steering; same arc; no double jump; lift source logged per jump.
+- [ ] Swing / cast / spell prepare loop in the air take priority over the jump clips; the arc continues; landing waits for the action.
+- [ ] Spell prepare loop while a spell is armed (ids from the spell's `SpellAnimation` stats); LMB casts, RMB / same key cancels to idle.
+- [ ] First swing animates on a single click; single-click chain 1→2→3 (open since the last round).
 - [ ] Blocking and parry: **custom animations**; block only with a shield equipped, parry only with a weapon that can parry (decided 2026-10-08).
 - [x] Fire Bolt aimed at the crosshair (character aim assist, or ground / object point). *(2026-10-08)*
 - [x] Fireball cast at the crosshair. *(2026-10-08)*
@@ -217,6 +229,14 @@ Lessons recorded for the next pass: `Ext.Require` only works at load time; `hit.
 - [ ] Act 3 fight pass
 - [ ] Install guide and mod page
 - [ ] Public release
+
+## Backlog (much later, not scheduled)
+
+Added 2026-10-09 (movement round).
+
+- [ ] **Strafe / dash-strafe animations** (custom). The body may turn toward the movement as long as the camera isn't forced.
+- [ ] **Defence animations:** block hold and parry (custom). Block only with a shield, parry only with a parry-capable weapon (decided 2026-10-08).
+- [ ] **Weapon chain auto-guess:** propose each weapon family's chain from clip names (light 1–3, heavy, ranged draw / hold / release) and show it in the gallery for one-click accept.
 
 ## Archived (future)
 

@@ -26,4 +26,8 @@ void Set(uintptr_t instance, float rate);
 // "ok" / "failed: <why>" / "not installed" for the status line.
 const char* State();
 
+// Scaled calls since the target was set (0 = the hook never saw a clip
+// of that character, e.g. locomotion not driven by PlayAnimation nodes).
+long Hits();
+
 }  // namespace dag::animrate

@@ -87,6 +87,17 @@ end
 
 local function animNow() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
 
+-- Stop a scripted clip that is still playing (spell prepare loop, jump
+-- clip) before something else needs the character: a cast, a cancel.
+-- No-op when none of our clips is running. Returns true if it cleared.
+function M.StopScriptedAnim(uuid, why)
+    if not animState[uuid] then return false end
+    animState[uuid] = nil
+    clearOsirisQueue(uuid, why)
+    Log.Write(string.format("Net: scripted clip stopped on %s (%s)", uuid, why))
+    return true
+end
+
 local function animWatchdog()
     local t = animNow()
     for uuid, st in pairs(animState) do
@@ -131,6 +142,14 @@ handlers[Net.Channels.PlayAnimRequest] = function(payload, userId)
             for _, fn in ipairs({ "PurgeOsirisQueue", "FlushOsirisQueue", "StopAnimation" }) do
                 local ok, err = pcall(function() return Osi[fn](uuid) end)
                 Log.Write(string.format("Net: unstick Osi.%s ok=%s %s", fn, tostring(ok), ok and "" or tostring(err)))
+            end
+            return
+        end
+        -- Movement round: "__stop__" ends our scripted clip (spell prepare
+        -- cancel, a jump clip that rooted the walk) -> idle / locomotion.
+        if payload.animId == "__stop__" then
+            if not M.StopScriptedAnim(uuid, "stop request") then
+                Log.Write("Net: stop request, no scripted clip running on " .. uuid)
             end
             return
         end

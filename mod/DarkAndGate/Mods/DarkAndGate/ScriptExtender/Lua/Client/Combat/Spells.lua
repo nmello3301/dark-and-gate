@@ -6,6 +6,11 @@
 --   2. Fire crosshair aim ray to find a target or hit point.
 --   3. Send CastSpellRequest with withMana=true + spell + aim.
 -- Server validates mana and routes to Osi.UseSpell / UseSpellAtPosition.
+-- Returns true when the request was sent.
+--
+-- The cast is an action (Client/Combat/Actions.lua) for air_action.cast_s,
+-- extended while the player still has SpellCastIsCasting: the jump clips
+-- wait for it. The spell prepare loop (Prepare.lua) hands over here.
 
 local Log       = Ext.Require("Shared/Log.lua")
 local Net       = Ext.Require("Shared/Net.lua")
@@ -13,6 +18,9 @@ local State     = Ext.Require("Client/Combat/State.lua")
 local Aim       = Ext.Require("Client/Combat/Aim.lua")
 local ClientNet = Ext.Require("Client/Net.lua")
 local spells    = Ext.Require("data/spells.lua")
+local Actions   = Ext.Require("Client/Combat/Actions.lua")
+local Prepare   = Ext.Require("Client/Combat/Prepare.lua")
+local airAction = Ext.Require("data/movement.lua").air_action
 
 local M = {}
 
@@ -61,11 +69,35 @@ function M.Cast(spellId)
 
     -- Only after we're committed to firing: eat the cooldown.
     State.cooldownUntil[spellId] = nowMs() + (def.cooldown_ms or 400)
+    Actions.Begin("cast", airAction.cast_s)
+    Prepare.Stop("cast")
     ClientNet.Send(Net.Channels.CastSpellRequest, payload)
     Log.Write(string.format("Spells: request %s (%s) target=%s point=%s",
         spellId, def.label or kind,
         tostring(payload.targetUuid),
         payload.hitPoint and string.format("(%.2f,%.2f,%.2f)", payload.hitPoint.x, payload.hitPoint.y, payload.hitPoint.z) or "nil"))
+    return true
+end
+
+-- Keep the "cast" action alive while the engine still casts. Whether the
+-- client sees SpellCastIsCasting on the player is logged once.
+local castProbeLogged = false
+local function tick()
+    if not Actions.Running("cast") then return end
+    local okE, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    local me = okE and ents and ents[1] or nil
+    if not me then return end
+    local okC, c = pcall(function() return me.SpellCastIsCasting end)
+    local casting = okC and c ~= nil
+    if not castProbeLogged and casting then
+        castProbeLogged = true
+        Log.Write("Spells: SpellCastIsCasting is visible on the client -> the cast action lasts as long as the cast")
+    end
+    if casting then Actions.Extend("cast", nowMs() + 100) end
+end
+
+function M.Register()
+    Ext.Events.Tick:Subscribe(function() pcall(tick) end)
 end
 
 return M

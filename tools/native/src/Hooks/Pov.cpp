@@ -28,6 +28,7 @@
 #include "../SafeMem.h"
 #include "VisualLift.h"
 #include "AnimRate.h"
+#include "MoveSpeed.h"
 
 namespace dag::pov {
 
@@ -155,6 +156,9 @@ struct LuaState {
     uintptr_t visual = 0;      // player's root rf Visual (body lift)
     uintptr_t animInst = 0;    // GenomeBlueprintInstance to play at animRate (AnimRate.cpp)
     float     animRate = 1.f;
+    float     smooth   = 0.f;  // head-bone smoothing 0..0.9 (0 = raw pose)
+    float     moveWalk = 1.f;  // WASD speed multipliers (MoveSpeed.cpp)
+    float     moveRun  = 1.f;
     DWORD readTick  = 0;
 };
 
@@ -234,6 +238,11 @@ void PollLuaFile()
         s.animInst = static_cast<uintptr_t>(std::strtoull(v, nullptr, 16));
     }
     s.animRate = ValF(buf, "anim_rate", 1.f);
+    s.smooth   = ValF(buf, "head_smooth", 0.f);
+    if (s.smooth < 0.f) s.smooth = 0.f;
+    if (s.smooth > 0.9f) s.smooth = 0.9f;
+    s.moveWalk = ValF(buf, "move_walk", 1.f);
+    s.moveRun  = ValF(buf, "move_run", 1.f);
     if (const char* v = FindVal(buf, "visual")) {
         s.visual = static_cast<uintptr_t>(std::strtoull(v, nullptr, 16));
     }
@@ -455,6 +464,32 @@ struct JumpLift {
     float         lift = 0;      // this frame, metres
 };
 JumpLift g_jump;
+
+// Per-jump record of where the visible lift came from (logged at JUMP end):
+// frames with the bone anchor, frames where the camera had to add lift the
+// body didn't carry ("fill"), and the worst body-vs-curve error.
+struct JumpLiftStats {
+    int   frames = 0, boneFrames = 0, fillFrames = 0, bodyFrames = 0;
+    float maxMissing = 0, maxBodyErr = 0;
+};
+JumpLiftStats g_jls;
+
+// Camera steadiness: the eye's offset from the engine pivot (look-down
+// slide and jump lift removed), per frame. delta = |change| per frame,
+// jerk = |second difference| (raw pose jitter shows here, smooth motion
+// doesn't). Logged every 3 s as "CAM delta ..." and on the status line.
+struct CamStats {
+    bool  have1 = false, have2 = false;
+    float r1[3] = {}, r2[3] = {};
+    float maxD = 0, maxJ = 0;
+    double sumD = 0;
+    int   n = 0;
+    DWORD windowStart = 0;
+    float lastAvg = 0, lastMax = 0, lastJerk = 0;
+    bool  sHave = false;           // head smoothing state (head - pivot)
+    float s[3] = {};
+};
+CamStats g_cam;
 
 struct HeadSel {
     bool      valid = false;
@@ -785,6 +820,7 @@ void UpdateJump()
             g_jump.h = g_lua.jumpH;
             g_jump.k = g_lua.jumpK < 1.0f ? 1.0f : g_lua.jumpK;
             { int a, b, c; dag::visuallift::TakeStats(a, b, c); }  // reset per jump
+            g_jls = JumpLiftStats{};
             dag::log::Writef("JUMP start seq=%d dur=%.0fms h=%.2f k=%.1f lift=%s",
                              g_jump.seq, g_jump.durMs, g_jump.h, g_jump.k,
                              dag::visuallift::BodyLiftActive() ? "body+camera" : "camera-only jump");
@@ -799,6 +835,13 @@ void UpdateJump()
         dag::visuallift::TakeStats(hw, rw, ew);
         dag::log::Writef("JUMP end seq=%d after %.0fms body writes: hook=%d refresh=%d external=%d",
                          g_jump.seq, ms, hw, rw, ew);
+        const bool body = dag::visuallift::BodyLiftActive();
+        const char* srcName = !body ? "camera-only"
+            : (g_jls.fillFrames * 10 > g_jls.frames ? "body+camera-fill" : "body");
+        dag::log::Writef("JUMP lift seq=%d liftSrc=%s anchor=%s frames=%d boneFrames=%d bodyFrames=%d "
+                         "fillFrames=%d maxMissing=%.3fm maxBodyErr=%.3fm",
+                         g_jump.seq, srcName, g_lua.anchor ? "head" : "pivot", g_jls.frames, g_jls.boneFrames,
+                         g_jls.bodyFrames, g_jls.fillFrames, g_jls.maxMissing, g_jls.maxBodyErr);
         return;
     }
     const float u = static_cast<float>(ms / g_jump.durMs);
@@ -986,12 +1029,16 @@ void WriteStatus()
     const DWORD now = GetTickCount();
     if (now - g_lastStatusMs < 500) return;
     g_lastStatusMs = now;
-    char line[1024];
+    float ms0, mr0, mt0, mso, mro; long mc;
+    dag::movespeed::Read(ms0, mr0, mt0, mso, mro, mc);
+    char line[1600];
     const int len = std::snprintf(line, sizeof(line),
         "on=%d active=%d applied=%d src=%s rotOff=0x%X rotCal=%d sel=%d bone=%d%s mesh=%d pose%d layout%d %s "
         "eye=%.3f,%.3f,%.3f P=%.3f,%.3f,%.3f head=%.3f,%.3f,%.3f rot=%.3f,%.3f,%.3f "
         "root=%.3f,%.3f,%.3f mouselook=%d toggled=%d filter=%d meshes=%d "
-        "head=%s headBone=%d headCal=%d eyeUpAuto=%.3f lift=%.3f liftMode=%s jumpSeq=%d animRate=%.2f rateHook=%s t=%u\n",
+        "headName=%s headBone=%d headCal=%d eyeUpAuto=%.3f lift=%.3f liftMode=%s jumpSeq=%d animRate=%.2f rateHook=%s rateHits=%ld "
+        "anchor=%s delta=%.4f deltaMax=%.4f jerk=%.4f smooth=%.2f "
+        "move=%s walkX=%.2f runX=%.2f tmplStroll=%.2f tmplRun=%.2f walkT=%.3f outStroll=%.2f outRun=%.2f moveCalls=%ld t=%u\n",
         g_lua.on ? 1 : 0, g_lua.active ? 1 : 0, g_status.applied ? 1 : 0, g_status.src,
         g_rotOff, g_rotLogged ? 1 : 0, g_sel.valid ? 1 : 0, g_sel.bone,
         g_sel.fromSocket ? "(socket)" : "(top)", g_sel.meshIdx, g_sel.poseSlot + 1, g_sel.layout,
@@ -1004,7 +1051,10 @@ void WriteStatus()
         g_mlWanted.load() ? 1 : 0, g_toggled.load() ? 1 : 0, g_filterInstalled ? 1 : 0,
         g_lua.numMeshes,
         g_head.valid ? g_head.name : "none", g_head.bone, g_head.calibrated ? 1 : 0, g_head.eyeUpAuto,
-        g_jump.lift, dag::visuallift::Mode(), g_jump.seq, g_lua.animRate, dag::animrate::State(), (unsigned)now);
+        g_jump.lift, dag::visuallift::Mode(), g_jump.seq, g_lua.animRate, dag::animrate::State(), dag::animrate::Hits(),
+        g_lua.anchor ? "head" : "pivot", g_cam.lastAvg, g_cam.lastMax, g_cam.lastJerk, g_lua.smooth,
+        dag::movespeed::State(), g_lua.moveWalk, g_lua.moveRun, ms0, mr0, mt0, mso, mro, mc,
+        (unsigned)now);
     WriteSmallFile(L"native-pov-status.txt", line, len);
 }
 
@@ -1041,6 +1091,7 @@ void OnFrame(void* gameplayCam)
     dag::visuallift::SetLift(g_jump.lift);
     dag::visuallift::Refresh();
     dag::animrate::Set(g_lua.animInst, g_lua.animRate);
+    dag::movespeed::Set(g_lua.moveWalk, g_lua.moveRun);
     if (!g_lua.on) g_status.applied = false;
     WriteStatus();
 }
@@ -1121,6 +1172,19 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
             }
         } else {
             g_badFrames = 0;
+            // Optional light smoothing of the head's offset from the pivot
+            // (off by default; only if the CAM delta log shows pose jitter).
+            if (g_lua.smooth > 0.f && pivotOk) {
+                float hr[3] = { head[0] - pivot[0], head[1] - pivot[1], head[2] - pivot[2] };
+                if (!g_cam.sHave) { std::memcpy(g_cam.s, hr, sizeof(hr)); g_cam.sHave = true; }
+                const float a = 1.f - g_lua.smooth;
+                for (int i = 0; i < 3; ++i) {
+                    g_cam.s[i] += (hr[i] - g_cam.s[i]) * a;
+                    head[i] = pivot[i] + g_cam.s[i];
+                }
+            } else {
+                g_cam.sHave = false;
+            }
             eye[0] = head[0] + fx * fwdTotal;
             // The head carries whatever lift is really on the body; add the
             // rest so the camera always rises the full amount.
@@ -1132,6 +1196,10 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
             eye[1] = head[1] + g_head.eyeUpAuto + g_lua.eyeUp + missing;
             eye[2] = head[2] + fz * fwdTotal;
             src = "bone"; have = true;
+            if (g_jump.active) {
+                if (missing > g_jls.maxMissing) g_jls.maxMissing = missing;
+                if (missing > 0.03f) ++g_jls.fillFrames;
+            }
         }
     }
     const uintptr_t meshForFallback = g_head.mb ? g_head.mb : g_sel.mesh;
@@ -1153,6 +1221,50 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
         eye[1] = pivot[1] + g_lua.pivotUp + lift;
         eye[2] = pivot[2] + fz * fwdTotal;
         src = "pivot";
+    }
+
+    // Per-jump lift bookkeeping (both anchors).
+    if (g_jump.active) {
+        ++g_jls.frames;
+        if (std::strcmp(src, "bone") == 0) ++g_jls.boneFrames;
+        if (bodyLift) {
+            const float applied = dag::visuallift::AppliedLift();
+            const float err = std::fabs(applied - lift);
+            if (err > g_jls.maxBodyErr) g_jls.maxBodyErr = err;
+            if (err < 0.03f) ++g_jls.bodyFrames;
+        }
+    }
+
+    // Camera steadiness relative to the body (see CamStats).
+    if (pivotOk) {
+        const float rel[3] = { eye[0] - fx * fwdTotal - pivot[0], eye[1] - lift - pivot[1], eye[2] - fz * fwdTotal - pivot[2] };
+        const DWORD nowMs = GetTickCount();
+        if (g_cam.windowStart == 0) g_cam.windowStart = nowMs;
+        if (g_cam.have1) {
+            const float d[3] = { rel[0] - g_cam.r1[0], rel[1] - g_cam.r1[1], rel[2] - g_cam.r1[2] };
+            const float dl = Len3(d);
+            if (dl < 1.0f) {   // ignore teleports / anchor switches
+                g_cam.sumD += dl; ++g_cam.n;
+                if (dl > g_cam.maxD) g_cam.maxD = dl;
+                if (g_cam.have2) {
+                    const float j[3] = { rel[0] - 2 * g_cam.r1[0] + g_cam.r2[0], rel[1] - 2 * g_cam.r1[1] + g_cam.r2[1],
+                                         rel[2] - 2 * g_cam.r1[2] + g_cam.r2[2] };
+                    const float jl = Len3(j);
+                    if (jl > g_cam.maxJ) g_cam.maxJ = jl;
+                }
+            }
+            std::memcpy(g_cam.r2, g_cam.r1, sizeof(rel)); g_cam.have2 = true;
+        }
+        std::memcpy(g_cam.r1, rel, sizeof(rel)); g_cam.have1 = true;
+        if (nowMs - g_cam.windowStart >= 3000 && g_cam.n > 0) {
+            g_cam.lastAvg = static_cast<float>(g_cam.sumD / g_cam.n);
+            g_cam.lastMax = g_cam.maxD;
+            g_cam.lastJerk = g_cam.maxJ;
+            dag::log::Writef("CAM delta anchor=%s src=%s frames=%d avg=%.4f max=%.4f jerk=%.4f smooth=%.2f jump=%d",
+                             g_lua.anchor ? "head" : "pivot", src, g_cam.n, g_cam.lastAvg, g_cam.lastMax,
+                             g_cam.lastJerk, g_lua.smooth, g_jump.active ? 1 : 0);
+            g_cam.windowStart = nowMs; g_cam.n = 0; g_cam.sumD = 0; g_cam.maxD = 0; g_cam.maxJ = 0;
+        }
     }
 
     // Look-at point: in front of the eye along the engine's view direction.

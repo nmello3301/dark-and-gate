@@ -20,6 +20,8 @@ local longsword = Ext.Require("data/weapons/longsword.lua")
 local ClientNet = Ext.Require("Client/Net.lua")
 local Anims     = Ext.Require("Client/Combat/Anims.lua")
 local Tags      = Ext.Require("Client/AnimLib/Tags.lua")
+local Actions   = Ext.Require("Client/Combat/Actions.lua")
+local airAction = Ext.Require("data/movement.lua").air_action
 
 local M = {}
 
@@ -116,7 +118,15 @@ local function startSwing(index)
     local tagged = Tags.ForPlayer("swing" .. index)
     local anim = tagged and tagged.key or Anims.ForSwing(index)
     if anim then
-        ClientNet.PlayAnim(anim, tagged and tagged.dur and tagged.dur > 0 and tagged.dur or nil)
+        local clipS = tagged and tagged.dur and tagged.dur > 0 and tagged.dur or nil
+        ClientNet.PlayAnim(anim, clipS)
+        -- The swing owns the body for its clip (or the data fallback): jump
+        -- clips wait, the lift doesn't (Client/Combat/Actions.lua).
+        local timingS = (def.windup_ms + def.active_ms + def.recovery_ms) / 1000
+        local actS = math.max(clipS or airAction.swing_s, timingS)
+        Actions.Begin("swing", actS)
+        Log.Write(string.format("Swing: #%d anim %s clip=%s action=%.2fs%s", index, tostring(anim),
+            clipS and string.format("%.2fs", clipS) or "?", actS, State.jumping and " (airborne)" or ""))
         if tagged and not State["tagLogged" .. index] then
             State["tagLogged" .. index] = true
             Log.Write(string.format("Swing: #%d uses tagged clip %s (%s)", index, tostring(tagged.file), tagged.key))

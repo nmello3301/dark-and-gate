@@ -219,12 +219,14 @@ local function enforceVisual(vis, label)
     end
 end
 
-function M.Enforce()
-    -- Quiet lookup: findLocalChar() logs, and this runs every 100 ms.
+-- why: nil for the periodic check, or the event that asked for it.
+function M.Enforce(why)
+    -- Quiet lookup: findLocalChar() logs, and this runs every second.
     local okE, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
     local eh = okE and ents and ents[1] or nil
     if not eh then return end
     local ent = Ext.Entity.Get(eh); if ent == nil then return end
+    local before = reHides
     local root = ent.Visual and ent.Visual.Visual or nil
     if root and root.Attachments then
         for i, att in ipairs(root.Attachments) do
@@ -234,12 +236,62 @@ function M.Enforce()
             end
         end
     end
+    -- A newly equipped helmet brings its own sub-visuals.
+    pcall(function()
+        local eq = ent.ClientEquipmentVisuals
+        for slot, data in pairs(eq.Equipment) do
+            if tostring(slot) == "Helmet" then
+                for i, subEh in ipairs(data.SubVisuals or {}) do
+                    local subEnt = Ext.Entity.Get(subEh)
+                    local sv = subEnt and subEnt.Visual or nil
+                    if sv and sv.Visual then enforceVisual(sv.Visual, string.format("helmet.sub[%d]", i)) end
+                end
+            end
+        end
+    end)
+    if why then
+        Log.Write(string.format("Spike11: re-hide on %s event -> %d renderable(s) re-hidden", why, reHides - before))
+    end
+end
+
+-- Equipment / visual change events on the player ask for an immediate
+-- Enforce (picked up by NativeBridge's tick, so the new renderables exist).
+-- Which subscriptions the client accepts is logged once.
+local eventRequest = nil
+local function playerHandle()
+    local okE, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    return okE and ents and ents[1] or nil
+end
+local function onEvent(name)
+    return function(ent)
+        local p = playerHandle()
+        if p and ent and tostring(ent) ~= tostring(p) then return end
+        eventRequest = name
+    end
+end
+function M.TakeEventRequest()
+    local r = eventRequest
+    eventRequest = nil
+    return r
+end
+function M.WatchVisualEvents()
+    local ok = {}
+    for _, c in ipairs({ "ClientEquipmentVisuals", "Visual", "EquipmentVisual" }) do
+        local okS = pcall(Ext.Entity.OnChange, c, onEvent(c))
+        if okS then ok[#ok + 1] = c .. "(change)" end
+    end
+    for _, c in ipairs({ "VisualChangedEvent", "EquipmentSlotChangedEvent", "VisualLoaded" }) do
+        local okS = pcall(Ext.Entity.OnCreateDeferred, c, onEvent(c))
+        if okS then ok[#ok + 1] = c .. "(create)" end
+    end
+    Log.Write("Spike11: head re-hide watches " .. (#ok > 0 and table.concat(ok, ", ") or "NOTHING (periodic 1 s check only)"))
 end
 
 function M.Register()
     Ext.RegisterConsoleCommand("dag11_dump", function() dump() end)
     Ext.RegisterConsoleCommand("dag11_hide", function() apply(true) end)
     Ext.RegisterConsoleCommand("dag11_show", function() apply(false) end)
+    M.WatchVisualEvents()
     Log.Write("Spike11: registered dag11_dump / dag11_hide / dag11_show (v5 RenderPasses)")
 end
 

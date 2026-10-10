@@ -19,12 +19,26 @@
 --   0       0/cast  ascend end ->        T - lead - descend.dur   T - lead
 -- "none" = no clips found yet (scan running or empty); the lift still runs.
 --
+-- Moving jumps (2026-10-09 movement round): the lift is the same on a moving
+-- jump; WASD keeps steering because the real position never leaves the
+-- ground. Osi.PlayAnimation may stop the walk, so data.jump.moving_anims
+-- decides whether clips play on a moving jump ("auto": the first one is
+-- checked, and if the walk stops with WASD held, moving jumps skip clips for
+-- the session; logged as "Jump: moving clip ROOTED ...").
+--
+-- Actions in the air (Client/Combat/Actions.lua): a swing, a cast or the
+-- spell prepare loop suspends the phase clips; when it ends, the phase that
+-- matches the arc resumes ("Jump: resumed <phase> ..."). An action still
+-- playing at touchdown delays the landing clip instead of being cut off.
+--
 -- Commands (client console):
 --   !dag_jump <mult> [height] [flatness]   tune live (duration multiplier,
 --                                          apex height m, apex flatness k)
 --   !dag_jump_status                       print the current tuning
 --   !dag_lift_probe [m]                    SE-only body lift test (diagnostic)
 --   !dag_jump_play_anims [on|off]          jump clips on/off (lift unaffected)
+--   !dag_jump_mult <x> / !dag_jump_height <m>   the same as !dag_jump, one value
+--   !dag_jump_moving_anims auto|on|off     clips on moving jumps (see above)
 
 local Log       = Ext.Require("Shared/Log.lua")
 local MCM       = Ext.Require("Shared/MCM.lua")
@@ -33,11 +47,12 @@ local State     = Ext.Require("Client/Combat/State.lua")
 local FullPov   = Ext.Require("FullPov.lua")
 local JumpAnims = Ext.Require("Client/Movement/JumpAnims.lua")
 local movement  = Ext.Require("data/movement.lua")
-local AnimSpeed = Ext.Require("Client/AnimLib/AnimSpeed.lua")
+local Actions   = Ext.Require("Client/Combat/Actions.lua")
 
 local M = {}
 
 local D = movement.jump
+local A = movement.air_action
 
 local function nowMs() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
 
@@ -53,10 +68,25 @@ local J = {
     T = 0,            -- ms
     events = {},      -- { at = ms (absolute), clip, label, every = ms?, untilAt = ms? }
     readyAt = 0,      -- ms (absolute), next jump accepted
+    P = nil,          -- phase clips of the current jump
+    Ts = 0,           -- airtime, seconds
+    rate = nil,       -- clip play rate of the current jump (nil = clips off)
+    landPlayed = false,
+    landPending = nil, -- { at = ms } touchdown happened while an action played
+    rootCheck = nil,   -- { at = ms, v0 = m/s } moving-clip check
+    movingPolicy = D.moving_anims or "auto",
+    rootedSeen = false, -- auto: a moving clip stopped the walk this session
+    movingChecked = false,
 }
+
+-- WASD held? Read-only key tracking (Input.lua owns the key handling) for
+-- the moving-clip check.
+local held = {}
+local function moveKeysHeld() return held.W or held.A or held.S or held.D end
 
 local function play(clip, label)
     if not clip or not cfg("play_anims") then return end
+    if label == "land" then J.landPlayed = true end
     ClientNet.PlayAnim(clip.key, (clip.dur or 0) > 0 and clip.dur or nil)
     Log.Write(string.format("Jump: anim %s %s (%.2fs)", label, clip.key, clip.dur or 0))
 end
@@ -102,6 +132,39 @@ local function schedule(t0, T, P)
     return ev
 end
 
+-- After an action: rebuild the schedule and play the phase that matches
+-- the current point of the arc now (earlier phases are dropped, later ones
+-- keep their times). Returns the phase label or nil.
+local function resumePhase(now)
+    if not J.P or J.rate == nil then return nil end
+    local ev = schedule(J.t0, J.Ts, J.P)
+    local cur
+    for i, e in ipairs(ev) do if e.at <= now then cur = i end end
+    -- The next phase is about due (e.g. landing 30 ms away): go straight
+    -- to it instead of starting a clip that would be cut at once.
+    if cur and ev[cur + 1] and ev[cur + 1].at - now < A.resume_skip_s * 1000 then
+        cur = cur + 1
+        ev[cur].at = now
+    end
+    local out = {}
+    local label
+    for i, e in ipairs(ev) do
+        if cur and i < cur then
+            -- already past
+        elseif i == cur then
+            if not (e.untilAt and now >= e.untilAt) and not (e.label == "land" and J.landPlayed) then
+                e.at = now
+                out[#out + 1] = e
+                label = e.label
+            end
+        else
+            out[#out + 1] = e
+        end
+    end
+    J.events = out
+    return label or "next"
+end
+
 -- Horizontal speed of the controlled character (m/s), sampled every
 -- 100 ms, so each jump logs whether it started standing or moving.
 local speed = { at = 0, x = nil, z = nil, v = 0 }
@@ -124,10 +187,25 @@ end
 function M.OnSpace()
     if not cfg("enabled") then return end
     local now = nowMs()
-    if J.active or now < J.readyAt then return end
+    if J.active or now < J.readyAt then
+        if J.active then Log.Write("Jump: ignored (already airborne, no double jump)") end
+        return
+    end
 
     local P = {}
     for _, ph in ipairs({ "cast", "ascend", "hang", "descend", "land" }) do P[ph] = JumpAnims.Pick(ph) end
+    local moving = speed.v >= (D.moving_speed or 0.8)
+    local clipsWhy
+    local clipsOn = cfg("play_anims")
+    if not clipsOn then
+        clipsWhy = "off (!dag_jump_play_anims)"
+    elseif moving and J.movingPolicy == "off" then
+        clipsOn, clipsWhy = false, "off on moving jumps (policy off)"
+    elseif moving and J.movingPolicy == "auto" and J.rootedSeen then
+        clipsOn, clipsWhy = false, "off on moving jumps (a clip rooted the walk earlier)"
+    else
+        clipsWhy = moving and ("on, moving (policy " .. J.movingPolicy .. ")") or "on"
+    end
     local base, baseSrc = baseAir(P.ascend, P.descend)
     local T = base * cfg("duration_mult")
     if T < D.min_air_s then T = D.min_air_s end
@@ -138,7 +216,16 @@ function M.OnSpace()
     J.active = true
     J.t0 = now
     J.T = T * 1000
-    J.events = schedule(now, T, P)
+    J.Ts = T
+    J.P = P
+    J.events = clipsOn and schedule(now, T, P) or {}
+    J.landPlayed = false
+    J.landPending = nil
+    J.rate = nil
+    J.rootCheck = nil
+    if clipsOn and moving and J.movingPolicy == "auto" and not J.movingChecked and #J.events > 0 then
+        J.rootCheck = { at = now + 450, v0 = speed.v }
+    end
     State.jumping = true
 
     FullPov.Jump(J.seq, J.T, h, k)
@@ -146,31 +233,71 @@ function M.OnSpace()
 
     -- Slow the jump clips to fit the airtime with the native per-character
     -- play rate (AnimRate.cpp, docs/spikes/anim-clock.md); reset on landing.
+    -- (base rate through Actions: an action in the air plays at its own
+    -- rate and the jump rate comes back after it); reset on landing.
     local animPath = (#J.events > 0) and "substitute" or "none"
-    J.rateEnt = nil
     local clipsAir = dur(P.ascend) + dur(P.descend)
-    if #J.events > 0 and clipsAir > 0 and cfg("play_anims") then
-        local okE, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
-        local me = okE and ents and ents[1] or nil
-        local rate = math.max(0.3, math.min(1.0, clipsAir / T))
-        local okR, how = false, nil
-        if me then okR, how = AnimSpeed.SetCharacter(me, rate) end
-        if okR then
-            J.rateEnt = me
-            animPath = string.format("phases at x%.2f (%s)", rate, how)
-        end
+    if #J.events > 0 and clipsAir > 0 then
+        J.rate = math.max(0.3, math.min(1.0, clipsAir / T))
+        Actions.SetBaseRate("jump", J.rate)
+        animPath = string.format("phases at x%.2f", J.rate)
+    elseif #J.events > 0 then
+        J.rate = 1.0
     end
 
     Log.Write(string.format(
-        "Jump: start seq=%d T=%.2fs h=%.2fm k=%.1f base=%.2fs(%s) mult=%.2f anim=%s phases=%d clips=%s speed=%.1fm/s",
-        J.seq, T, h, k, base, baseSrc, cfg("duration_mult"), animPath, #J.events, JumpAnims.State(), speed.v))
+        "Jump: start seq=%d T=%.2fs h=%.2fm k=%.1f base=%.2fs(%s) mult=%.2f anim=%s phases=%d clips=%s data=%s speed=%.1fm/s moving=%s wasd=%s actions=%s",
+        J.seq, T, h, k, base, baseSrc, cfg("duration_mult"), animPath, #J.events, clipsWhy, JumpAnims.State(),
+        speed.v, moving and "yes" or "no", moveKeysHeld() and "held" or "none", Actions.Describe()))
+end
+
+local function landNow(why)
+    play(J.P and J.P.land, "land")
+    Log.Write("Jump: landing clip " .. why)
 end
 
 local function tick()
     local now = nowMs()
     sampleSpeed(now)
+
+    -- Touchdown happened during an action: the landing clip waits for it.
+    if J.landPending and not Actions.Busy() then
+        local late = now - J.landPending.at
+        if late <= A.land_after_s * 1000 then
+            landNow(string.format("after the action (%d ms after touchdown)", late))
+        else
+            Log.Write(string.format("Jump: landing clip skipped (action ended %d ms after touchdown > %d)",
+                late, math.floor(A.land_after_s * 1000)))
+        end
+        J.landPending = nil
+    end
+
     if not J.active then return end
-    for _, e in ipairs(J.events) do
+
+    -- Moving-clip check (policy auto, once per session until it passes).
+    if J.rootCheck and now >= J.rootCheck.at then
+        local rc = J.rootCheck
+        J.rootCheck = nil
+        if moveKeysHeld() and speed.v < D.rooted_speed then
+            J.rootedSeen = true
+            J.events = {}
+            Actions.SetBaseRate("jump", 1.0)
+            ClientNet.PlayAnim("__stop__")
+            Log.Write(string.format(
+                "Jump: moving clip ROOTED the walk (%.1f -> %.1f m/s with WASD held); clips skipped on moving jumps from now (!dag_jump_moving_anims on|auto)",
+                rc.v0, speed.v))
+        elseif moveKeysHeld() then
+            J.movingChecked = true
+            Log.Write(string.format("Jump: moving clip check ok (%.1f -> %.1f m/s with WASD held)", rc.v0, speed.v))
+        else
+            Log.Write("Jump: moving clip check skipped (WASD released mid-jump)")
+        end
+    end
+
+    -- An action (swing / cast / prepare loop) owns the body: no phase clips
+    -- until it ends (the landing below still runs on time).
+    local suspended = Actions.Busy()
+    for _, e in ipairs(suspended and {} or J.events) do
         if e.at and now >= e.at then
             if e.untilAt and now >= e.untilAt then
                 e.at = nil
@@ -185,8 +312,27 @@ local function tick()
         J.active = false
         State.jumping = false
         J.readyAt = now + D.cooldown_s * 1000
-        if J.rateEnt then AnimSpeed.SetCharacter(J.rateEnt, 1.0); J.rateEnt = nil end
-        Log.Write(string.format("Jump: landed seq=%d after %.2fs", J.seq, (now - J.t0) / 1000))
+        if J.rate then Actions.SetBaseRate("jump", 1.0) end
+        local landWait = ""
+        if suspended and J.rate and not J.landPlayed and J.P and J.P.land then
+            J.landPending = { at = now }
+            landWait = " (landing clip waits for " .. Actions.Describe() .. ")"
+        end
+        Log.Write(string.format("Jump: landed seq=%d after %.2fs speed=%.1fm/s wasd=%s%s",
+            J.seq, (now - J.t0) / 1000, speed.v, moveKeysHeld() and "held" or "none", landWait))
+    end
+end
+
+-- Actions start / end while airborne.
+local function onActions(busy, label)
+    if not J.active or J.rate == nil then return end
+    local now = nowMs()
+    local u = (now - J.t0) / J.T
+    if busy then
+        Log.Write(string.format("Jump: clips suspended for %s at u=%.2f (lift continues)", tostring(label), u))
+    else
+        local ph = resumePhase(now)
+        Log.Write(string.format("Jump: resumed %s after %s at u=%.2f", tostring(ph), tostring(label), u))
     end
 end
 
@@ -201,6 +347,29 @@ function M.Register()
     MCM.DefineNumber("jump_apex_flatness", D.apex_flatness, "Jump apex hang (2 = parabola)", 1.0, 8.0)
 
     Ext.Events.Tick:Subscribe(function() pcall(tick) end)
+    Actions.OnChange(onActions)
+    Ext.Events.KeyInput:Subscribe(function(e)
+        local k = tostring(e.Key or "")
+        if k == "W" or k == "A" or k == "S" or k == "D" then
+            held[k] = tostring(e.Event or "") == "KeyDown"
+        end
+    end)
+
+    Ext.RegisterConsoleCommand("dag_jump_mult", function(_, x)
+        if tonumber(x) then MCM.Set("jump_duration_mult", tonumber(x)) end
+        Log.Write(string.format("Jump: mult=%.2f (airtime %.2fs)", cfg("duration_mult"), D.clip_air_s * cfg("duration_mult")))
+    end)
+    Ext.RegisterConsoleCommand("dag_jump_height", function(_, x)
+        if tonumber(x) then MCM.Set("jump_height_m", tonumber(x)) end
+        Log.Write(string.format("Jump: height=%.2fm", cfg("height_m")))
+    end)
+    Ext.RegisterConsoleCommand("dag_jump_moving_anims", function(_, x)
+        if x == "auto" or x == "on" or x == "off" then
+            J.movingPolicy = x
+            J.rootedSeen, J.movingChecked = false, false
+        end
+        Log.Write("Jump: clips on moving jumps = " .. J.movingPolicy)
+    end)
 
     Ext.RegisterConsoleCommand("dag_jump", function(_, mult, height, flat)
         if tonumber(mult)   then MCM.Set("jump_duration_mult", tonumber(mult)) end
@@ -210,9 +379,9 @@ function M.Register()
             cfg("duration_mult"), cfg("height_m"), cfg("apex_flatness")))
     end)
     Ext.RegisterConsoleCommand("dag_jump_status", function()
-        Log.Write(string.format("Jump: enabled=%s mult=%.2f height=%.2fm flatness=%.1f active=%s seq=%d scan=%s",
+        Log.Write(string.format("Jump: enabled=%s mult=%.2f height=%.2fm flatness=%.1f active=%s seq=%d scan=%s moving_anims=%s rooted=%s",
             tostring(cfg("enabled")), cfg("duration_mult"), cfg("height_m"), cfg("apex_flatness"),
-            tostring(J.active), J.seq, JumpAnims.State()))
+            tostring(J.active), J.seq, JumpAnims.State(), J.movingPolicy, tostring(J.rootedSeen)))
     end)
 
     -- Diagnostic from docs/spikes/m1b-visual-lift.md: lift the body's Visual
@@ -230,7 +399,7 @@ function M.Register()
         if not ok then Log.Write("Jump: lift probe ERROR " .. tostring(err)) end
     end)
 
-    Log.Write("Jump: registered (Space; !dag_jump <mult> [height] [flatness]; !dag_jump_status; !dag_lift_probe)")
+    Log.Write("Jump: registered (Space; !dag_jump <mult> [height] [flatness]; !dag_jump_mult; !dag_jump_height; !dag_jump_moving_anims; !dag_jump_status; !dag_lift_probe)")
 end
 
 return M

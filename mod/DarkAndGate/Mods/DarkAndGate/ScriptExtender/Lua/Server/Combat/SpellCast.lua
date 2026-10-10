@@ -96,6 +96,10 @@ function M.Register()
                 return
             end
 
+            -- A spell prepare loop (or jump clip) still playing would queue
+            -- the cast behind it (Osi.PlayAnimation is an Osiris task).
+            ServerNet.StopScriptedAnim(caster, "before cast")
+
             -- Character target if the client found one, else the point.
             local target = resolveTarget(caster, parsed)
             local okCast, how
