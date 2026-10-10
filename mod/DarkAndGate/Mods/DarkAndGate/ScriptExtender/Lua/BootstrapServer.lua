@@ -34,6 +34,7 @@ local Dummy        = Ext.Require("Server/Combat/Dummy.lua")
 Mana.Register()
 HitValidator.Register()
 SpellCast.Register()
+Ext.Require("Shared/SpellRange.lua").Register("Server")
 Dummy.Register()
 
 -- Animation browser + gallery (server side: preview copies).

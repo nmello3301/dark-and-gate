@@ -74,7 +74,20 @@ local function castAtTarget(caster, spellId, target)
     })
 end
 
+-- Channelled casting: when each user armed which spell (SpellArm).
+local armed = {}   -- userId -> { spell, at = ms }
+local function nowMs() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
+
 function M.Register()
+    Ext.RegisterNetListener(Net.Channels.SpellArm, function(_, payload, userId)
+        local ok, p = pcall(Ext.Json.Parse, payload)
+        if not ok then return end
+        if p.spell and p.spell ~= "" then
+            armed[userId] = { spell = p.spell, at = nowMs() }
+        else
+            armed[userId] = nil
+        end
+    end)
     -- Replace the Spike 5 handler at the same channel. Last subscriber wins
     -- for a given channel? SE's RegisterNetListener stacks subscribers. Guard
     -- by only letting ours accept well-formed payloads with the "withMana"
@@ -82,6 +95,20 @@ function M.Register()
     Ext.RegisterNetListener(Net.Channels.CastSpellRequest, function(_, payload, userId)
         local ok, parsed = pcall(Ext.Json.Parse, payload)
         if not ok or not parsed.withMana then return end  -- not for us
+
+        -- Cast time: the release must come cast_time_s after the arm.
+        do
+            local def0 = spells.spells[parsed.spell]
+            local need = ((def0 and def0.cast_time_s) or spells.cast_time_s or 0) - (spells.cast_time_tolerance_s or 0)
+            local a = armed[userId]
+            local held = a and a.spell == parsed.spell and (nowMs() - a.at) / 1000 or nil
+            if need > 0 and (not held or held < need) then
+                Log.Write(string.format("SpellCast: REJECTED %s released after %s s (cast time %.2f s)",
+                    tostring(parsed.spell), held and string.format("%.2f", held) or "no arm", need + (spells.cast_time_tolerance_s or 0)))
+                return
+            end
+            armed[userId] = nil
+        end
 
         ServerNet.EnqueueOsi(function()
             local caster = ServerNet.UserToCharacter(userId)

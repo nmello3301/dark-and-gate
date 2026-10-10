@@ -167,9 +167,13 @@ Lessons recorded for the next pass: `Ext.Require` only works at load time; `hit.
 - [ ] Speed knob: `move.walk_speed / run_speed / speed_mult` (`data/movement.lua`, MCM), `Movement.AddModifier / RemoveModifier`, `!dag_speed_mult / !dag_walk_speed / !dag_run_speed`. Native lever: the MoveController template fetch ([move-speed.md](spikes/move-speed.md)).
 - [ ] Locomotion clips play at the gait's speed multiplier (no foot sliding).
 - [ ] Jump while walking / running keeps the movement and steering; same arc; no double jump; lift source logged per jump. **2026-10-09 playtest: no visible jump while moving**, although the DLL lifted the Visual every frame. Fix 2: the camera measures the head mesh's real rise and fills the rest; the body re-applies the lift after engine writes when the mesh doesn't follow (`LIFT: … force on`, `JUMP lift … meshRise=`).
+- [x] Jump while walking / running (camera + body rise, movement kept). *(verified 2026-10-09)*
+- [x] Single-click swing chain. *(verified 2026-10-09, unarmed; weapons not tested yet)*
 - [x] Standing jump. *(verified 2026-10-09)* Clips now cast → ascend → descend fitted to the airtime (x1.35); the Recover clip is dropped (developer: unneeded).
 - [ ] Swing / cast / spell prepare loop in the air take priority over the jump clips; the arc continues; landing waits for the action.
 - [ ] Spell prepare loop while a spell is armed (ids from the spell's `SpellAnimation` stats); LMB casts, RMB / same key cancels to idle.
+- [ ] **Channelled casting** (2026-10-09): selecting a hotbar spell starts casting (prepare animation, priority over the jump clips); held indefinitely; LMB releases only after the cast time (`data/spells.lua` `cast_time_s = 2.0`, server-checked via `SpellArm`). Later: cast time scaled by character traits.
+- [ ] **Shooting spells have no max range**: aim point up to 100 m along the crosshair, spell `TargetRadius` raised to 100 at stats load (`Shared/SpellRange.lua`).
 - [ ] First swing animates on a single click; single-click chain 1→2→3. **2026-10-09: cause found** — the auto-picked swing-1 clip was BG3's ranged attack (no clip in melee stances), so click 1 played nothing and click 2 (swing 2) did. Swings 1–3 now use the developer's picks (RHand, LHand, RHand) via `data/anim_tags.lua`; ranged clips excluded from the auto-pick.
 - [ ] Blocking and parry: **custom animations**; block only with a shield equipped, parry only with a weapon that can parry (decided 2026-10-08).
 - [x] Fire Bolt aimed at the crosshair (character aim assist, or ground / object point). *(2026-10-08)*

@@ -38,6 +38,8 @@ local Hotbar = Ext.Require("Client/Combat/Hotbar.lua")
 local Spells = Ext.Require("Client/Combat/Spells.lua")
 local Jump   = Ext.Require("Client/Movement/Jump.lua")
 local Prepare = Ext.Require("Client/Combat/Prepare.lua")
+local Net       = Ext.Require("Shared/Net.lua")
+local ClientNet = Ext.Require("Client/Net.lua")
 
 local M = {}
 
@@ -96,9 +98,16 @@ local function onMouse(event)
         if pressed then
             if State.armedSpell then
                 local armed = State.armedSpell
-                State.armedSpell = nil
-                Log.Write("Combat: LMB casts armed spell " .. tostring(armed))
-                if not Spells.Cast(armed) then Prepare.Stop("cast aborted") end
+                local left = Spells.ReadyIn(armed)
+                if left > 0 then
+                    -- Still channelling: keep casting, nothing is released.
+                    Log.Write(string.format("Combat: LMB ignored, %s still casting (%.2fs left)", tostring(armed), left))
+                else
+                    State.armedSpell = nil
+                    State.armedAt = nil
+                    Log.Write("Combat: LMB releases " .. tostring(armed))
+                    if not Spells.Cast(armed) then Prepare.Stop("cast aborted") end
+                end
             else
                 Swing.OnLMB()
             end
@@ -109,6 +118,8 @@ local function onMouse(event)
             if State.armedSpell then
                 Log.Write("Combat: canceled armed spell (RMB) was=" .. tostring(State.armedSpell))
                 State.armedSpell = nil
+                State.armedAt = nil
+                ClientNet.Send(Net.Channels.SpellArm, { spell = nil })
                 Prepare.Stop("cancel-rmb")
             else
                 State.blocking = true

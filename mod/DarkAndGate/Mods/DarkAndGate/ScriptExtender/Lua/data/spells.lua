@@ -10,6 +10,23 @@
 -- Resolved at cast time from Osi.GetAbility(caster, "<Ability>").
 
 return {
+    -- Channelled casting (2026-10-09): selecting a hotbar spell starts
+    -- casting (its prepare animation plays and loops); LMB releases it,
+    -- but only once cast_time_s has passed. Held as long as you like.
+    -- Per-spell `cast_time_s` overrides this. Later: scale with traits.
+    cast_time_s = 2.0,
+    -- The server accepts a release this much earlier than cast_time_s
+    -- (network latency between the arm and the cast messages).
+    cast_time_tolerance_s = 0.25,
+
+    -- Shooting spells (unlimited_range = true) fly toward the crosshair at
+    -- any distance: the aim point is up to aim_far_m away along the view,
+    -- and the spell's own TargetRadius stat is raised to stat_range_m at
+    -- stats load (Shared/SpellRange.lua) so BG3 doesn't refuse or walk
+    -- you into range. BG3's 18 m felt wrong in first person.
+    aim_far_m    = 100,
+    stat_range_m = 100,
+
     -- Cost table by spell level (index 0..6).
     cost_by_level = { [0] = 0, [1] = 10, [2] = 20, [3] = 32, [4] = 45, [5] = 60, [6] = 80 },
 
@@ -24,6 +41,7 @@ return {
         -- does not exist, which is why spike 5 saw nothing happen.
         Projectile_FireBolt = {
             kind       = "target",    -- character under crosshair, else ground point
+            unlimited_range = true,
             level      = 0,
             cost       = 0,
             cooldown_ms = 400,
@@ -33,6 +51,7 @@ return {
         },
         Projectile_Fireball = {
             kind       = "point",     -- held-key ground preview; stub this pass
+            unlimited_range = true,
             level      = 3,
             cost       = 32,
             cooldown_ms = 1500,

@@ -69,6 +69,10 @@ Net.Channels = {
     -- First-person jump (visual lift). Client -> server: { durMs, h, k }.
     -- The server lifts the jumper's hitbox (Shared/Hitbox.lua) and relays
     -- JumpNotify { uuid, durMs, h, k } to every other client.
+    -- Channelled casting: the client tells the server when a spell is
+    -- armed / disarmed ({ spell = id | nil }); the server only accepts the
+    -- cast once the spell's cast time has passed since the arm.
+    SpellArm          = "DAG_SpellArm",
     JumpStart         = "DAG_JumpStart",
     JumpNotify        = "DAG_JumpNotify",
 
@@ -100,6 +104,7 @@ Net.AllChannels = {
     Net.Channels.CombatIntent,
     Net.Channels.SpawnDummy,
     Net.Channels.SpawnDummyReply,
+    Net.Channels.SpellArm,
     Net.Channels.JumpStart,
     Net.Channels.JumpNotify,
     Net.Channels.AnimLibSpawn,

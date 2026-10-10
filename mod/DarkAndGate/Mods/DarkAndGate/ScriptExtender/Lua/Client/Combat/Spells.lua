@@ -35,7 +35,8 @@ function M.Cast(spellId)
     if nowMs() < cd then return end
 
     local kind = def.kind or "target"
-    local range = def.range_m or 30.0
+    local far = def.unlimited_range
+    local range = far and (spells.aim_far_m or 100) or (def.range_m or 30.0)
 
     local payload = {
         withMana = true,
@@ -56,7 +57,8 @@ function M.Cast(spellId)
             payload.hitPoint   = { x = t.pos[1], y = t.pos[2], z = t.pos[3] }
             Log.Write(string.format("Spells: %s -> character %s at %.1f m", spellId, t.target, t.distance or 0))
         else
-            local pos, dist, via = Aim.GroundPoint(range)
+            local pos, dist, via
+            if far then pos, dist, via = Aim.AimPoint(range) else pos, dist, via = Aim.GroundPoint(range) end
             if not pos then
                 Log.Write("Spells: camera not readable -- aborting " .. spellId)
                 return
@@ -77,6 +79,18 @@ function M.Cast(spellId)
         tostring(payload.targetUuid),
         payload.hitPoint and string.format("(%.2f,%.2f,%.2f)", payload.hitPoint.x, payload.hitPoint.y, payload.hitPoint.z) or "nil"))
     return true
+end
+
+-- Channelled casting: seconds until the armed spell may be released
+-- (0 = ready). armedAt comes from Hotbar.PressSlot.
+function M.CastTime(spellId)
+    local def = spells.spells[spellId]
+    return (def and def.cast_time_s) or spells.cast_time_s or 0
+end
+function M.ReadyIn(spellId)
+    if not State.armedAt then return 0 end
+    local left = M.CastTime(spellId) - (nowMs() - State.armedAt) / 1000
+    return left > 0 and left or 0
 end
 
 -- Keep the "cast" action alive while the engine still casts. Whether the

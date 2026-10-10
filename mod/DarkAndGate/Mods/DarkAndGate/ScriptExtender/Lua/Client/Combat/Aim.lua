@@ -225,6 +225,22 @@ function M.GroundPoint(maxDist)
     return { eye[1] + fwd[1] / fl * r, groundY, eye[3] + fwd[3] / fl * r }, r, "ahead"
 end
 
+-- Shooting spells: the first thing the crosshair ray hits within maxDist,
+-- else the point maxDist along the view (in the air if you aim up), so a
+-- spell flies that way at any distance. Returns pos, distance, via.
+function M.AimPoint(maxDist)
+    maxDist = maxDist or 100.0
+    local eye, fwd = readInvView()
+    if not eye then return nil end
+    local nudge = 0.4
+    local from = { eye[1] + fwd[1] * nudge, eye[2] + fwd[2] * nudge, eye[3] + fwd[3] * nudge }
+    local d = M.WorldRay(from, fwd, maxDist)
+    if d then
+        return { from[1] + fwd[1] * d, from[2] + fwd[2] * d, from[3] + fwd[3] * d }, d + nudge, "ray"
+    end
+    return { eye[1] + fwd[1] * maxDist, eye[2] + fwd[2] * maxDist, eye[3] + fwd[3] * maxDist }, maxDist, "far"
+end
+
 -- Back-compat for older callers: { eye, forward, hit = { pos, distance } }.
 function M.CrosshairRay(maxDist, _includeChars)
     local eye, fwd = readInvView()
