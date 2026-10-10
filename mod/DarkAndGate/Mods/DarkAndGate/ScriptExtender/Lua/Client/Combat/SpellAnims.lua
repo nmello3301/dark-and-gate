@@ -143,10 +143,11 @@ end
 
 local memo = {}   -- spell .. "|" .. entity -> result
 
-function M.For(spell, ent)
+-- fresh: ignore the memo (the active sets changed, e.g. CastTags).
+function M.For(spell, ent, fresh)
     if not spell or not ent then return nil end
     local mk = spell .. "|" .. tostring(ent)
-    if memo[mk] then return memo[mk] end
+    if memo[mk] and not fresh then return memo[mk] end
     local slots, src = M.Slots(spell)
     local resolve, nsets = resolver(ent)
     local fb = spells.spell_anims and spells.spell_anims.fallback or {}

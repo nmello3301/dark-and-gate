@@ -61,6 +61,12 @@ return {
         -- immediate: no draw animation (it would compete with the prepare).
         -- wait_s: the client holds the prepare event up to this long until
         -- the weapon is out, so the right clip is picked.
+        -- Casting animation set like vanilla targeting (Client/Combat/
+        -- CastTags.lua): type-1 copies of the character's tags that have an
+        -- OverrideType 1 waterfall set. wait_s: the select event waits this
+        -- long at most for the set to be in place. *_hold_s: kept after the
+        -- release so cast / recover / stow come from the same set.
+        cast_tags = { enabled = true, wait_s = 0.5, cast_hold_s = 3.0, cancel_hold_s = 1.2 },
         unsheath = {
             enabled = false,
             default = "unsheath", Melee = "unsheath", Somatic = "unsheath", WeaponSet = "unsheath",

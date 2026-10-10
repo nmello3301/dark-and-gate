@@ -27,6 +27,7 @@ local FullPov      = Ext.Require("FullPov.lua")
 local SpellAnims   = Ext.Require("Client/Combat/SpellAnims.lua")
 local GenomeEvents = Ext.Require("Client/Combat/GenomeEvents.lua")
 local SpellFx      = Ext.Require("Client/Combat/SpellFx.lua")
+local CastTags     = Ext.Require("Client/Combat/CastTags.lua")
 local movement     = Ext.Require("data/movement.lua")
 local spells       = Ext.Require("data/spells.lua")
 
@@ -72,13 +73,16 @@ end
 local function begin(me)
     local c = cur
     c.begun = true
+    -- Re-resolve now that the casting set (CastTags) is first, so the
+    -- logged clip and its duration are the ones that will play.
+    c.anims = SpellAnims.For(c.spell, me, true) or c.anims
     local left = math.max(c.castTime - (nowMs() - c.t0) / 1000, 0.1)
     local prep = c.anims.prepare
     local rate = (prep and prep.dur and prep.dur > 0) and (prep.dur / left) or 1.0
     if prep and c.inst then FullPov.SetClipRates(c.inst, { [prep.key] = rate }) end
     local ok, how = GenomeEvents.PlaySpell(me, c.anims)
-    Log.Write(string.format("Prepare: start %s via %s (stance %s after %.2fs) -> prepare %s (%.2fs clip at x%.2f = %.2fs left of %.2fs), loop %s, rig %s%s",
-        c.spell, ok and how or ("FAILED: " .. tostring(how)), stance(me), (nowMs() - c.t0) / 1000, prep and prep.file or "none",
+    Log.Write(string.format("Prepare: start %s via %s (stance %s, casting set %s, after %.2fs) -> prepare %s (%.2fs clip at x%.2f = %.2fs left of %.2fs), loop %s, rig %s%s",
+        c.spell, ok and how or ("FAILED: " .. tostring(how)), stance(me), CastTags.Ready(me) and "ready" or "NOT ready", (nowMs() - c.t0) / 1000, prep and prep.file or "none",
         prep and prep.dur or 0, rate, left, c.castTime, c.anims.loop and c.anims.loop.file or "none", c.anims.rig,
         c.anims.fallback and " [fallback anims]" or ""))
     SpellFx.Start(c.spell, me)
@@ -95,13 +99,24 @@ function M.Start(spell)
     cur = { spell = spell, anims = anims, t0 = nowMs(), castTime = castTime, inst = instAddr(me) }
     Actions.Hold("prepare")
     local drawn, wait = wantsDrawn(spell)
-    local st = stance(me)
-    if drawn and st == "Sheathed" and wait > 0 then
+    cur.wantsDrawn = drawn
+    local nTags = CastTags.Apply(me)
+    local ctWait = (spells.spell_anims and spells.spell_anims.cast_tags and spells.spell_anims.cast_tags.wait_s) or 0.5
+    if nTags > 0 then wait = math.max(wait, ctWait) end
+    if wait > 0 and not M.CanBegin(me) then
         cur.waitUntil = cur.t0 + wait * 1000
-        Log.Write(string.format("Prepare: %s waits up to %.2fs for the weapon (stance %s)", spell, wait, st))
+        Log.Write(string.format("Prepare: %s waits up to %.2fs (stance %s, casting set %s)", spell, wait, stance(me),
+            CastTags.Ready(me) and "ready" or "pending"))
     else
         begin(me)
     end
+end
+
+-- The select event waits for the weapon (when the arm draws it) and for the
+-- casting animation set.
+function M.CanBegin(me)
+    if cur and cur.wantsDrawn and stance(me) == "Sheathed" then return false end
+    return CastTags.Ready(me)
 end
 
 -- reason: "cast" (release), "cancel-rmb", "cancel-key", "cast aborted", "re-arm".
@@ -111,6 +126,7 @@ function M.Stop(reason)
     cur = nil
     local me = player()
     if c.begun then SpellFx.Stop(reason) end
+    if reason ~= "re-arm" then CastTags.Release(reason) end
     if reason == "cast" then
         -- Guard: fast-forward the engine's own prepare / loop if UseSpell
         -- replays them; the cast and recover play at normal speed.
@@ -141,7 +157,7 @@ local function tick()
     end
     if cur and not cur.begun then
         local me = player()
-        if me and (stance(me) ~= "Sheathed" or nowMs() >= cur.waitUntil) then begin(me) end
+        if me and (M.CanBegin(me) or nowMs() >= cur.waitUntil) then begin(me) end
     end
     if cur and not cur.ready and nowMs() - cur.t0 >= cur.castTime * 1000 then
         cur.ready = true
@@ -154,6 +170,7 @@ function M.Register()
     Ext.Events.Tick:Subscribe(function() pcall(tick) end)
     GenomeEvents.Register()
     SpellFx.Register()
+    CastTags.Register()
     -- Debug: run our channel without POV / the hotbar, to compare it with
     -- vanilla from the normal camera. !dag_prepare_test [spell] | stop
     Ext.RegisterConsoleCommand("dag_prepare_test", function(_, a)

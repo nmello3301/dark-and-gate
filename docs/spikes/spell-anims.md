@@ -89,3 +89,21 @@ Playtest: the replayed select event animated Gale, but not with the same prepare
 - **Ours:** low sideways stance, legs spread, left hand extended as if aiming, right hand cocked like a throw, occasional forward flinch.
 
 So the same node and mapping id resolve to a different clip. Something on the character that vanilla targeting sets steers the resolution: a blueprint variable, animation tag or set override. Probe: `!dag_anim_state <label> [delay]` (`Client/AnimLib/AnimState.lua`) snapshots blueprint variables (named), DynamicAnimationTags / AnimationWaterfall / AnimationSet / overrides, the component list and a full component dump, for a vanilla vs ours diff.
+
+## Snapshot diff: the casting animation set (2026-10-10)
+
+`!dag_anim_state` taken during vanilla targeting and during ours (`anim-state-*.txt`). Blueprint variables only differ by timers. The real differences:
+
+| | Vanilla targeting | Ours |
+| --- | --- | --- |
+| DynamicAnimationTags | `a865965f` type 0 **and type 1** | `a865965f` type 0 only |
+| AnimationSet.Entries[1] | **`745fbb35…` Dynamic** (Visual) | (absent) |
+| Components | `eoc::spell_cast::IsCastingComponent` | (absent) |
+
+- Gale's `AnimationWaterfall.Overrides` maps tag `a865965f` with **OverrideType 1** to set `745fbb35`.
+- The type-1 copy of the tag activates that override, and the set goes first in the AnimationSet. The prepare / loop ids then resolve there: the standing, elbow-holding casting pose, instead of the generic low "throw" stance.
+- None of Gale's other tags has an OverrideType 1 entry.
+
+**Fix:** `Client/Combat/CastTags.lua`. On arm, every type-0 tag with an OverrideType 1 waterfall entry gets a type-1 copy. The select event waits (up to `cast_tags.wait_s`) until the override sets appear in `AnimationSet`. The clips are then re-resolved (`SpellAnims.For(..., fresh)`) for the right durations. The copies are removed `cast_hold_s` after a cast or `cancel_hold_s` after a cancel.
+
+**Open:** whether the engine rebuilds the AnimationSet when Lua writes the tag (logged as "casting set ready / NOT ready"). Also whether other casters use the same rule.
