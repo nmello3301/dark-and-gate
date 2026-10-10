@@ -79,6 +79,8 @@ Net.Channels = {
     AnimLibSpawn      = "DAG_AnimLibSpawn",
     AnimLibSpawned    = "DAG_AnimLibSpawned",
     AnimLibClear      = "DAG_AnimLibClear",
+    -- Client -> server: { uuid, name } -- rename a gallery copy after its clip.
+    AnimLibName       = "DAG_AnimLibName",
 }
 
 -- Every channel both sides care about. Both server and client must register
@@ -103,6 +105,7 @@ Net.AllChannels = {
     Net.Channels.AnimLibSpawn,
     Net.Channels.AnimLibSpawned,
     Net.Channels.AnimLibClear,
+    Net.Channels.AnimLibName,
 }
 
 return Net

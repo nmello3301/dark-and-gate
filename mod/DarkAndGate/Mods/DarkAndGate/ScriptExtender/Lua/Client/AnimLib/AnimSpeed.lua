@@ -18,6 +18,7 @@
 -- pretending.
 
 local Log = Ext.Require("Shared/Log.lua")
+local FullPov = Ext.Require("FullPov.lua")
 
 local M = {}
 
@@ -83,5 +84,29 @@ end
 function M.Available(ent, name) return ent ~= nil and findIndex(ent, name) ~= nil end
 
 function M.Forget() indexCache = {} end
+
+-- Whole-character play rate (0 = freeze). The entry point the browser
+-- slider and the jump use. Routes to the native per-character animation
+-- clock when the DLL provides it (docs/spikes/anim-clock.md); until then
+-- tries the blueprint "PlayRate" variable. Returns ok, how-or-reason.
+-- Native: the DLL hooks the shared PlayAnimation-node Execute and scales
+-- the PlayRate input for this character's GenomeBlueprintInstance
+-- (docs/spikes/anim-clock.md). One target at a time.
+M.Native = function(ent, rate)
+    local okI, inst = pcall(function() return ent.AnimationBlueprint.Instance end)
+    local addr = okI and inst and FullPov.AddrOf(inst) or nil
+    if not addr then return false, "no AnimationBlueprint.Instance on this character" end
+    if rate == 1 then FullPov.SetAnimRate(nil, 1.0) else FullPov.SetAnimRate(addr, rate) end
+    return true, "native PlayAnimation hook (native.log RATE lines confirm)"
+end
+function M.SetCharacter(ent, rate)
+    if M.Native then
+        local ok, how = M.Native(ent, rate)
+        if ok then return true, how end
+    end
+    local ok, why = M.Set(ent, rate)
+    if ok then return true, "blueprint PlayRate variable" end
+    return false, M.Native and "native lever failed and " .. tostring(why) or ("no native lever yet; " .. tostring(why))
+end
 
 return M

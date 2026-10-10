@@ -63,3 +63,7 @@ Per the developer's instruction, stop and choose before building any of these:
 ## Credits
 
 The approach was learned from **QSAT** (Quick Small Animation Thingy) by its author, and from **BG3AF** (BG3 Animation Framework). We read their mods to learn from them; none of their files, code or assets ship with Dark and Gate.
+
+## Resolution (2026-10-09)
+
+Gameplay characters use the native route instead: [anim-clock.md](anim-clock.md). The DLL hooks the Execute shared by every PlayAnimation-type Genome node and scales the PlayRate input for one character's blueprint instance (`Hooks/AnimRate.cpp`, `AnimSpeed.SetCharacter` in Lua). The QSAT-style variable write stays as a fallback for photo-mode dummies.

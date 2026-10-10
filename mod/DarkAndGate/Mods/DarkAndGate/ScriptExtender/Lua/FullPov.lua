@@ -45,6 +45,10 @@ local S = {
     jump_ms = 0,
     jump_h = 0,
     jump_k = 2,
+    -- Per-character animation play rate (AnimRate.cpp): the character's
+    -- GenomeBlueprintInstance address and the rate; rate 1 = off.
+    anim_inst = "0",
+    anim_rate = 1.0,
 }
 
 -- ---------------------------------------------------------------------
@@ -229,8 +233,8 @@ local function writeState()
     if S.on and USE_BONE_ANCHOR then refreshCache(e, now) end
 
     local line = string.format(
-        "on=%d active=%d visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
-        S.on and 1 or 0, active and 1 or 0, (S.on and cache.visual) or "0", S.anchor, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
+        "on=%d active=%d anim_inst=%s anim_rate=%.3f visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
+        S.on and 1 or 0, active and 1 or 0, S.anim_inst, S.anim_rate, (S.on and cache.visual) or "0", S.anchor, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
         S.jump_seq, math.floor(S.jump_ms + 0.5), S.jump_h, S.jump_k,
         S.dump, cache.sock or -1, cache.skel or 0, x, y, z,
         (S.on and #cache.meshes > 0) and table.concat(cache.meshes, ",") or "0",
@@ -282,6 +286,16 @@ function M.Jump(seq, durMs, height, flatness)
     lastWrite = 0
     pcall(writeState)
 end
+
+-- Per-character play rate through the DLL's PlayAnimation hook.
+-- inst: hex address of ent.AnimationBlueprint.Instance (nil = off).
+function M.SetAnimRate(inst, rate)
+    S.anim_inst = inst or "0"
+    S.anim_rate = rate or 1.0
+    lastWrite = 0
+    pcall(writeState)
+end
+M.AddrOf = function(o) return addrOf(o) end
 
 -- Animation browser: third person while its window is open.
 function M.SetOn(on) setOn(on and true or false) end

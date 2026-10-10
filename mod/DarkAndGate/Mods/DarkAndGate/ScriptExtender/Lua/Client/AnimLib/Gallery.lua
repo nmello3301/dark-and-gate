@@ -131,6 +131,12 @@ local function updateLabels()
         local feet = s.uuid and feetOf(s)
         local x, y
         if feet then x, y = project({ feet[1], feet[2] + HEAD_M, feet[3] }) end
+        if not labelDebugLogged and s.uuid then
+            labelDebugLogged = true
+            Log.Write(string.format("AnimLib: label #%d feet=%s screen=%s", i,
+                feet and string.format("(%.1f,%.1f,%.1f)", feet[1], feet[2], feet[3]) or "nil (entity not found on client)",
+                x and string.format("(%.0f,%.0f)", x, y) or "nil (projection failed)"))
+        end
         if x then
             local w = labelWindow(i)
             if w then
@@ -144,6 +150,17 @@ local function updateLabels()
         end
     end
 end
+
+-- Copy names follow their clip ("#3 HUM_M_Rig_1HS_..._Attack").
+local function sendName(i, s)
+    if not s.uuid then return end
+    local name = s.clip and string.format("#%d %s", i, s.clip.base:gsub("^%a+_%a+_Rig_", "")) or string.format("#%d (no clip)", i)
+    if s.sentName == name then return end
+    s.sentName = name
+    ClientNet.Send(Net.Channels.AnimLibName, { uuid = s.uuid, name = name })
+end
+
+local labelDebugLogged = false
 
 local function startOne()
     if paused then return end
@@ -201,6 +218,7 @@ function M.SetPage(clips)
             s.clip = clips[i]
             s.nextAt = s.clip and t or nil
             s.text = nil
+            sendName(i, s)
         end
     end
 end
@@ -260,6 +278,7 @@ function M.Register()
         else
             s.uuid, s.ent, s.err = msg.uuid, nil, nil
             if s.clip then s.nextAt = now() end
+            sendName(i, s)
         end
         local have = 0
         for _, x in pairs(slots) do if x.uuid or x.err then have = have + 1 end end

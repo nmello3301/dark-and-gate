@@ -7,10 +7,9 @@
 --   * list: that target's own playable clips, one row per clip file (all
 --     its mapping ids kept), filtered by text / category / family / phase,
 --     paged (page size = gallery size);
---   * Play / Replay / Prev / Next (PageUp / PageDown) / Stop on the target,
---     through the server PlayAnim channel ("force" skips the turn-based
---     guard). "Try next id" cycles the clip's mapping ids, then its
---     resource id; "It played" remembers which kind works;
+--   * Play the selected clip on the target, Prev / Next (PageUp /
+--     PageDown), through the server PlayAnim channel ("force" skips the
+--     turn-based guard); "Play rate" slows / speeds up the target live;
 --   * "Use as": tag the selected clip (Client/AnimLib/Tags.lua), by mapping
 --     id, optionally only for the target's rig;
 --   * Coverage: which rigs have a clip for the selected mapping id;
@@ -21,6 +20,10 @@
 -- While the window is open first person is off (third person to watch);
 -- it comes back on close. ImGui elements are created once.
 --
+-- Notes: select a clip, type in "note", press "Log this animation" -- one
+-- line per note in DarkAndGate/anim-notes.txt (Client/AnimLib/Notes.lua);
+-- clips with a note show [*] in the list. !dag_animlib_notes prints them.
+--
 -- Commands (client console):
 --   !dag_animlib                       open / close the browser
 --   !dag_animlib gallery [n]           open with a gallery of n copies (default 12, max 25)
@@ -28,6 +31,7 @@
 --   !dag_animlib template <uuid>       gallery template override (empty = automatic)
 --   !dag_animlib global                build the global index (coverage, fallback lists)
 --   !dag_animlib_export                print the tags as a Lua table for data/anim_tags.lua
+--   !dag_animlib_notes                 print the animation notes
 
 local Log       = Ext.Require("Shared/Log.lua")
 local ClientNet = Ext.Require("Client/Net.lua")
@@ -36,6 +40,7 @@ local Library   = Ext.Require("Client/AnimLib/Library.lua")
 local Tags      = Ext.Require("Client/AnimLib/Tags.lua")
 local Gallery   = Ext.Require("Client/AnimLib/Gallery.lua")
 local AnimSpeed = Ext.Require("Client/AnimLib/AnimSpeed.lua")
+local Notes     = Ext.Require("Client/AnimLib/Notes.lua")
 
 local M = {}
 
@@ -238,7 +243,7 @@ end
 -- ---------------------------------------------------------------------
 local function rowLabel(i, c)
     local n = (page - 1) * pageSize + i
-    return string.format("#%d  %s  (%.1fs, %d id%s)##row%d", n, c.base, c.dur or 0, #c.keys, #c.keys == 1 and "" or "s", i)
+    return string.format("%s#%d  %s  (%.1fs)##row%d", Notes.For(c.base) and "[*] " or "", n, c.base, c.dur or 0, i)
 end
 
 local function refreshRows()
@@ -262,13 +267,10 @@ local function selectedInfo()
         set(W.sel, "Label", "selected: (none) -- click a row")
         return
     end
-    local subs = {}
-    for s in pairs(selected.subsets) do subs[#subs + 1] = s end
-    table.sort(subs)
-    local id, kind = idFor(selected)
-    set(W.sel, "Label", string.format("selected: %s\n%.2fs  rig %s  family %s  phase %s\n%d mapping id(s), subsets: %s\nnext play uses %s %s",
+    local note = Notes.For(selected.base)
+    set(W.sel, "Label", string.format("selected: %s\n%.2fs  rig %s  family %s  phase %s  (%d mapping id%s)%s",
         selected.base, selected.dur or 0, selected.rig, selected.family, selected.phase,
-        #selected.keys, table.concat(subs, ", "), kind, id))
+        #selected.keys, #selected.keys == 1 and "" or "s", note and ("\nnote: " .. note) or ""))
 end
 
 local function coverageText()
@@ -356,16 +358,13 @@ local function build()
 
         t.sel = w:AddText("")
         t.play = w:AddButton("Play")
-        t.replay = w:AddButton("Replay"); trySet(t.replay, "SameLine", true)
-        t.stop = w:AddButton("Stop"); trySet(t.stop, "SameLine", true)
-        t.alt = w:AddButton("Try next id"); trySet(t.alt, "SameLine", true)
-        t.works = w:AddButton("It played"); trySet(t.works, "SameLine", true)
-        t.force = w:AddCheckbox("force (ignore the turn-based guard)", false)
-        t.speedSl = w:AddSlider("Play rate", 1.0, 0.0, 2.0)
-        t.speedTgt = w:AddButton("Apply to target")
-        t.speedAll = w:AddButton("Apply to all copies"); trySet(t.speedAll, "SameLine", true)
+        t.force = w:AddCheckbox("force (ignore the turn-based guard)", false); trySet(t.force, "SameLine", true)
+        t.speedSl = w:AddSlider("Play rate (target)", 1.0, 0.0, 2.0)
         t.speedReset = w:AddButton("1x"); trySet(t.speedReset, "SameLine", true)
         t.speed = w:AddText("speed: (pick a target)")
+        t.note = w:AddInputText("note", "")
+        t.noteBtn = w:AddButton("Log this animation")
+        t.notesInfo = w:AddText("notes: " .. Notes.Summary())
         w:AddSeparator()
 
         t.tagCombo = w:AddCombo("Use as")
@@ -410,24 +409,13 @@ local function build()
         t.prev.OnClick = function() M.Page(-1) end
         t.next.OnClick = function() M.Page(1) end
         t.play.OnClick = function() playSelected("play") end
-        t.replay.OnClick = function() playSelected("replay") end
-        t.stop.OnClick = function()
-            if target then ClientNet.PlayAnimOn(target.uuid, "__unstick__", nil, true) end
-            Log.Write("AnimLib: stop on " .. (target and target.name or "?"))
-        end
-        t.alt.OnClick = function()
-            if not selected then return end
-            altIdx = altIdx + 1
-            if altIdx > #selected.keys + 1 then altIdx = 1 end
-            selectedInfo()
-            playSelected("try next id")
-        end
-        t.works.OnClick = function()
-            if not selected then return end
-            local _, kind = idFor(selected)
-            preferRes = (kind == "resource")
-            Log.Write(string.format("AnimLib: %s plays via %s -- %s ids preferred from now on",
-                selected.base, kind, preferRes and "resource" or "mapping"))
+        t.noteBtn.OnClick = function()
+            if not selected then set(t.notesInfo, "Label", "notes: select a clip first"); return end
+            local text = t.note.Text or ""
+            Notes.Add(selected, target, Library.B.rig, text)
+            trySet(t.note, "Text", "")
+            set(t.notesInfo, "Label", "notes: " .. Notes.Summary())
+            refreshRows()
         end
         t.force.OnChange = function(_, v) force = v and true or false end
         local function rate()
@@ -436,23 +424,20 @@ local function build()
             if r > 0 and r < 0.1 then r = 0.1 end   -- 0 = freeze, else 0.1 .. 2
             return r
         end
-        local function applyRate(ents, label)
-            local okN, last = 0, nil
-            for _, e in ipairs(ents) do
-                local ok, why = AnimSpeed.Set(e, rate())
-                if ok then okN = okN + 1 else last = why end
-            end
-            local msg = string.format("speed: x%.2f on %d/%d %s%s", rate(), okN, #ents, label,
-                last and (" -- " .. last) or "")
+        -- Live: the slider applies to the browsed character as it moves.
+        local lastRateLog = 0
+        local function applyRate()
+            if not target then return end
+            local r = rate()
+            local ok, how = AnimSpeed.SetCharacter(target.ent, r)
+            local msg = string.format("speed: x%.2f on %s -- %s", r, target.name, ok and how or ("NOT applied: " .. tostring(how)))
             set(t.speed, "Label", msg)
-            Log.Write("AnimLib: " .. msg)
+            if now() - lastRateLog > 500 then lastRateLog = now(); Log.Write("AnimLib: " .. msg) end
         end
-        t.speedTgt.OnClick = function() if target then applyRate({ target.ent }, "target") end end
-        t.speedAll.OnClick = function() applyRate(Gallery.Entities(), "gallery copies") end
+        t.speedSl.OnChange = function() applyRate() end
         t.speedReset.OnClick = function()
             trySet(t.speedSl, "Value", { 1, 0, 0, 0 })
-            if target then applyRate({ target.ent }, "target") end
-            if Gallery.Active() then applyRate(Gallery.Entities(), "gallery copies") end
+            applyRate()
         end
         t.tagBtn.OnClick = function() tagSelected() end
         t.export.OnClick = function() M.Export() end
@@ -552,6 +537,8 @@ function M.Close(why)
     if not open then return end
     open = false
     Gallery.Clear("browser closed")
+    if target then pcall(AnimSpeed.SetCharacter, target.ent, 1.0) end   -- never leave a character slowed
+    if W then trySet(W.speedSl, "Value", { 1, 0, 0, 0 }) end
     trySet(W.win, "Open", false)
     if povWasOn then FullPov.SetOn(true) end
     Log.Write("AnimLib: browser closed (" .. tostring(why) .. ")" .. (povWasOn and ", first person back on" or ""))
@@ -613,6 +600,7 @@ function M.Register()
         end
     end)
     Ext.RegisterConsoleCommand("dag_animlib_export", function() M.Export() end)
+    Ext.RegisterConsoleCommand("dag_animlib_notes", function() Notes.Print() end)
     Log.Write("AnimLib: registered (!dag_animlib [gallery n|clear|template <uuid>|global], !dag_animlib_export)")
 end
 

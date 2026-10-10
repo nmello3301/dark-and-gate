@@ -27,6 +27,7 @@
 #include "../Log.h"
 #include "../SafeMem.h"
 #include "VisualLift.h"
+#include "AnimRate.h"
 
 namespace dag::pov {
 
@@ -152,6 +153,8 @@ struct LuaState {
     int   numMeshes = 0;
     uintptr_t meshes[kMaxMeshes] = {};
     uintptr_t visual = 0;      // player's root rf Visual (body lift)
+    uintptr_t animInst = 0;    // GenomeBlueprintInstance to play at animRate (AnimRate.cpp)
+    float     animRate = 1.f;
     DWORD readTick  = 0;
 };
 
@@ -227,6 +230,10 @@ void PollLuaFile()
             if (*m == ',') ++m;
         }
     }
+    if (const char* v = FindVal(buf, "anim_inst")) {
+        s.animInst = static_cast<uintptr_t>(std::strtoull(v, nullptr, 16));
+    }
+    s.animRate = ValF(buf, "anim_rate", 1.f);
     if (const char* v = FindVal(buf, "visual")) {
         s.visual = static_cast<uintptr_t>(std::strtoull(v, nullptr, 16));
     }
@@ -984,7 +991,7 @@ void WriteStatus()
         "on=%d active=%d applied=%d src=%s rotOff=0x%X rotCal=%d sel=%d bone=%d%s mesh=%d pose%d layout%d %s "
         "eye=%.3f,%.3f,%.3f P=%.3f,%.3f,%.3f head=%.3f,%.3f,%.3f rot=%.3f,%.3f,%.3f "
         "root=%.3f,%.3f,%.3f mouselook=%d toggled=%d filter=%d meshes=%d "
-        "head=%s headBone=%d headCal=%d eyeUpAuto=%.3f lift=%.3f liftMode=%s jumpSeq=%d t=%u\n",
+        "head=%s headBone=%d headCal=%d eyeUpAuto=%.3f lift=%.3f liftMode=%s jumpSeq=%d animRate=%.2f rateHook=%s t=%u\n",
         g_lua.on ? 1 : 0, g_lua.active ? 1 : 0, g_status.applied ? 1 : 0, g_status.src,
         g_rotOff, g_rotLogged ? 1 : 0, g_sel.valid ? 1 : 0, g_sel.bone,
         g_sel.fromSocket ? "(socket)" : "(top)", g_sel.meshIdx, g_sel.poseSlot + 1, g_sel.layout,
@@ -997,7 +1004,7 @@ void WriteStatus()
         g_mlWanted.load() ? 1 : 0, g_toggled.load() ? 1 : 0, g_filterInstalled ? 1 : 0,
         g_lua.numMeshes,
         g_head.valid ? g_head.name : "none", g_head.bone, g_head.calibrated ? 1 : 0, g_head.eyeUpAuto,
-        g_jump.lift, dag::visuallift::Mode(), g_jump.seq, (unsigned)now);
+        g_jump.lift, dag::visuallift::Mode(), g_jump.seq, g_lua.animRate, dag::animrate::State(), (unsigned)now);
     WriteSmallFile(L"native-pov-status.txt", line, len);
 }
 
@@ -1033,6 +1040,7 @@ void OnFrame(void* gameplayCam)
     dag::visuallift::SetVisual((g_lua.on && g_lua.active) ? g_lua.visual : 0);
     dag::visuallift::SetLift(g_jump.lift);
     dag::visuallift::Refresh();
+    dag::animrate::Set(g_lua.animInst, g_lua.animRate);
     if (!g_lua.on) g_status.applied = false;
     WriteStatus();
 }

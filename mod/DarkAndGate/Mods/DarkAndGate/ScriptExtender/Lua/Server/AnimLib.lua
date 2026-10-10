@@ -25,7 +25,7 @@ local M = {}
 
 local SPAWNED_PATH = "DarkAndGate/animlib-spawned.txt"
 local MAX_COPIES = 25
-local SPACING = 1.5
+local SPACING = 2.0   -- 2026-10-09 playtest: 1.5 m felt a bit tight
 local AHEAD = 4.0
 local PER_ROW = 5
 
@@ -278,6 +278,20 @@ function M.Register()
         local ok, msg = pcall(Ext.Json.Parse, payload)
         if not ok then return end
         ServerNet.EnqueueOsi(function() onSpawn(msg, userId) end)
+    end)
+    -- Name each copy after the clip it plays (so the world shows which is
+    -- which). Osi.SetStoryDisplayName is tried; its result is logged once.
+    local nameLogged = false
+    Ext.RegisterNetListener(Net.Channels.AnimLibName, function(_, payload)
+        local ok, msg = pcall(Ext.Json.Parse, payload)
+        if not ok or not msg or not copies[msg.uuid] then return end
+        ServerNet.EnqueueOsi(function()
+            local okN, err = pcall(function() Osi.SetStoryDisplayName(msg.uuid, tostring(msg.name)) end)
+            if not nameLogged then
+                nameLogged = true
+                Log.Write("AnimLib: rename copies via Osi.SetStoryDisplayName " .. (okN and "ok" or ("failed: " .. tostring(err))))
+            end
+        end)
     end)
     Ext.RegisterNetListener(Net.Channels.AnimLibClear, function(_, payload)
         local ok, msg = pcall(Ext.Json.Parse, payload)
