@@ -135,7 +135,12 @@ return {
         resume_skip_s = 0.25,
     },
     prepare = {
-        enabled          = false,
+        -- 2026-10-10: back ON through BG3's own spell animation event (no
+        -- rooting; GenomeEvents.lua). guard_rate / release_guard_s: fast-
+        -- forward of the engine's prepare/loop right after release.
+        enabled          = true,
+        guard_rate       = 20.0,
+        release_guard_s  = 1.5,
         loop_fallback    = nil,
         refresh_margin_s = 0.05,
         unknown_dur_s    = 1.0,

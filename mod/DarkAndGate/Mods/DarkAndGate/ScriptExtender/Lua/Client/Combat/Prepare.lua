@@ -1,28 +1,30 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
--- Spell prepare loop while a hotbar spell is armed (arm-then-cast).
+-- Spell channel animation (docs/spikes/spell-anims.md, spell-anims-native.md).
 --
--- Arming a spell (Hotbar.PressSlot) plays that spell's own prepare clip on
--- the player, then keeps its loop clip going until LMB casts or RMB / the
--- same key cancels. Cancel stops our clip on the server ("__stop__"), which
--- returns the body to idle or locomotion; a cast hands over to the engine's
--- own cast animation (the server clears our clip before UseSpell).
+-- Arming a spell (Hotbar.PressSlot) starts the channel: the spell's own
+-- PREPARE plays, stretched to exactly the cast time (per-clip play rate in
+-- the DLL, so the legs aren't sped up), then its LOOP holds until LMB
+-- releases (Spells.Cast -> server UseSpell plays CAST + RECOVER) or RMB /
+-- the same key cancels.
 --
--- Clip ids come from the spell's stats, SpellAnimation (9 slots of
--- "mappingId,,"; slot 0 = prepare, slot 1 = prepare loop, slot 2 = cast).
--- Every slot is logged once per spell ("Prepare: <spell> SpellAnimation ...")
--- so the slot order can be checked against what plays. Durations come from
--- the player's own AnimationSet (mapping id -> Animation resource).
+-- Path (2026-10-10, developer's choice): BG3's own spell animation event to
+-- the animation blueprint (GenomeEvents.lua), not Osi.PlayAnimation, so
+-- nothing roots the character: WASD (70% / 100%) and the jump keep working.
+-- Full body: while walking the legs hold the cast pose (accepted).
+-- Release guard: for release_guard_s after LMB, the spell's prepare / loop
+-- clips are fast-forwarded (x guard_rate) in case the engine's UseSpell
+-- replays them; logged by the DLL as "RATE: clip rates ...".
 --
--- The prepare loop is an action (Client/Combat/Actions.lua): armed in the
--- air, it suspends the jump clips like a swing does.
---
--- Commands: !dag_prepare_anims on|off, !dag_prepare_info <spell>.
+-- The channel is an action (Actions.lua): the jump clips wait for it.
+-- Commands: !dag_prepare_anims on|off.
 
-local Log       = Ext.Require("Shared/Log.lua")
-local ClientNet = Ext.Require("Client/Net.lua")
-local Actions   = Ext.Require("Client/Combat/Actions.lua")
-local movement  = Ext.Require("data/movement.lua")
-local Jump      = Ext.Require("Client/Movement/Jump.lua")
+local Log          = Ext.Require("Shared/Log.lua")
+local Actions      = Ext.Require("Client/Combat/Actions.lua")
+local State        = Ext.Require("Client/Combat/State.lua")
+local FullPov      = Ext.Require("FullPov.lua")
+local SpellAnims   = Ext.Require("Client/Combat/SpellAnims.lua")
+local GenomeEvents = Ext.Require("Client/Combat/GenomeEvents.lua")
+local movement     = Ext.Require("data/movement.lua")
 
 local M = {}
 
@@ -36,208 +38,82 @@ local function player()
     return ok and ents and ents[1] or nil
 end
 
-local function isGuid(x)
-    return type(x) == "string" and x:match("^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$") ~= nil
+local function instAddr(ent)
+    local ok, inst = pcall(function() return ent.AnimationBlueprint.Instance end)
+    return ok and inst and FullPov.AddrOf(inst) or nil
 end
 
--- First GUID in a value that may be a string, an array or nested arrays.
-local function firstGuid(v, depth)
-    depth = depth or 0
-    if v == nil or depth > 3 then return nil end
-    if type(v) == "string" then
-        for part in v:gmatch("[^,;%s]+") do if isGuid(part) then return part end end
-        return nil
-    end
-    local okI, r = pcall(function()
-        for _, x in ipairs(v) do
-            local g = firstGuid(x, depth + 1)
-            if g then return g end
-        end
-        return nil
-    end)
-    if okI and r then return r end
-    local okS, str = pcall(tostring, v)
-    if okS and str then
-        for part in str:gmatch("[^,;%s%[%]\"]+") do if isGuid(part) then return part end end
-    end
-    return nil
-end
-
--- slots[0..8] = first mapping id of each SpellAnimation slot (or nil).
-local function spellSlots(spell)
-    local slots, src = {}, nil
-    -- 1) The stat entry's SpellAnimation (string "id,,;id,,;..." or a table).
-    local okS, st = pcall(Ext.Stats.Get, spell)
-    if okS and st then
-        local okA, raw = pcall(function() return st.SpellAnimation end)
-        if okA and raw ~= nil then
-            if type(raw) == "string" then
-                local i = 0
-                for group in (raw .. ";"):gmatch("([^;]*);") do
-                    slots[i] = firstGuid(group); i = i + 1
-                end
-                src = "stats string"
-            else
-                pcall(function()
-                    for i, group in ipairs(raw) do slots[i - 1] = firstGuid(group) end
-                end)
-                src = "stats table"
-            end
-        end
-    end
-    -- 2) The cached spell prototype (Part0..Part8).
-    local any = false
-    for i = 0, 8 do if slots[i] then any = true end end
-    if not any then
-        local okC, proto = pcall(Ext.Stats.GetCachedSpell, spell)
-        if okC and proto then
-            pcall(function()
-                local a = proto.SpellAnimation
-                for i = 0, 8 do slots[i] = firstGuid(a["Part" .. i]) end
-            end)
-            src = "spell prototype"
-        end
-    end
-    return slots, src or "none"
-end
-
--- Mapping id -> clip length for the player (first AnimationSet that maps it).
-local durCache = {}
-local function clipDur(ent, mapping)
-    if not mapping then return nil end
-    if durCache[mapping] ~= nil then return durCache[mapping] or nil end
-    local d = false
-    pcall(function()
-        for _, e in ipairs(ent.AnimationSet.Entries) do
-            local okR, res = pcall(Ext.Resource.Get, tostring(e.Resource), "AnimationSet")
-            if okR and res then
-                for _, sub in pairs(res.AnimationBank.AnimationSubSets) do
-                    local okD, desc = pcall(function() return sub.Animation[mapping] end)
-                    if okD and desc then
-                        local okA, ar = pcall(Ext.Resource.Get, tostring(desc.ID), "Animation")
-                        if okA and ar then d = tonumber(ar.Duration) or false end
-                        if d then return end
-                    end
-                end
-            end
-            if d then return end
-        end
-    end)
-    durCache[mapping] = d
-    return d or nil
-end
-
-local info = {}   -- spell -> { prepare = {key,dur}, loop = {key,dur} } | false
-local function infoFor(spell, ent)
-    if info[spell] ~= nil then return info[spell] or nil end
-    local slots, src = spellSlots(spell)
-    local parts = {}
-    for i = 0, 8 do parts[#parts + 1] = string.format("%d=%s", i, slots[i] or "-") end
-    Log.Write(string.format("Prepare: %s SpellAnimation (%s) %s", spell, src, table.concat(parts, " ")))
-    local r = {}
-    if slots[0] then r.prepare = { key = slots[0], dur = clipDur(ent, slots[0]) } end
-    if slots[1] then r.loop = { key = slots[1], dur = clipDur(ent, slots[1]), from = "spell" } end
-    if not r.loop and P.loop_fallback then
-        r.loop = { key = P.loop_fallback, dur = clipDur(ent, P.loop_fallback), from = "data fallback" }
-    end
-    Log.Write(string.format("Prepare: %s prepare=%s (%s) loop=%s (%s, %s)", spell,
-        r.prepare and r.prepare.key or "none", r.prepare and r.prepare.dur and string.format("%.2fs", r.prepare.dur) or "?",
-        r.loop and r.loop.key or "none", r.loop and r.loop.dur and string.format("%.2fs", r.loop.dur) or "?",
-        r.loop and r.loop.from or "hold after prepare"))
-    if not r.prepare and not r.loop then r = false end
-    info[spell] = r
-    return r or nil
-end
-
-local cur = nil   -- { spell, i, phase, nextAt, t0, loops }
-
-local function playClip(c, label)
-    ClientNet.PlayAnim(c.key, c.dur)
-    if cur then cur.phase = label end
-end
+local cur = nil      -- { spell, anims, t0, castTime, ready, inst }
+local guardUntil, guardInst = nil, nil
 
 function M.Start(spell)
     if cur then M.Stop("re-arm") end
     if not enabled then return end
     local me = player()
     if not me then return end
-    local i = infoFor(spell, me)
-    if not i then
-        Log.Write("Prepare: " .. spell .. " has no prepare / loop clip -- nothing plays while armed")
-        return
-    end
-    local t = nowMs()
-    cur = { spell = spell, i = i, t0 = t, loops = 0 }
+    local anims = SpellAnims.For(spell, me)
+    if not anims then return end
+    local castTime = State.armedCastTime or 2.0
+    cur = { spell = spell, anims = anims, t0 = nowMs(), castTime = castTime, inst = instAddr(me) }
     Actions.Hold("prepare")
-    -- 2026-10-10: armed in the air while moving, the clip (an Osiris
-    -- PlayAnimation task) stopped the walk and the jump lost its momentum.
-    -- Keep the momentum: the clip starts when the jump lands.
-    if Jump.AirborneMoving() then
-        cur.deferred = true
-        Log.Write("Prepare: " .. spell .. " armed in the air while moving -- animation waits for the landing (momentum kept)")
-        return
-    end
-    local first = i.prepare or i.loop
-    playClip(first, i.prepare and "prepare" or "loop")
-    local d = first.dur or P.unknown_dur_s
-    cur.nextAt = t + math.max(0.1, d - P.refresh_margin_s) * 1000
-    Log.Write(string.format("Prepare: start %s -> %s %s (%s)", spell, cur.phase, first.key,
-        first.dur and string.format("%.2fs", first.dur) or string.format("length unknown, assuming %.2fs", d)))
+    -- Stretch the prepare to exactly the cast time.
+    local prep = anims.prepare
+    local rate = (prep and prep.dur and prep.dur > 0) and (prep.dur / castTime) or 1.0
+    if prep and cur.inst then FullPov.SetClipRates(cur.inst, { [prep.key] = rate }) end
+    local ok, how = GenomeEvents.PlaySpell(me, anims)
+    Log.Write(string.format("Prepare: start %s via %s -> prepare %s (%.2fs clip at x%.2f = %.2fs cast time), loop %s, rig %s%s",
+        spell, ok and how or ("FAILED: " .. tostring(how)), prep and prep.file or "none", prep and prep.dur or 0, rate, castTime,
+        anims.loop and anims.loop.file or "none", anims.rig, anims.fallback and " [fallback anims]" or ""))
 end
 
--- reason: "cast" (the engine's cast clip takes over), "cancel-rmb",
--- "cancel-key", "re-arm".
+-- reason: "cast" (release), "cancel-rmb", "cancel-key", "cast aborted", "re-arm".
 function M.Stop(reason)
     if not cur then return end
     local c = cur
     cur = nil
-    if reason ~= "cast" and reason ~= "re-arm" then ClientNet.PlayAnim("__stop__") end
+    local me = player()
+    if reason == "cast" then
+        -- Guard: fast-forward the engine's own prepare / loop if UseSpell
+        -- replays them; the cast and recover play at normal speed.
+        local g = {}
+        if c.anims.prepare then g[c.anims.prepare.key] = P.guard_rate end
+        if c.anims.loop then g[c.anims.loop.key] = P.guard_rate end
+        if c.inst then FullPov.SetClipRates(c.inst, g) end
+        guardUntil, guardInst = nowMs() + P.release_guard_s * 1000, c.inst
+    else
+        if c.inst then FullPov.SetClipRates(c.inst, nil) end
+        if reason ~= "re-arm" and me then
+            local ok, how = GenomeEvents.Cancel(me)
+            Log.Write("Prepare: cancel via " .. (ok and how or ("none (" .. tostring(how) .. ")")))
+        end
+    end
     Actions.Release("prepare")
-    Log.Write(string.format("Prepare: stop %s (%s) after %.2fs, %d loop plays", c.spell, reason,
-        (nowMs() - c.t0) / 1000, c.loops))
+    Log.Write(string.format("Prepare: stop %s (%s) after %.2fs%s", c.spell, reason, (nowMs() - c.t0) / 1000,
+        c.ready and " (was READY)" or ""))
 end
 
 function M.Active() return cur ~= nil end
 
 local function tick()
-    if cur and cur.deferred and not Jump.Airborne() then
-        cur.deferred = false
-        local i = cur.i
-        local first = i.prepare or i.loop
-        playClip(first, i.prepare and "prepare" or "loop")
-        local d = first.dur or P.unknown_dur_s
-        cur.nextAt = nowMs() + math.max(0.1, d - P.refresh_margin_s) * 1000
-        Log.Write("Prepare: " .. cur.spell .. " landed -> " .. cur.phase .. " " .. first.key)
+    if guardUntil and nowMs() >= guardUntil then
+        guardUntil = nil
+        if guardInst then FullPov.SetClipRates(guardInst, nil) end
+        Log.Write("Prepare: release guard over (clip rates cleared)")
     end
-    if not cur or not cur.nextAt then return end
-    local t = nowMs()
-    if t < cur.nextAt then return end
-    local l = cur.i.loop
-    if not l then
-        cur.nextAt = nil
-        Log.Write("Prepare: " .. cur.spell .. " holds after the prepare clip (no loop clip)")
-        return
+    if cur and not cur.ready and nowMs() - cur.t0 >= cur.castTime * 1000 then
+        cur.ready = true
+        Log.Write(string.format("Prepare: %s READY after %.2fs -> loop %s", cur.spell, (nowMs() - cur.t0) / 1000,
+            cur.anims.loop and cur.anims.loop.file or "none"))
     end
-    playClip(l, "loop")
-    cur.loops = cur.loops + 1
-    if cur.loops == 1 then
-        Log.Write(string.format("Prepare: %s loop %s (%s)", cur.spell, l.key, l.dur and string.format("%.2fs", l.dur) or "?"))
-    end
-    cur.nextAt = t + math.max(0.1, (l.dur or P.unknown_dur_s) - P.refresh_margin_s) * 1000
 end
 
 function M.Register()
     Ext.Events.Tick:Subscribe(function() pcall(tick) end)
+    GenomeEvents.Register()
     Ext.RegisterConsoleCommand("dag_prepare_anims", function(_, a)
         if a == "off" or a == "0" then enabled = false; M.Stop("cancel-key")
         elseif a == "on" or a == "1" then enabled = true end
-        Log.Write("Prepare: spell prepare loop " .. (enabled and "ON" or "OFF"))
-    end)
-    Ext.RegisterConsoleCommand("dag_prepare_info", function(_, spell)
-        spell = spell or "Projectile_FireBolt"
-        info[spell] = nil
-        local me = player()
-        if me then infoFor(spell, me) end
+        Log.Write("Prepare: spell channel animation " .. (enabled and "ON" or "OFF"))
     end)
 end
 
