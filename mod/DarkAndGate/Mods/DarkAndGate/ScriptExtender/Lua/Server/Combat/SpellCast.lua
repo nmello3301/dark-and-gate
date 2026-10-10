@@ -100,6 +100,7 @@ function M.Register()
                 local sheathing = okS and st and tostring(st.Sheathing or "") or ""
                 local U = spells.spell_anims and spells.spell_anims.unsheath or {}
                 local action = U[sheathing ~= "" and sheathing or "default"] or U.default or "none"
+                if U.enabled == false then return end
                 local res = "skipped"
                 if action == "unsheath" or action == "sheath" then
                     local okO, err = pcall(Osi.SetWeaponUnsheathed, caster, action == "unsheath" and 1 or 0, U.immediate and 1 or 0)

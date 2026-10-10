@@ -55,12 +55,14 @@ return {
         -- sound playing on it at that instant).
         fx = { effect = true, sounds = true, stop_sounds = true },
         -- Weapon stance on arm, by the spell's Sheathing stat (empty =
-        -- "default"). Vanilla Fire Bolt (no Sheathing) draws the staff, and
-        -- the prepare clip comes from the drawn weapon's animation set.
+        -- "default"). OFF (2026-10-10 playtest): vanilla Fire Bolt does NOT
+        -- draw the staff (hand gestures only), so the stance was not why our
+        -- prepare looked different.
         -- immediate: no draw animation (it would compete with the prepare).
         -- wait_s: the client holds the prepare event up to this long until
         -- the weapon is out, so the right clip is picked.
         unsheath = {
+            enabled = false,
             default = "unsheath", Melee = "unsheath", Somatic = "unsheath", WeaponSet = "unsheath",
             Sheathed = "sheath", DontChange = "none", Ranged = "none", Instrument = "none",
             immediate = true, wait_s = 0.4,

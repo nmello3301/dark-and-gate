@@ -66,3 +66,5 @@ Playtest: the replayed select event animated Gale, but not with the same prepare
 - **Fix:** on `SpellArm` the server calls `Osi.SetWeaponUnsheathed(char, 1, immediate)`, the 3-arg builtin the game's own story uses (`_CRIME_CrimeTriggers`, `GLO_Camp`). The choice follows the spell's `Sheathing` stat; the map is in `data/spells.lua` `spell_anims.unsheath`.
 - The client holds the select event for up to `wait_s` until `ent.Unsheath.State` leaves `Sheathed`. It then stretches the prepare over the rest of the cast time.
 - `!dag_spell_anims <spell>` now lists every clip an id maps to in each set / subset, plus the current stance. Our duration still comes from the first match, so the stretch can be slightly off until the staff clip is identified.
+
+**Result (playtest, 2026-10-10): wrong.** Vanilla doesn't draw the staff; Gale does hand gestures with the fire. Our version still shows a different animation even with the staff drawn. The draw is now off (`unsheath.enabled = false`, the code is kept). Next: record vanilla and ours in the same session (`!dag_anim_record` gives the graph node, its class and the mapping id) and compare.

@@ -61,6 +61,7 @@ end
 
 local function wantsDrawn(spell)
     local U = spells.spell_anims and spells.spell_anims.unsheath or {}
+    if U.enabled == false then return false, 0 end
     local okS, st = pcall(Ext.Stats.Get, spell)
     local sh = okS and st and tostring(st.Sheathing or "") or ""
     return (U[sh ~= "" and sh or "default"] or U.default) == "unsheath", U.wait_s or 0
