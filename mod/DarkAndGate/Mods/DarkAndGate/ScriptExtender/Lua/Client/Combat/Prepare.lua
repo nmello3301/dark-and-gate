@@ -28,6 +28,7 @@ local SpellAnims   = Ext.Require("Client/Combat/SpellAnims.lua")
 local GenomeEvents = Ext.Require("Client/Combat/GenomeEvents.lua")
 local SpellFx      = Ext.Require("Client/Combat/SpellFx.lua")
 local movement     = Ext.Require("data/movement.lua")
+local spells       = Ext.Require("data/spells.lua")
 
 local M = {}
 
@@ -49,6 +50,39 @@ end
 local cur = nil      -- { spell, anims, t0, castTime, ready, inst }
 local guardUntil, guardInst = nil, nil
 
+-- Weapon stance the arm asks the server for (data spell_anims.unsheath,
+-- Server/Combat/SpellCast.lua): true when the prepare must wait for the
+-- weapon to come out.
+local function stance(ent)
+    local ok, st = pcall(function() return ent.Unsheath.State end)
+    local s = ok and tostring(st) or "?"
+    return (s == "3") and "Sheathed" or s   -- StatsUnsheathState 3 = Sheathed
+end
+
+local function wantsDrawn(spell)
+    local U = spells.spell_anims and spells.spell_anims.unsheath or {}
+    local okS, st = pcall(Ext.Stats.Get, spell)
+    local sh = okS and st and tostring(st.Sheathing or "") or ""
+    return (U[sh ~= "" and sh or "default"] or U.default) == "unsheath", U.wait_s or 0
+end
+
+-- Send the select event (prepare, then the held loop), stretching the
+-- prepare over what is left of the cast time.
+local function begin(me)
+    local c = cur
+    c.begun = true
+    local left = math.max(c.castTime - (nowMs() - c.t0) / 1000, 0.1)
+    local prep = c.anims.prepare
+    local rate = (prep and prep.dur and prep.dur > 0) and (prep.dur / left) or 1.0
+    if prep and c.inst then FullPov.SetClipRates(c.inst, { [prep.key] = rate }) end
+    local ok, how = GenomeEvents.PlaySpell(me, c.anims)
+    Log.Write(string.format("Prepare: start %s via %s (stance %s after %.2fs) -> prepare %s (%.2fs clip at x%.2f = %.2fs left of %.2fs), loop %s, rig %s%s",
+        c.spell, ok and how or ("FAILED: " .. tostring(how)), stance(me), (nowMs() - c.t0) / 1000, prep and prep.file or "none",
+        prep and prep.dur or 0, rate, left, c.castTime, c.anims.loop and c.anims.loop.file or "none", c.anims.rig,
+        c.anims.fallback and " [fallback anims]" or ""))
+    SpellFx.Start(c.spell, me)
+end
+
 function M.Start(spell)
     if cur then M.Stop("re-arm") end
     if not enabled then return end
@@ -59,15 +93,14 @@ function M.Start(spell)
     local castTime = State.armedCastTime or 2.0
     cur = { spell = spell, anims = anims, t0 = nowMs(), castTime = castTime, inst = instAddr(me) }
     Actions.Hold("prepare")
-    -- Stretch the prepare to exactly the cast time.
-    local prep = anims.prepare
-    local rate = (prep and prep.dur and prep.dur > 0) and (prep.dur / castTime) or 1.0
-    if prep and cur.inst then FullPov.SetClipRates(cur.inst, { [prep.key] = rate }) end
-    local ok, how = GenomeEvents.PlaySpell(me, anims)
-    Log.Write(string.format("Prepare: start %s via %s -> prepare %s (%.2fs clip at x%.2f = %.2fs cast time), loop %s, rig %s%s",
-        spell, ok and how or ("FAILED: " .. tostring(how)), prep and prep.file or "none", prep and prep.dur or 0, rate, castTime,
-        anims.loop and anims.loop.file or "none", anims.rig, anims.fallback and " [fallback anims]" or ""))
-    SpellFx.Start(spell, me)
+    local drawn, wait = wantsDrawn(spell)
+    local st = stance(me)
+    if drawn and st == "Sheathed" and wait > 0 then
+        cur.waitUntil = cur.t0 + wait * 1000
+        Log.Write(string.format("Prepare: %s waits up to %.2fs for the weapon (stance %s)", spell, wait, st))
+    else
+        begin(me)
+    end
 end
 
 -- reason: "cast" (release), "cancel-rmb", "cancel-key", "cast aborted", "re-arm".
@@ -76,7 +109,7 @@ function M.Stop(reason)
     local c = cur
     cur = nil
     local me = player()
-    SpellFx.Stop(reason)
+    if c.begun then SpellFx.Stop(reason) end
     if reason == "cast" then
         -- Guard: fast-forward the engine's own prepare / loop if UseSpell
         -- replays them; the cast and recover play at normal speed.
@@ -87,7 +120,7 @@ function M.Stop(reason)
         guardUntil, guardInst = nowMs() + P.release_guard_s * 1000, c.inst
     else
         if c.inst then FullPov.SetClipRates(c.inst, nil) end
-        if reason ~= "re-arm" and me then
+        if reason ~= "re-arm" and me and c.begun then
             local ok, how = GenomeEvents.Cancel(me, c.anims)
             Log.Write("Prepare: cancel via " .. (ok and how or ("none (" .. tostring(how) .. ")")))
         end
@@ -104,6 +137,10 @@ local function tick()
         guardUntil = nil
         if guardInst then FullPov.SetClipRates(guardInst, nil) end
         Log.Write("Prepare: release guard over (clip rates cleared)")
+    end
+    if cur and not cur.begun then
+        local me = player()
+        if me and (stance(me) ~= "Sheathed" or nowMs() >= cur.waitUntil) then begin(me) end
     end
     if cur and not cur.ready and nowMs() - cur.t0 >= cur.castTime * 1000 then
         cur.ready = true

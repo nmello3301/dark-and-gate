@@ -118,6 +118,29 @@ local function resolver(ent)
     end, #sets
 end
 
+-- Every clip `id` maps to, per animation set / subset (diagnostic: the
+-- blueprint picks the one of the ACTIVE subset, which follows the weapon).
+function M.AllMatches(ent, id)
+    local out = {}
+    pcall(function()
+        for _, e in ipairs(ent.AnimationSet.Entries) do
+            local okR, res = pcall(Ext.Resource.Get, tostring(e.Resource), "AnimationSet")
+            if okR and res then
+                for subKey, sub in pairs(res.AnimationBank.AnimationSubSets) do
+                    local okD, desc = pcall(function() return sub.Animation[id] end)
+                    if okD and desc then
+                        local okA, ar = pcall(Ext.Resource.Get, tostring(desc.ID), "Animation")
+                        local f = (okA and ar) and tostring(ar.SourceFile or ""):gsub("^.*[/\\]", ""):gsub("%.[Gg][Rr]2$", "") or "?"
+                        out[#out + 1] = string.format("%s/%s: %s (%.2fs)", tostring(e.Resource):sub(1, 8), tostring(subKey), f,
+                            (okA and ar) and tonumber(ar.Duration) or 0)
+                    end
+                end
+            end
+        end
+    end)
+    return out
+end
+
 local memo = {}   -- spell .. "|" .. entity -> result
 
 function M.For(spell, ent)
@@ -173,6 +196,17 @@ function M.Register()
         local raw = {}
         for i = 0, 8 do raw[#raw + 1] = string.format("%d=%s", i, slots[i] and slots[i]:sub(1, 8) or "-") end
         Log.Write(string.format("SpellAnims: %s slots %s\n    %s", spell, table.concat(raw, " "), M.Describe(a)))
+        for _, ph in ipairs(PHASES) do
+            local id = slots[M.SLOTS[ph]]
+            if id then
+                Log.Write(string.format("SpellAnims: %s %s %s in every set:\n    %s", spell, ph, id:sub(1, 8),
+                    table.concat(M.AllMatches(ent, id), "\n    ")))
+            end
+        end
+        pcall(function()
+            Log.Write(string.format("SpellAnims: stance %s, weapon set %s", tostring(ent.Unsheath.State),
+                tostring(ent.WeaponSet and ent.WeaponSet.WeaponSet)))
+        end)
     end)
 end
 

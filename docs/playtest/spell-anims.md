@@ -4,16 +4,6 @@ Console: `client` first, then the commands. Logs: client.log / server.log, `Scri
 
 How it plays: arming a spell replays BG3's own **select** event with that spell's prepare and loop clips. The prepare is stretched to the cast time, then the loop holds. LMB lets the engine play cast → recover. Cancel replays BG3's **cancel** event with the spell's un-prepare clip. Layouts were captured from your vanilla Fire Bolt ([genome-capture.md](../spikes/genome-capture.md)).
 
-## 0. Vanilla effect reference (normal camera, POV off)
-
-1. Run `!dag_spell_fx_watch on`.
-   - Expect `SpellFx: watch ON …`.
-2. Select **Fire Bolt** from the vanilla hotbar, hold about 2 s, then right-click cancel.
-3. Select it again and cast it at a goblin or the ground. Wait 3 s.
-4. Run `!dag_spell_fx_watch off`.
-   - Expect `SpellFx watch: +0x… c88e9cfa-… (Projectile_FireBolt.PrepareEffect) src=… bones=…` at select.
-   - Expect a matching `-0x… after N s` at cancel and again at cast.
-
 ## 1. Resolution
 
 Run `!dag_spell_anims Projectile_FireBolt`, then `Projectile_Fireball`, then `Target_MistyStep`.
@@ -21,6 +11,8 @@ Run `!dag_spell_anims Projectile_FireBolt`, then `Projectile_Fireball`, then `Ta
 - Expect `SpellAnims: <spell> rig=HUM_M sets=… prepare ok / loop ok / cast ok / recover ok`.
 - Then a slots line with `6=eadedcce` (Fire Bolt), and `prepare=3ff87abf… HUM_M_Rig_VIO_SPL_Bard_01_Prepare (2.13s)`.
 - Misty Step lists its own clips.
+- For each phase, expect `SpellAnims: Projectile_FireBolt prepare 3ff87abf in every set:` followed by one line per set / subset (clip name and length). Expect one for the staff.
+- Expect `SpellAnims: stance …, weapon set …`.
 
 ## 2. Arm Fire Bolt standing (`!dag_full_pov on`, key 1)
 
@@ -28,15 +20,16 @@ Run `!dag_spell_anims Projectile_FireBolt`, then `Projectile_Fireball`, then `Ta
 
 | Expect | Log |
 | --- | --- |
-| Prepare plays, filling exactly 2.0 s | `Prepare: start Projectile_FireBolt via select event to 0x… -> prepare HUM_M_Rig_VIO_SPL_Bard_01_Prepare (2.13s clip at x1.07 = 2.00s cast time), loop …` |
-| | native.log: `RATE: clip rates on …: 3ff87abf-…:1.065 (1 ids)` |
+| Gale draws the staff (no draw animation), server log | `SpellCast: arm Projectile_FireBolt Sheathing=(default) -> unsheath (ok)` |
+| The prepare waits for the staff | `Prepare: Projectile_FireBolt waits up to 0.40s for the weapon (stance Sheathed)` (only when sheathed) |
+| Prepare plays, filling exactly 2.0 s | `Prepare: start Projectile_FireBolt via select event to 0x… (stance Melee after 0.0xs) -> prepare … (… = 1.9xs left of 2.00s), loop …` |
+| | native.log: `RATE: clip rates on …: 3ff87abf-…:1.0x (1 ids)` |
 | Loop at READY | `Prepare: Projectile_FireBolt READY after 2.0xs -> loop …` |
 | LMB: cast → fires → recover → idle | `Prepare: stop Projectile_FireBolt (cast) … (was READY)`; server `SpellCast: CAST …`; then `Prepare: release guard over` |
-
 | Hand fire + prepare sound, then the loop sound | `SpellFx: start Projectile_FireBolt: effect c88e9cfa -> 0x…, sound Spell_Prepare_… -> true, sound …_Loop -> true` |
 | Fire and loop sound end at LMB; vanilla cast fire / sound play | `SpellFx: stop Projectile_FireBolt (cast) effect destroyed true, sounds stopped ok` |
 
-Tell me: does Gale play the Fire Bolt prepare and then the loop? Does the prepare end right as READY shows? Is there a second prepare after LMB? Are the hand fire and the sounds there, and do they look and sound like vanilla?
+Tell me: is it now the same prepare as vanilla (staff in hand)? Does Gale play the Fire Bolt prepare and then the loop? Does the prepare end right as READY shows? Is there a second prepare after LMB? Are the hand fire and the sounds there, and do they look and sound like vanilla?
 
 ## 3. Same while walking and running
 

@@ -54,6 +54,17 @@ return {
         -- the sounds on the caster's sound object (also cuts any other
         -- sound playing on it at that instant).
         fx = { effect = true, sounds = true, stop_sounds = true },
+        -- Weapon stance on arm, by the spell's Sheathing stat (empty =
+        -- "default"). Vanilla Fire Bolt (no Sheathing) draws the staff, and
+        -- the prepare clip comes from the drawn weapon's animation set.
+        -- immediate: no draw animation (it would compete with the prepare).
+        -- wait_s: the client holds the prepare event up to this long until
+        -- the weapon is out, so the right clip is picked.
+        unsheath = {
+            default = "unsheath", Melee = "unsheath", Somatic = "unsheath", WeaponSet = "unsheath",
+            Sheathed = "sheath", DontChange = "none", Ranged = "none", Instrument = "none",
+            immediate = true, wait_s = 0.4,
+        },
         cast_rate = 1.0,           -- play rate of the cast clip (per spell: spells[id].cast_rate)
         fire_point = "cast_start", -- "cast_start" | "cast_event" (text-key, when found)
     },

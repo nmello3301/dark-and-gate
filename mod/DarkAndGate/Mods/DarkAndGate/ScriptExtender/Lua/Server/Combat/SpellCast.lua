@@ -87,6 +87,26 @@ function M.Register()
             local ct = tonumber(p.castTime)
             if ct then ct = math.max(ct, spells.min_cast_s or 0.3) end
             armed[userId] = { spell = p.spell, at = nowMs(), castTime = ct }
+            -- Weapon stance like vanilla targeting: the prepare clip resolves
+            -- in the active animation set, which follows the drawn weapon
+            -- (vanilla Fire Bolt draws Gale's staff on select). Osiris
+            -- SetWeaponUnsheathed(char, enable, immediate), as the game's own
+            -- story uses it (_CRIME_CrimeTriggers, GLO_Camp).
+            local spell = p.spell
+            ServerNet.EnqueueOsi(function()
+                local caster = ServerNet.UserToCharacter(userId)
+                if not caster then return end
+                local okS, st = pcall(Ext.Stats.Get, spell)
+                local sheathing = okS and st and tostring(st.Sheathing or "") or ""
+                local U = spells.spell_anims and spells.spell_anims.unsheath or {}
+                local action = U[sheathing ~= "" and sheathing or "default"] or U.default or "none"
+                local res = "skipped"
+                if action == "unsheath" or action == "sheath" then
+                    local okO, err = pcall(Osi.SetWeaponUnsheathed, caster, action == "unsheath" and 1 or 0, U.immediate and 1 or 0)
+                    res = okO and "ok" or ("ERROR " .. tostring(err))
+                end
+                Log.Write(string.format("SpellCast: arm %s Sheathing=%s -> %s (%s)", spell, sheathing ~= "" and sheathing or "(default)", action, res))
+            end)
         else
             armed[userId] = nil
         end

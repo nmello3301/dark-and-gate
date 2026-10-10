@@ -30,3 +30,7 @@ Replaying BG3's select event (`e8545375…`) plays Gale's prepare / loop animati
 ## Vanilla reference (`!dag_spell_fx_watch on`)
 
 The watcher is read-only. It logs every client effect handler the game creates or removes whose source, target or provider is the player, with its full init info, and names it when it matches a known spell's Prepare / Cast / Target / Hit / Preview effect. Compare a vanilla select against ours; if they differ, the next build copies vanilla's fields.
+
+## Watcher result (2026-10-10)
+
+`!dag_spell_fx_watch` logged **nothing** during a vanilla select / cancel / cast. Vanilla's prepare effect is therefore not a standalone `ClientEffectHandler` entity whose source, target or provider is the player. Our own `InitMultiEffect` does show the fire and plays the sounds (playtest). Not needed for now.

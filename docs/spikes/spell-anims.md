@@ -56,3 +56,13 @@ The client sends its effective time with `SpellArm`. The server floors it at `mi
 
 - stretch the prepare to exactly the cast time (rate = prepare duration / cast time) without speeding up the legs;
 - fast-forward the engine's own prepare / loop at release, so it isn't played twice.
+
+## Weapon stance (2026-10-10)
+
+Playtest: the replayed select event animated Gale, but not with the same prepare animation as vanilla.
+
+- The mapping id is the same, but the blueprint resolves it in the **active** animation subset, and that subset follows the drawn weapon.
+- The vanilla capture shows the stance change in the same frame as the select: `ad925ffc` with `Staff2H` / `Unarmed1H`, then `35ddd8c7`. Vanilla targeting draws Gale's staff, so the staff variant of the prepare plays. Our channel left him sheathed.
+- **Fix:** on `SpellArm` the server calls `Osi.SetWeaponUnsheathed(char, 1, immediate)`, the 3-arg builtin the game's own story uses (`_CRIME_CrimeTriggers`, `GLO_Camp`). The choice follows the spell's `Sheathing` stat; the map is in `data/spells.lua` `spell_anims.unsheath`.
+- The client holds the select event for up to `wait_s` until `ent.Unsheath.State` leaves `Sheathed`. It then stretches the prepare over the rest of the cast time.
+- `!dag_spell_anims <spell>` now lists every clip an id maps to in each set / subset, plus the current stance. Our duration still comes from the first match, so the stretch can be slightly off until the staff clip is identified.
