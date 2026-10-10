@@ -83,7 +83,10 @@ function M.Register()
         local ok, p = pcall(Ext.Json.Parse, payload)
         if not ok then return end
         if p.spell and p.spell ~= "" then
-            armed[userId] = { spell = p.spell, at = nowMs() }
+            -- The client's effective cast time (modifiers), floored at min_cast_s.
+            local ct = tonumber(p.castTime)
+            if ct then ct = math.max(ct, spells.min_cast_s or 0.3) end
+            armed[userId] = { spell = p.spell, at = nowMs(), castTime = ct }
         else
             armed[userId] = nil
         end
@@ -99,8 +102,9 @@ function M.Register()
         -- Cast time: the release must come cast_time_s after the arm.
         do
             local def0 = spells.spells[parsed.spell]
-            local need = ((def0 and def0.cast_time_s) or spells.cast_time_s or 0) - (spells.cast_time_tolerance_s or 0)
             local a = armed[userId]
+            local base = (a and a.castTime) or (def0 and (def0.base_cast_s or def0.cast_time_s)) or spells.base_cast_s or spells.cast_time_s or 0
+            local need = base - (spells.cast_time_tolerance_s or 0)
             local held = a and a.spell == parsed.spell and (nowMs() - a.at) / 1000 or nil
             if need > 0 and (not held or held < need) then
                 Log.Write(string.format("SpellCast: REJECTED %s released after %s s (cast time %.2f s)",

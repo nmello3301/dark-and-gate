@@ -38,4 +38,14 @@ long Hits();
 // to clip names (!dag_anim_record off). 0 = stop.
 void Record(uintptr_t instance);
 
+// Per-clip play rate (2026-10-10, spell channel): on `instance`, nodes whose
+// animation input (socket 0, a FixedString holding the mapping id) equals
+// one of `ids` play at the matching rate, on top of the character rate.
+// spec = "id:rate,id:rate" (mapping-id GUID strings), "" = none. Used to
+// stretch a spell's prepare to the cast time without touching the legs,
+// and to fast-forward the engine's own prepare/loop at release.
+void SetClipRates(uintptr_t instance, const char* spec);
+// Calls scaled by a clip rate since the spec was set.
+long ClipHits();
+
 }  // namespace dag::animrate

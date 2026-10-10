@@ -17,6 +17,7 @@ local Net    = Ext.Require("Shared/Net.lua")
 local State  = Ext.Require("Client/Combat/State.lua")
 local Aim    = Ext.Require("Client/Combat/Aim.lua")
 local spells = Ext.Require("data/spells.lua")
+local Spells = Ext.Require("Client/Combat/Spells.lua")
 
 local M = {}
 
@@ -139,7 +140,12 @@ local function render()
     local def = armedId and spells.spells[armedId] or nil
     updateAim(armedId, def)
     local parts = { string.format("Mana %d/%d", math.floor(State.mana.current), math.floor(State.mana.max)) }
-    if armedId then parts[#parts + 1] = "ARMED " .. ((def and def.label) or armedId) end
+    if armedId then
+        -- Channelled casting: CASTING <left> until the cast time is up, then READY.
+        local left = Spells.ReadyIn(armedId)
+        local name = (def and def.label) or armedId
+        parts[#parts + 1] = left > 0 and string.format("CASTING %s %.1fs", name, left) or ("READY " .. name)
+    end
     if aimText ~= "" then parts[#parts + 1] = aimText end
     local label = table.concat(parts, "  |  ")
     if label ~= lastLabel then

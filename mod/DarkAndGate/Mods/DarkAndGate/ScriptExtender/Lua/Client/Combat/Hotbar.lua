@@ -14,8 +14,8 @@ local Prepare = Ext.Require("Client/Combat/Prepare.lua")
 local Net       = Ext.Require("Shared/Net.lua")
 local ClientNet = Ext.Require("Client/Net.lua")
 
-local function sendArm(id)
-    ClientNet.Send(Net.Channels.SpellArm, { spell = id })
+local function sendArm(id, castTime)
+    ClientNet.Send(Net.Channels.SpellArm, { spell = id, castTime = castTime })
 end
 
 local M = {}
@@ -50,6 +50,7 @@ function M.PressSlot(slot)
     if State.armedSpell == id then
         State.armedSpell = nil
         State.armedAt = nil
+        State.armedCastTime = nil
         sendArm(nil)
         Log.Write("Hotbar: UNARMED " .. id .. " (same slot re-pressed)")
         Prepare.Stop("cancel-key")
@@ -59,7 +60,8 @@ function M.PressSlot(slot)
     -- time counting); LMB releases it once the cast time has passed.
     State.armedSpell = id
     State.armedAt = tonumber(Ext.Timer.MonotonicTime()) or 0
-    sendArm(id)
+    State.armedCastTime = Spells.CastTime(id)
+    sendArm(id, State.armedCastTime)
     Log.Write(string.format("Hotbar: CASTING slot %d = %s (release with LMB after %.1fs; RMB or same slot cancels)",
         slot, id, Spells.CastTime(id)))
     Prepare.Start(id)

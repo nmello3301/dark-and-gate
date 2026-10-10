@@ -99,15 +99,26 @@ function M.Cast(spellId)
     return true
 end
 
--- Channelled casting: seconds until the armed spell may be released
--- (0 = ready). armedAt comes from Hotbar.PressSlot.
+-- Channelled casting. Cast time = base (data/spells.lua base_cast_s, per
+-- spell override, or !dag_cast_time) x the product of the modifiers.
+local castMods = {}
+local baseOverride = nil
+function M.AddCastTimeModifier(id, fn) castMods[id] = fn; Log.Write("Spells: cast-time modifier added " .. tostring(id)) end
+function M.RemoveCastTimeModifier(id) castMods[id] = nil end
 function M.CastTime(spellId)
     local def = spells.spells[spellId]
-    return (def and def.cast_time_s) or spells.cast_time_s or 0
+    local t = baseOverride or (def and (def.base_cast_s or def.cast_time_s)) or spells.base_cast_s or spells.cast_time_s or 0
+    for id, fn in pairs(castMods) do
+        local ok, f = pcall(fn, spellId)
+        if ok and type(f) == "number" and f > 0 then t = t * f end
+    end
+    return t
 end
+-- Seconds until the armed spell may be released (0 = ready). armedAt
+-- comes from Hotbar.PressSlot; the cast time is fixed at arm time.
 function M.ReadyIn(spellId)
     if not State.armedAt then return 0 end
-    local left = M.CastTime(spellId) - (nowMs() - State.armedAt) / 1000
+    local left = (State.armedCastTime or M.CastTime(spellId)) - (nowMs() - State.armedAt) / 1000
     return left > 0 and left or 0
 end
 
@@ -130,6 +141,12 @@ end
 
 function M.Register()
     Ext.Events.Tick:Subscribe(function() pcall(tick) end)
+    Ext.RegisterConsoleCommand("dag_cast_time", function(_, s)
+        local v = tonumber(s)
+        baseOverride = (v and v > 0) and v or nil
+        Log.Write(string.format("Spells: base cast time = %s (Fire Bolt now %.2fs)",
+            baseOverride and string.format("%.2fs (override)", baseOverride) or "data", M.CastTime("Projectile_FireBolt")))
+    end)
     -- Casting slows the caster on the ground (data/spells.lua
     -- casting_speed_mult); ready-to-release and airborne are full speed.
     local wasSlowed = false

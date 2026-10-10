@@ -71,6 +71,8 @@ Ext.Require("Client/Combat/Actions.lua").Register()
 CombatInput.Register()
 CombatSwing.Register()
 Ext.Require("Shared/SpellRange.lua").Register("Client")
+-- !dag_spell_anims: each spell's prepare / loop / cast / recover for this character.
+Ext.Require("Client/Combat/SpellAnims.lua").Register()
 CombatHotbar.Register()
 CombatHUD.Register()
 CombatDebug.Register()

@@ -13,8 +13,13 @@ return {
     -- Channelled casting (2026-10-09): selecting a hotbar spell starts
     -- casting (its prepare animation plays and loops); LMB releases it,
     -- but only once cast_time_s has passed. Held as long as you like.
-    -- Per-spell `cast_time_s` overrides this. Later: scale with traits.
-    cast_time_s = 2.0,
+    -- Per-spell `base_cast_s` overrides this. The effective cast time is
+    -- base x the product of Spells.AddCastTimeModifier factors (future
+    -- traits); !dag_cast_time <s> overrides the base for the session.
+    base_cast_s = 2.0,
+    -- The server accepts the client's effective cast time down to this
+    -- (modifiers are client-side until traits exist server-side).
+    min_cast_s = 0.3,
     -- The server accepts a release this much earlier than cast_time_s
     -- (network latency between the arm and the cast messages).
     cast_time_tolerance_s = 0.25,
@@ -30,6 +35,21 @@ return {
     -- you into range. BG3's 18 m felt wrong in first person.
     aim_far_m    = 100,
     stat_range_m = 100,
+
+    -- Spell animations (Client/Combat/SpellAnims.lua): each spell's own
+    -- SpellAnimation slots (0 prepare, 4 loop, 2 cast, 3 recover). A slot
+    -- the caster can't resolve uses this family (Fire Bolt's, mapping ids,
+    -- so every rig resolves its own version).
+    spell_anims = {
+        fallback = {
+            prepare = "3ff87abf-1ea1-4c32-aadf-c822d74c7dc0",
+            loop    = "d8925ce4-d6d9-400c-92f5-ad772ef7f178",
+            cast    = "38cdb41c-2eec-4e03-bb31-83cff0346c35",
+            recover = "85414f5f-b448-4dda-9370-1b6c4b38b561",
+        },
+        cast_rate = 1.0,           -- play rate of the cast clip (per spell: spells[id].cast_rate)
+        fire_point = "cast_start", -- "cast_start" | "cast_event" (text-key, when found)
+    },
 
     -- Cost table by spell level (index 0..6).
     cost_by_level = { [0] = 0, [1] = 10, [2] = 20, [3] = 32, [4] = 45, [5] = 60, [6] = 80 },

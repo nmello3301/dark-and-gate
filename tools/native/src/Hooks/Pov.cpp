@@ -159,6 +159,8 @@ struct LuaState {
     uintptr_t animInst = 0;    // GenomeBlueprintInstance to play at animRate (AnimRate.cpp)
     float     animRate = 1.f;
     uintptr_t recInst  = 0;    // instance to record animations of (AnimRate.cpp)
+    uintptr_t clipInst = 0;    // per-clip rates target (AnimRate SetClipRates)
+    char      clipRates[400] = "";
     float     smooth   = 0.f;  // head-bone smoothing 0..0.9 (0 = raw pose)
     float     moveWalk = 1.f;  // WASD speed multipliers (MoveSpeed.cpp)
     float     moveRun  = 1.f;
@@ -203,7 +205,7 @@ void PollLuaFile()
     }
     g_lastPollMs = now;
 
-    char buf[2048];
+    char buf[4096];
     if (!ReadSmallFile(L"native-pov.txt", buf, sizeof(buf), &mt)) return;
     // Lua writes the line in one go and ends it with " t=<ms>"; a read that
     // caught a half-written file is retried next frame (mtime not taken).
@@ -246,6 +248,13 @@ void PollLuaFile()
         s.animInst = static_cast<uintptr_t>(std::strtoull(v, nullptr, 16));
     }
     s.animRate = ValF(buf, "anim_rate", 1.f);
+    if (const char* v = FindVal(buf, "clip_inst")) s.clipInst = static_cast<uintptr_t>(std::strtoull(v, nullptr, 16));
+    if (const char* v = FindVal(buf, "clip_rates")) {
+        size_t n = 0;
+        while (v[n] && v[n] != ' ' && v[n] != '\n' && v[n] != '\r' && n + 1 < sizeof(s.clipRates)) { s.clipRates[n] = v[n]; ++n; }
+        s.clipRates[n] = 0;
+        if (std::strcmp(s.clipRates, "-") == 0) s.clipRates[0] = 0;
+    }
     if (const char* v = FindVal(buf, "rec_inst")) {
         s.recInst = static_cast<uintptr_t>(std::strtoull(v, nullptr, 16));
     }
@@ -1144,6 +1153,7 @@ void OnFrame(void* gameplayCam)
     dag::visuallift::Refresh();
     dag::animrate::Set(g_lua.animInst, g_lua.animRate);
     dag::animrate::Record(g_lua.recInst);
+    dag::animrate::SetClipRates(g_lua.clipInst, g_lua.clipRates);
     dag::movespeed::Set(g_lua.moveWalk, g_lua.moveRun);
     if (!g_lua.on) g_status.applied = false;
     dag::watchdog::Stage("WriteStatus");

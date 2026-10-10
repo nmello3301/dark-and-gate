@@ -191,6 +191,43 @@ void RecordNodeLocked(void* node, uint8_t* ctx)
     ++g_recLines;
 }
 
+// ---- per-clip rates ----------------------------------------------------
+constexpr int kClipIds = 8;
+struct ClipRate { char id[40]; float rate; };
+ClipRate g_clip[kClipIds];
+int      g_numClip = 0;
+std::atomic<uintptr_t> g_clipInst{ 0 };
+std::atomic<long> g_clipHits{ 0 };
+char     g_clipSpec[512] = "";
+// FixedString id -> rate (0 = not a target), filled lazily per spec.
+constexpr int kFsCache = 256;
+struct FsRate { uint32_t fs; float rate; };
+FsRate   g_fsCache[kFsCache];
+int      g_fsCacheN = 0;
+std::atomic_flag g_clipLock = ATOMIC_FLAG_INIT;
+
+float ClipRateFor(uint8_t* ctx)
+{
+    uint8_t* a = SocketVar(ctx, 0);
+    if (!a) return 1.f;
+    uint32_t fs = 0;
+    __try { fs = *reinterpret_cast<uint32_t*>(a); } __except (EXCEPTION_EXECUTE_HANDLER) { return 1.f; }
+    if (g_clipLock.test_and_set(std::memory_order_acquire)) return 1.f;
+    float r = 1.f;
+    bool found = false;
+    for (int i = 0; i < g_fsCacheN; ++i) if (g_fsCache[i].fs == fs) { r = g_fsCache[i].rate; found = true; break; }
+    if (!found) {
+        char txt[64];
+        r = 0.f;
+        if (FsText(fs, txt, sizeof(txt))) {
+            for (int i = 0; i < g_numClip; ++i) if (_stricmp(txt, g_clip[i].id) == 0) { r = g_clip[i].rate; break; }
+        }
+        if (g_fsCacheN < kFsCache) g_fsCache[g_fsCacheN++] = { fs, r };
+    }
+    g_clipLock.clear(std::memory_order_release);
+    return r > 0.f ? r : 1.f;
+}
+
 bool Lookup(uintptr_t inst, float& r)
 {
     for (auto& s : g_slots) {
@@ -219,10 +256,17 @@ float* PlayRateVar(uint8_t* ctx)
 
 void __fastcall HookExec(void* node, uint8_t* ctx)
 {
-    float r;
+    float r = 1.f;
     const uintptr_t inst = ctx ? *reinterpret_cast<uintptr_t*>(ctx + 0x18) : 0;
     if (inst && inst == g_recInst.load(std::memory_order_relaxed)) RecordNode(node, ctx);
-    if (!inst || !Lookup(inst, r)) { g_orig(node, ctx); return; }
+    const bool charRate = inst && Lookup(inst, r);
+    float clip = 1.f;
+    if (inst && inst == g_clipInst.load(std::memory_order_relaxed)) {
+        clip = ClipRateFor(ctx);
+        if (clip != 1.f) g_clipHits.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (!charRate && clip == 1.f) { g_orig(node, ctx); return; }
+    r *= clip;
     float* p = PlayRateVar(ctx);
     if (!p) { g_orig(node, ctx); return; }
     const float saved = *p;
@@ -307,6 +351,40 @@ void Set(uintptr_t instance, float rate)
 }
 
 const char* State() { return g_why; }
+
+long ClipHits() { return g_clipHits.load(); }
+
+void SetClipRates(uintptr_t instance, const char* spec)
+{
+    if (!spec) spec = "";
+    if (instance == g_clipInst.load() && std::strcmp(spec, g_clipSpec) == 0) return;
+    if (instance && spec[0] && g_state == 0) Install();
+    if (!g_gstTried) FindStringTable();
+    while (g_clipLock.test_and_set(std::memory_order_acquire)) {}
+    strncpy_s(g_clipSpec, spec, _TRUNCATE);
+    g_numClip = 0;
+    g_fsCacheN = 0;
+    const char* p = g_clipSpec;
+    while (*p && g_numClip < kClipIds) {
+        const char* colon = std::strchr(p, ':');
+        if (!colon) break;
+        const size_t n = static_cast<size_t>(colon - p);
+        if (n > 0 && n < sizeof(g_clip[0].id)) {
+            std::memcpy(g_clip[g_numClip].id, p, n);
+            g_clip[g_numClip].id[n] = 0;
+            g_clip[g_numClip].rate = static_cast<float>(std::atof(colon + 1));
+            if (g_clip[g_numClip].rate > 0.f) ++g_numClip;
+        }
+        const char* comma = std::strchr(colon, ',');
+        if (!comma) break;
+        p = comma + 1;
+    }
+    g_clipLock.clear(std::memory_order_release);
+    g_clipInst.store((g_numClip > 0 && g_state == 1) ? instance : 0);
+    g_clipHits.store(0);
+    dag::log::Writef("RATE: clip rates on %p: %s (%d ids)", reinterpret_cast<void*>(instance),
+                     g_numClip ? g_clipSpec : "none", g_numClip);
+}
 
 void Record(uintptr_t instance)
 {

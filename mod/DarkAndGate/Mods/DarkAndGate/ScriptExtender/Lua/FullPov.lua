@@ -57,6 +57,9 @@ local S = {
     -- Animation recorder target (Client/AnimLib/Recorder.lua): the
     -- player's GenomeBlueprintInstance address, "0" = off.
     rec_inst = "0",
+    -- Per-clip play rates (AnimRate SetClipRates): "id:rate,id:rate" or "-".
+    clip_inst = "0",
+    clip_rates = "-",
     -- Jump: also lift the meshes' render objects (what is drawn), not only
     -- the root Visual. !dag_lift_objects off for A/B.
     lift_objects = 1,
@@ -254,8 +257,8 @@ local function writeState()
     if S.on and USE_BONE_ANCHOR then refreshCache(e, now) end
 
     local line = string.format(
-        "on=%d active=%d anim_inst=%s anim_rate=%.3f rec_inst=%s lift_objects=%d jump_mode=%d strafe_sign=%d rj_land_speed=%.2f rj_wall_h=%.2f head_smooth=%.2f move_walk=%.3f move_run=%.3f visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
-        S.on and 1 or 0, active and 1 or 0, S.anim_inst, S.anim_rate, S.rec_inst, S.lift_objects, S.jump_mode, S.strafe_sign, S.rj_land_speed, S.rj_wall_h, S.head_smooth, S.move_walk, S.move_run, (S.on and cache.visual) or "0", S.anchor, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
+        "on=%d active=%d anim_inst=%s anim_rate=%.3f clip_inst=%s clip_rates=%s rec_inst=%s lift_objects=%d jump_mode=%d strafe_sign=%d rj_land_speed=%.2f rj_wall_h=%.2f head_smooth=%.2f move_walk=%.3f move_run=%.3f visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
+        S.on and 1 or 0, active and 1 or 0, S.anim_inst, S.anim_rate, S.clip_inst, S.clip_rates, S.rec_inst, S.lift_objects, S.jump_mode, S.strafe_sign, S.rj_land_speed, S.rj_wall_h, S.head_smooth, S.move_walk, S.move_run, (S.on and cache.visual) or "0", S.anchor, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
         S.jump_seq, math.floor(S.jump_ms + 0.5), S.jump_h, S.jump_k,
         S.dump, cache.sock or -1, cache.skel or 0, x, y, z,
         (S.on and #cache.meshes > 0) and table.concat(cache.meshes, ",") or "0",
@@ -337,6 +340,18 @@ function M.FlipStrafe()
     lastWrite = 0
     pcall(writeState)
     return S.strafe_sign
+end
+
+-- Per-clip play rates on one character (hex instance, { [mappingId] = rate }).
+function M.SetClipRates(inst, rates)
+    local parts = {}
+    for id, r in pairs(rates or {}) do parts[#parts + 1] = string.format("%s:%.3f", id, r) end
+    table.sort(parts)
+    local spec = #parts > 0 and table.concat(parts, ",") or "-"
+    if spec == S.clip_rates and (inst or "0") == S.clip_inst then return end
+    S.clip_inst, S.clip_rates = inst or "0", spec
+    lastWrite = 0
+    pcall(writeState)
 end
 
 -- Animation recorder (hex instance address or nil = off).
