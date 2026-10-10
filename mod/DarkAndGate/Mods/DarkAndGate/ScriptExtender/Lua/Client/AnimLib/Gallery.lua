@@ -166,6 +166,14 @@ local function startOne()
     if paused then return end
     local t = now()
     for i, s in pairs(slots) do
+        if s.uuid and s.clip and s.nextAt and t >= s.nextAt and s.clip.custom then
+            -- Custom player (SpellVariants: set override + genome event);
+            -- returns seconds until it wants to run again, or nil.
+            local ok, again = pcall(s.clip.custom, s)
+            s.nextAt = (ok and tonumber(again)) and (t + tonumber(again) * 1000) or nil
+            if not ok then Log.Write(string.format("AnimLib: gallery #%d custom play ERROR %s", i, tostring(again))) end
+            return
+        end
         if s.uuid and s.clip and s.nextAt and t >= s.nextAt then
             ClientNet.PlayAnimOn(s.uuid, s.clip.playId or s.clip.keys[1], s.clip.dur, true, true)
             playsThisPage = playsThisPage + 1

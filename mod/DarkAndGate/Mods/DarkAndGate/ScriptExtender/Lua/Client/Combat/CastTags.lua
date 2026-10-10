@@ -54,6 +54,42 @@ local function candidates(ent)
     return out
 end
 
+-- Put animation set `res` first in ent's AnimationSet (Dynamic, like the
+-- engine's own override entry). Returns a short status. The engine did NOT
+-- rebuild the AnimationSet from a Lua-written tag (playtest 2026-10-10:
+-- "casting set NOT ready"), so force_set writes the entry directly.
+function M.PrependSet(ent, res)
+    if not ent or not res then return "no entity / set" end
+    local ok, r = pcall(function()
+        local entries = ent.AnimationSet.Entries
+        if #entries > 0 and tostring(entries[1].Resource) == res then return "already first" end
+        local old = {}
+        for i, e in ipairs(entries) do
+            if tostring(e.Resource) ~= res then
+                old[#old + 1] = { Slot = tostring(e.Slot or ""), Resource = tostring(e.Resource), Type = tostring(e.Type), Dynamic = e.Dynamic }
+            end
+        end
+        local n = #entries
+        entries[1] = { Slot = "", Resource = res, Type = "Visual", Dynamic = true }
+        for i, e in ipairs(old) do entries[i + 1] = e end
+        for i = #entries, #old + 2, -1 do entries[i] = nil end
+        return string.format("prepended (%d -> %d entries, first %s)", n, #entries, tostring(entries[1].Resource):sub(1, 8))
+    end)
+    return ok and r or ("ERROR " .. tostring(r))
+end
+
+-- Remove the Dynamic entry for `res` (one we prepended).
+function M.RemoveSet(ent, res)
+    local ok, r = pcall(function()
+        local entries = ent.AnimationSet.Entries
+        for i = #entries, 1, -1 do
+            if tostring(entries[i].Resource) == res and entries[i].Dynamic then entries[i] = nil; return "removed" end
+        end
+        return "not present"
+    end)
+    return ok and r or ("ERROR " .. tostring(r))
+end
+
 local function removeNow(why)
     removeAt = nil
     if not added then return end
@@ -68,7 +104,10 @@ local function removeNow(why)
             end
         end
     end)
-    Log.Write(string.format("CastTags: removed %d casting tag(s) (%s)", n, why))
+    local setParts = {}
+    for _, res in ipairs(a.forced or {}) do setParts[#setParts + 1] = res:sub(1, 8) .. " " .. M.RemoveSet(a.ent, res) end
+    Log.Write(string.format("CastTags: removed %d casting tag(s)%s (%s)", n,
+        #setParts > 0 and (", forced sets: " .. table.concat(setParts, ", ")) or "", why))
 end
 
 -- Add the casting tags. Returns the number added.
@@ -93,6 +132,22 @@ function M.Apply(ent)
             okA and "" or (" ERROR " .. tostring(err)))
     end
     if #a.tags > 0 then added = a end
+    -- force_set: the engine doesn't rebuild the set list from our tag, so
+    -- put the override sets first ourselves.
+    if CT.force_set ~= false and #a.sets > 0 then
+        a.forced = {}
+        for i = #a.sets, 1, -1 do
+            local res = a.sets[i]
+            local present = false
+            pcall(function()
+                for _, e in ipairs(ent.AnimationSet.Entries) do if tostring(e.Resource) == res then present = true end end
+            end)
+            if not present then
+                parts[#parts + 1] = "force " .. res:sub(1, 8) .. ": " .. M.PrependSet(ent, res)
+                a.forced[#a.forced + 1] = res
+            end
+        end
+    end
     Log.Write(string.format("CastTags: added %d casting tag(s)%s", #a.tags, #parts > 0 and (": " .. table.concat(parts, "; ")) or ""))
     return #a.tags
 end

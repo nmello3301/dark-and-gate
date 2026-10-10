@@ -66,7 +66,9 @@ return {
         -- OverrideType 1 waterfall set. wait_s: the select event waits this
         -- long at most for the set to be in place. *_hold_s: kept after the
         -- release so cast / recover / stow come from the same set.
-        cast_tags = { enabled = true, wait_s = 0.5, cast_hold_s = 3.0, cancel_hold_s = 1.2 },
+        -- force_set: also write the override sets into AnimationSet directly
+        -- (the engine didn't rebuild it from the Lua-written tag).
+        cast_tags = { enabled = true, force_set = true, wait_s = 0.5, cast_hold_s = 3.0, cancel_hold_s = 1.2 },
         unsheath = {
             enabled = false,
             default = "unsheath", Melee = "unsheath", Somatic = "unsheath", WeaponSet = "unsheath",

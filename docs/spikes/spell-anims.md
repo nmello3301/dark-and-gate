@@ -107,3 +107,9 @@ So the same node and mapping id resolve to a different clip. Something on the ch
 **Fix:** `Client/Combat/CastTags.lua`. On arm, every type-0 tag with an OverrideType 1 waterfall entry gets a type-1 copy. The select event waits (up to `cast_tags.wait_s`) until the override sets appear in `AnimationSet`. The clips are then re-resolved (`SpellAnims.For(..., fresh)`) for the right durations. The copies are removed `cast_hold_s` after a cast or `cancel_hold_s` after a cancel.
 
 **Open:** whether the engine rebuilds the AnimationSet when Lua writes the tag (logged as "casting set ready / NOT ready"). Also whether other casters use the same rule.
+
+**Tag route result (playtest, 2026-10-10):** the Lua-written type-1 tag was accepted, but the engine did **not** rebuild the AnimationSet from it (`casting set NOT ready`). The old clip played.
+
+**Next round:**
+- `cast_tags.force_set` writes the override set into `AnimationSet.Entries` directly (`CastTags.PrependSet`). It is prepended as a Dynamic Visual entry, like the engine's own. Caveat: rewriting the entries from Lua loses their hidden per-entry tag pointers until the save is reloaded.
+- `!dag_spell_variants <spell> [gallery]` (`Client/AnimLib/SpellVariants.lua`) lists every distinct clip each phase id maps to across active, waterfall and override sets. `gallery` spawns one civilian per prepare variant, forces that variant's set first on it, and sends BG3's select event to it, so the developer can pick the vanilla pose by eye.
