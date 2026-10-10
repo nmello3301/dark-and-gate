@@ -128,7 +128,10 @@ Lessons recorded for the next pass: `Ext.Require` only works at load time; `hit.
 
 ### Tooling (M1b)
 
-- [ ] **Animation browser + gallery** (`!dag_animlib`): per-character clip list with filters, solo play, tagging by mapping id (per-rig overrides, DFLT fallback), coverage by rig, a looping grid of preview copies with floating labels, play-rate slider when the blueprint exposes `PlayRate`. Written 2026-10-09, playtest: [playtest/animlib.md](playtest/animlib.md).
+- [x] **Animation browser + gallery** (`!dag_animlib`) *(verified 2026-10-09: browsing, filters, paged gallery, notes, per-character play rate; 9 picks in [anim-picks-2026-10-09.txt](anim-picks-2026-10-09.txt))*: per-character clip list with filters, solo play, tagging by mapping id (per-rig overrides, DFLT fallback), coverage by rig, a looping grid of preview copies with floating labels, play-rate slider when the blueprint exposes `PlayRate`. Written 2026-10-09, playtest: [playtest/animlib.md](playtest/animlib.md).
+
+- [x] **Per-character animation play rate** (DLL hook on the shared PlayAnimation-node Execute, [anim-clock.md](spikes/anim-clock.md)): slow motion, freeze and 2x on Gale's clips. *(verified 2026-10-09)*
+- [ ] Use the 9 picks: swing chain, prepare -> loop, left-hand attack, jump cast/ascend/descend/recover, with their noted speeds. Needs **exact-clip playback** (a mapping id plays the character's own stance version; see DECISIONS 2026-10-09).
 
 ### Known issues (M1b)
 

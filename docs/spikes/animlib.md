@@ -1,6 +1,6 @@
 # Animation browser + gallery: engine facts
 
-**Status:** written 2026-10-09, awaiting the first playtest ([playtest/animlib.md](../playtest/animlib.md)). Fill in the "Verified" column from the logs.
+**Status:** verified in-game 2026-10-09 (browser, filters, gallery, notes, play rate); first playtest doc ([playtest/animlib.md](../playtest/animlib.md)). Fill in the "Verified" column from the logs.
 **SE:** v32 · **BG3:** Patch 8
 
 ## Finding a character's own animations
@@ -47,3 +47,10 @@ The same mapping id resolves to a different clip per weapon stance and per rig, 
   - Cutscene / photo-mode clips are hidden by default.
   - Families have plain labels.
   - The gallery logs `gallery page -> N clips` (warning on EMPTY) and its first plays.
+
+## Playtest 3 (2026-10-09): verified
+
+- Browsing, cascading filters, paged gallery (one clip per civilian, pages loop) and cleanup on close all work.
+- Notes: 9 picks logged to `anim-notes.txt` (copied to [docs/anim-picks-2026-10-09.txt](../anim-picks-2026-10-09.txt)).
+- Play rate: the native hook patched 6 vtable slots and scales Gale's clips (slow, freeze, fast).
+- **Mapping ids are stance-resolved.** The same id `f4ac302b…` was logged as 1HPSH and as 1HSSH. A civilian with the 1HSSH stance played that clip; Gale played his own stance's. Exact-clip playback is the next step.
