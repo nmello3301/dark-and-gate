@@ -358,7 +358,8 @@ function M.Register()
     MCM.DefineBool("jump_play_anims", true, "Play BG3's jump animation")
     MCM.RegisterToggleCommand("dag_jump_play_anims", "jump_play_anims")
     MCM.DefineNumber("jump_duration_mult", D.duration_mult, "Jump airtime multiplier (floatiness)", 0.5, 4.0)
-    MCM.DefineNumber("jump_height_m", D.height_m, "Jump height (m)", 0.1, 2.0)
+    -- Max 10 m: 2026-10-10 test of casting at the top of a 10x jump.
+    MCM.DefineNumber("jump_height_m", D.height_m, "Jump height (m)", 0.1, 10.0)
     MCM.DefineNumber("jump_apex_flatness", D.apex_flatness, "Jump apex hang (2 = parabola)", 1.0, 8.0)
 
     Ext.Events.Tick:Subscribe(function() pcall(tick) end)
