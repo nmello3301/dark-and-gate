@@ -53,6 +53,8 @@ bool                   g_engineWrote = false;
 bool                   g_loggedEngineThread = false;
 bool                   g_loggedRefreshThread = false;
 thread_local int       t_depth = 0;
+bool                   g_force = false;
+bool                   g_flip = false;
 
 bool Contains(const uintptr_t* list, int n, uintptr_t v)
 {
@@ -269,7 +271,7 @@ void Refresh()
         g_base[0] = cur[0]; g_base[1] = cur[1]; g_base[2] = cur[2];
         g_baseOk.store(true);
         ++g_statExt;
-    } else if (g_engineWrote && frame - g_writeFrame.load() < 2) {
+    } else if (g_engineWrote && frame - g_writeFrame.load() < 2 && !g_force) {
         // The engine wrote through our hook within the last frame: that
         // write already carries the lift.
         return;
@@ -287,12 +289,19 @@ void Refresh()
         dag::log::Writef("LIFT: camera-hook refresh on thread %lu (frame %u, engine thread logged %s)",
                          GetCurrentThreadId(), frame, g_loggedEngineThread ? "yes" : "not yet");
     }
-    const float c[3] = { g_base[0], g_base[1] + lift, g_base[2] };
+    // Forced re-apply: alternate a 0.1 mm nudge so a setter that skips
+    // unchanged values still propagates to the meshes.
+    g_flip = !g_flip;
+    const float nudge = (g_force && g_flip) ? 1e-4f : 0.f;
+    const float c[3] = { g_base[0], g_base[1] + lift + nudge, g_base[2] };
     g_origT(reinterpret_cast<void*>(v), c);
     std::memcpy(g_lastWritten, c, sizeof(c)); g_haveWritten = true;
     g_lastApplied = lift;
     if (!external) ++g_statRefresh;
 }
+
+void SetForce(bool on) { g_force = on; }
+bool Forced() { return g_force; }
 
 float AppliedLift()
 {

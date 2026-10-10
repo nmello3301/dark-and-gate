@@ -31,6 +31,13 @@ void SetLift(float lift);
 // Called once per frame from the camera hook, after SetLift.
 void Refresh();
 
+// 2026-10-09: while walking the engine writes the Visual through our hook
+// (lift added) yet the mesh stayed down. Force = also re-apply the lift in
+// Refresh right after an engine write (Pov.cpp turns it on when it sees
+// the mesh not following).
+void SetForce(bool on);
+bool Forced();
+
 // True when the vtable hooks are live on the current Visual, i.e. the
 // whole body (and so the head bone) carries the lift.
 bool BodyLiftActive();

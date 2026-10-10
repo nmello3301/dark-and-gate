@@ -55,6 +55,9 @@ local function score(file)
     if base:sub(1, #RIG_PREFIX) ~= RIG_PREFIX then return nil end
     if not f:find("_cmbt_", 1, true) or not f:find("_attack", 1, true) then return nil end
     if not (f:find("melee", 1, true) or f:find("_1hs_", 1, true) or f:find("_dflt_", 1, true)) then return nil end
+    -- 2026-10-09: "_1hs_" also matched CMBT_Range_RHand_01_Attack (a ranged
+    -- attack with no clip in melee stances): swing 1 played nothing.
+    if f:find("_range_", 1, true) then return nil end
     for _, x in ipairs(EXCLUDE) do
         if f:find(x, 1, true) then return nil end
     end

@@ -101,22 +101,27 @@ local function baseAir(ascend, descend)
     return D.clip_air_s, string.format("data, clips=%.2fs", clips)
 end
 
--- Phase schedule for a jump of T seconds starting at t0 (ms).
-local function schedule(t0, T, P)
+-- Phase schedule for a jump of T seconds starting at t0 (ms). Clip
+-- lengths are divided by the play rate (the clips are fitted to T).
+-- 2026-10-09: phases = cast, ascend, descend (data.jump.phases); without a
+-- land clip, descend ends at touchdown.
+local function schedule(t0, T, P, rate)
+    rate = (rate and rate > 0) and rate or 1.0
+    local function sd(c) return dur(c) / rate end
     local ev = {}
-    local landAt = math.max(0, T - D.land_lead_s)
+    local landAt = P.land and math.max(0, T - D.land_lead_s) or T
     local cursor = 0
     if D.use_cast and P.cast then
         ev[#ev + 1] = { at = 0, clip = P.cast, label = "cast" }
-        cursor = dur(P.cast)
+        cursor = sd(P.cast)
     end
     if P.ascend then
         ev[#ev + 1] = { at = cursor, clip = P.ascend, label = "ascend" }
-        cursor = cursor + dur(P.ascend)
+        cursor = cursor + sd(P.ascend)
     end
-    local descendAt = landAt - dur(P.descend)
+    local descendAt = landAt - sd(P.descend)
     if P.hang and descendAt - cursor > 0.1 then
-        local every = dur(P.hang) >= 0.1 and dur(P.hang) or nil
+        local every = sd(P.hang) >= 0.1 and sd(P.hang) or nil
         ev[#ev + 1] = { at = cursor, clip = P.hang, label = "hang", every = every, untilAt = descendAt }
     end
     if P.descend and descendAt > 0 then
@@ -137,7 +142,7 @@ end
 -- keep their times). Returns the phase label or nil.
 local function resumePhase(now)
     if not J.P or J.rate == nil then return nil end
-    local ev = schedule(J.t0, J.Ts, J.P)
+    local ev = schedule(J.t0, J.Ts, J.P, J.rate)
     local cur
     for i, e in ipairs(ev) do if e.at <= now then cur = i end end
     -- The next phase is about due (e.g. landing 30 ms away): go straight
@@ -193,7 +198,7 @@ function M.OnSpace()
     end
 
     local P = {}
-    for _, ph in ipairs({ "cast", "ascend", "hang", "descend", "land" }) do P[ph] = JumpAnims.Pick(ph) end
+    for _, ph in ipairs(D.phases or { "cast", "ascend", "hang", "descend", "land" }) do P[ph] = JumpAnims.Pick(ph) end
     local moving = speed.v >= (D.moving_speed or 0.8)
     local clipsWhy
     local clipsOn = cfg("play_anims")
@@ -218,7 +223,10 @@ function M.OnSpace()
     J.T = T * 1000
     J.Ts = T
     J.P = P
-    J.events = clipsOn and schedule(now, T, P) or {}
+    -- Fit the clips to the airtime: rate = clip time / airtime.
+    local clipsAir = (D.use_cast and dur(P.cast) or 0) + dur(P.ascend) + dur(P.descend)
+    local rate = clipsAir > 0 and math.max(0.3, math.min(D.max_clip_rate or 1.0, clipsAir / T)) or 1.0
+    J.events = clipsOn and schedule(now, T, P, rate) or {}
     J.landPlayed = false
     J.landPending = nil
     J.rate = nil
@@ -236,9 +244,8 @@ function M.OnSpace()
     -- (base rate through Actions: an action in the air plays at its own
     -- rate and the jump rate comes back after it); reset on landing.
     local animPath = (#J.events > 0) and "substitute" or "none"
-    local clipsAir = dur(P.ascend) + dur(P.descend)
     if #J.events > 0 and clipsAir > 0 then
-        J.rate = math.max(0.3, math.min(1.0, clipsAir / T))
+        J.rate = rate
         Actions.SetBaseRate("jump", J.rate)
         animPath = string.format("phases at x%.2f", J.rate)
     elseif #J.events > 0 then

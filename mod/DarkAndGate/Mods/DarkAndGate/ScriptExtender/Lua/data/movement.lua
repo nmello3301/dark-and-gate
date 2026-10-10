@@ -18,9 +18,12 @@
 --                   k = 2 is a plain parabola; 3-4 hangs longer near the apex.
 --   cooldown_s      after landing, before the next jump is accepted.
 --   land_lead_s     the landing (Recover) clip starts this long before touchdown.
---   use_cast        play the JumpFlight Cast (crouch/takeoff) clip first.
---                   Off: the lift starts on the key press, so a crouch
---                   would play while already rising.
+--   use_cast        play the JumpFlight Cast (take-off) clip first.
+--   phases          which clips a jump plays, in order. 2026-10-09 playtest:
+--                   the Recover (land) clip looked unneeded -> cast, ascend,
+--                   descend only; descend ends at touchdown.
+--   max_clip_rate   the clips are fitted to the airtime (rate = clip time /
+--                   airtime, 1.73 s of clips into 1.28 s = x1.35); capped here.
 --   anims           BG3 animation-mapping ids for the JumpFlight phases (found by
 --                   !dag_jump_anim_scan on 2026-10-09). A mapping id is the same for
 --                   every weapon stance; the engine picks the stance's clip. dur is
@@ -83,7 +86,9 @@ return {
         apex_flatness = 3.0,
         cooldown_s    = 0.15,
         land_lead_s   = 0.05,
-        use_cast      = false,
+        use_cast      = true,
+        phases        = { "cast", "ascend", "descend" },
+        max_clip_rate = 1.6,
         anims = {
             cast    = { key = "f49c1788-7819-481f-9b83-2344d708e682", dur = 0.600 },
             ascend  = { key = "8ee67630-f1c7-441d-aaf6-fa4633c890da", dur = 0.600 },

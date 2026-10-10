@@ -163,13 +163,14 @@ Lessons recorded for the next pass: `Ext.Require` only works at load time; `hit.
 **Movement round (2026-10-09), written, awaiting playtest** ([playtest/movement-round.md](playtest/movement-round.md)):
 
 - [ ] Camera A/B: `!dag_pov_anchor head|pivot` identical at rest; head glued to the body walking / running / attacking / jumping. Per-frame `CAM delta` stats in native.log and on the status line; optional `!dag_pov_smooth` (off by default).
-- [ ] Walk by default, Left Shift toggles run (BG3WASD config; Shift+W autoforward unbound).
+- [x] Walk by default, Left Shift toggles run (BG3WASD config; Shift+W autoforward unbound). *(verified 2026-10-09: "walking and running feel great")*
 - [ ] Speed knob: `move.walk_speed / run_speed / speed_mult` (`data/movement.lua`, MCM), `Movement.AddModifier / RemoveModifier`, `!dag_speed_mult / !dag_walk_speed / !dag_run_speed`. Native lever: the MoveController template fetch ([move-speed.md](spikes/move-speed.md)).
 - [ ] Locomotion clips play at the gait's speed multiplier (no foot sliding).
-- [ ] Jump while walking / running keeps the movement and steering; same arc; no double jump; lift source logged per jump.
+- [ ] Jump while walking / running keeps the movement and steering; same arc; no double jump; lift source logged per jump. **2026-10-09 playtest: no visible jump while moving**, although the DLL lifted the Visual every frame. Fix 2: the camera measures the head mesh's real rise and fills the rest; the body re-applies the lift after engine writes when the mesh doesn't follow (`LIFT: … force on`, `JUMP lift … meshRise=`).
+- [x] Standing jump. *(verified 2026-10-09)* Clips now cast → ascend → descend fitted to the airtime (x1.35); the Recover clip is dropped (developer: unneeded).
 - [ ] Swing / cast / spell prepare loop in the air take priority over the jump clips; the arc continues; landing waits for the action.
 - [ ] Spell prepare loop while a spell is armed (ids from the spell's `SpellAnimation` stats); LMB casts, RMB / same key cancels to idle.
-- [ ] First swing animates on a single click; single-click chain 1→2→3 (open since the last round).
+- [ ] First swing animates on a single click; single-click chain 1→2→3. **2026-10-09: cause found** — the auto-picked swing-1 clip was BG3's ranged attack (no clip in melee stances), so click 1 played nothing and click 2 (swing 2) did. Swings 1–3 now use the developer's picks (RHand, LHand, RHand) via `data/anim_tags.lua`; ranged clips excluded from the auto-pick.
 - [ ] Blocking and parry: **custom animations**; block only with a shield equipped, parry only with a weapon that can parry (decided 2026-10-08).
 - [x] Fire Bolt aimed at the crosshair (character aim assist, or ground / object point). *(2026-10-08)*
 - [x] Fireball cast at the crosshair. *(2026-10-08)*
@@ -236,6 +237,7 @@ Added 2026-10-09 (movement round).
 
 - [ ] **Strafe / dash-strafe animations** (custom). The body may turn toward the movement as long as the camera isn't forced.
 - [ ] **Defence animations:** block hold and parry (custom). Block only with a shield, parry only with a parry-capable weapon (decided 2026-10-08).
+- [ ] **Movement speed from agility:** scale walk / run speed with the character's agility (DEX), through `Movement.AddModifier` (the knob is ready; no mechanic yet, developer 2026-10-09).
 - [ ] **Weapon chain auto-guess:** propose each weapon family's chain from clip names (light 1–3, heavy, ranged draw / hold / release) and show it in the gallery for one-click accept.
 
 ## Archived (future)

@@ -472,7 +472,13 @@ JumpLift g_jump;
 struct JumpLiftStats {
     int   frames = 0, boneFrames = 0, fillFrames = 0, bodyFrames = 0;
     float maxMissing = 0, maxBodyErr = 0;
+    float maxMeshRise = 0;      // how far the head's mesh really rose
+    int   meshFrames = 0;       // frames the mesh rise could be read
 };
+// The head mesh's render-object height above the pivot at rest (EMA while
+// not jumping); during a jump, mesh rise = current offset - this.
+bool  g_meshOffOk = false;
+float g_meshOff = 0;
 JumpLiftStats g_jls;
 
 // Camera steadiness: the eye's offset from the engine pivot (look-down
@@ -840,9 +846,10 @@ void UpdateJump()
         const char* srcName = !body ? "camera-only"
             : (g_jls.fillFrames * 10 > g_jls.frames ? "body+camera-fill" : "body");
         dag::log::Writef("JUMP lift seq=%d liftSrc=%s anchor=%s frames=%d boneFrames=%d bodyFrames=%d "
-                         "fillFrames=%d maxMissing=%.3fm maxBodyErr=%.3fm",
+                         "fillFrames=%d maxMissing=%.3fm maxBodyErr=%.3fm meshRise=%.3fm (of %.2f, %d frames) force=%d",
                          g_jump.seq, srcName, g_lua.anchor ? "head" : "pivot", g_jls.frames, g_jls.boneFrames,
-                         g_jls.bodyFrames, g_jls.fillFrames, g_jls.maxMissing, g_jls.maxBodyErr);
+                         g_jls.bodyFrames, g_jls.fillFrames, g_jls.maxMissing, g_jls.maxBodyErr,
+                         g_jls.maxMeshRise, g_jump.h, g_jls.meshFrames, dag::visuallift::Forced() ? 1 : 0);
         return;
     }
     const float u = static_cast<float>(ms / g_jump.durMs);
@@ -1192,9 +1199,38 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
             }
             eye[0] = head[0] + fx * fwdTotal;
             // The head carries whatever lift is really on the body; add the
-            // rest so the camera always rises the full amount.
+            // rest so the camera always rises the full amount. 2026-10-09:
+            // while walking the Visual reported the lift but the mesh (and
+            // the head bone) stayed down, so the rise is measured on the
+            // head mesh's render object, not taken from the Visual.
             float missing = lift;
-            if (bodyLift) {
+            float meshY = 0;
+            bool meshOk = false;
+            {
+                void* obj = nullptr;
+                if (dag::safemem::ReadPtr(reinterpret_cast<void*>(g_head.mb), 0x28, obj) && obj)
+                    meshOk = dag::safemem::ReadFloat(obj, 0x1C, meshY) && std::isfinite(meshY);
+            }
+            if (meshOk && pivotOk) {
+                const float off = meshY - pivot[1];
+                if (!g_jump.active) {
+                    g_meshOff = g_meshOffOk ? g_meshOff + (off - g_meshOff) * 0.1f : off;
+                    g_meshOffOk = true;
+                } else if (g_meshOffOk) {
+                    float rise = off - g_meshOff;
+                    if (rise > g_jls.maxMeshRise) g_jls.maxMeshRise = rise;
+                    ++g_jls.meshFrames;
+                    if (rise < 0.f) rise = 0.f;
+                    if (rise > lift) rise = lift;
+                    missing = lift - rise;
+                    // The mesh isn't following the lifted Visual: re-apply
+                    // the lift after the engine's own writes from now on.
+                    if (bodyLift && !dag::visuallift::Forced() && lift > 0.2f && rise < 0.5f * lift && g_jls.meshFrames > 10) {
+                        dag::visuallift::SetForce(true);
+                        dag::log::Writef("LIFT: head mesh rose %.2f of %.2f m -> re-applying the lift after engine writes (force on)", rise, lift);
+                    }
+                }
+            } else if (bodyLift) {
                 const float applied = dag::visuallift::AppliedLift();
                 missing = lift - (applied < 0.f ? 0.f : (applied > lift + 0.05f ? lift : applied));
             }
