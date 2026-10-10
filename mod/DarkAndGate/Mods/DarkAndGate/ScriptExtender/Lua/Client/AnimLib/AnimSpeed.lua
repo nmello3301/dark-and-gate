@@ -23,22 +23,29 @@ local M = {}
 
 M.VAR = "PlayRate"
 
-local indexCache = {}   -- tostring(entity) -> index | false
+-- 2026-10-09 probe on Gale: the gameplay blueprint has NO general
+-- "PlayRate" (1794 variables), but has JumpFlightAscendPlayRate,
+-- JumpFlightDescendPlayRate, LOCO_CharacterScalePlayRate,
+-- ATT_AdditiveStillPlayRate and a few STAT_Incapacitated_* rates. Each
+-- variable reads as a gn::GenomeVariant userdata with .Type / .Value.
 
-local function findIndex(ent)
-    local key = tostring(ent)
+local indexCache = {}   -- tostring(entity) .. name -> index | false
+
+local function findIndex(ent, name)
+    name = name or M.VAR
+    local key = tostring(ent) .. "|" .. name
     local c = indexCache[key]
     if c ~= nil then return c or nil end
     local idx = false
     pcall(function()
         for i, v in ipairs(ent.AnimationBlueprint.Resource.Blueprints[1].Variables) do
-            if tostring(v.Name) == M.VAR then idx = i; return end
+            if tostring(v.Name) == name then idx = i; return end
         end
     end)
     if not idx then
         pcall(function()
             for _, v in ipairs(ent.AnimationBlueprint.Instance.Parent.Variables) do
-                if tostring(v.Name) == M.VAR then idx = v.Index + 1; return end
+                if tostring(v.Name) == name then idx = v.Index + 1; return end
             end
         end)
     end
@@ -46,30 +53,34 @@ local function findIndex(ent)
     return idx or nil
 end
 
--- Returns true, or false + reason.
-function M.Set(ent, rate)
+local function field(v, k)
+    local ok, x = pcall(function() return v[k] end)
+    return ok and x or nil
+end
+
+-- Returns true, or false + reason. name defaults to "PlayRate".
+function M.Set(ent, rate, name)
+    name = name or M.VAR
     if not ent then return false, "no entity" end
-    local idx = findIndex(ent)
-    if not idx then return false, "no " .. M.VAR .. " variable on this character's blueprint" end
+    local idx = findIndex(ent, name)
+    if not idx then return false, "no " .. name .. " variable on this character's blueprint" end
     local ok, err = pcall(function()
         local vars = ent.AnimationBlueprint.Instance.Variables
-        local cur = vars[idx]
-        local typ = type(cur) == "table" and cur.Type or nil
-        vars[idx] = { Type = typ, Value = rate }
+        vars[idx] = { Type = field(vars[idx], "Type"), Value = rate }
     end)
     if not ok then return false, tostring(err) end
     return true
 end
 
-function M.Get(ent)
-    local idx = ent and findIndex(ent)
+function M.Get(ent, name)
+    local idx = ent and findIndex(ent, name)
     if not idx then return nil end
     local ok, v = pcall(function() return ent.AnimationBlueprint.Instance.Variables[idx] end)
-    if ok and type(v) == "table" then return tonumber(v.Value) end
-    return ok and tonumber(v) or nil
+    if not ok then return nil end
+    return tonumber(field(v, "Value")) or tonumber(v)
 end
 
-function M.Available(ent) return ent ~= nil and findIndex(ent) ~= nil end
+function M.Available(ent, name) return ent ~= nil and findIndex(ent, name) ~= nil end
 
 function M.Forget() indexCache = {} end
 

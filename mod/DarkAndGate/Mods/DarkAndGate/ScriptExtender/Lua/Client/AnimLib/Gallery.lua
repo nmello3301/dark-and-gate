@@ -30,6 +30,7 @@ local requested = 0
 local spawnT0 = 0
 local lastLabelAt = 0
 local labelWindows = {}
+local playsThisPage = 0
 
 local function now() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
 local function trySet(o, k, v) pcall(function() o[k] = v end) end
@@ -150,6 +151,11 @@ local function startOne()
     for i, s in pairs(slots) do
         if s.uuid and s.clip and s.nextAt and t >= s.nextAt then
             ClientNet.PlayAnimOn(s.uuid, s.clip.playId or s.clip.keys[1], s.clip.dur, true, true)
+            playsThisPage = playsThisPage + 1
+            if playsThisPage <= 2 or playsThisPage == requested then
+                Log.Write(string.format("AnimLib: gallery #%d plays %s (%s)%s", i, s.clip.base, s.clip.keys[1],
+                    playsThisPage == requested and " -- every copy started" or ""))
+            end
             s.nextAt = loop and (t + ((s.clip.dur or 1) + LOOP_GAP_S) * 1000) or nil
             return  -- one clip start per tick
         end
@@ -182,6 +188,13 @@ function M.SetPaused(on) paused = on and true or false end
 -- clips: the browser's current page (array, up to n).
 function M.SetPage(clips)
     local t = now()
+    local n = 0
+    for i = 1, requested do if clips[i] then n = n + 1 end end
+    playsThisPage = 0
+    if requested > 0 then
+        Log.Write(string.format("AnimLib: gallery page -> %d clips on %d copies%s", n, requested,
+            n == 0 and " (EMPTY page: the filters match nothing)" or ("; #1 " .. clips[1].base)))
+    end
     for i = 1, requested do
         local s = slots[i]
         if s then
@@ -207,6 +220,12 @@ function M.Open(n, rig, target, template, clips)
     Log.Write(string.format("AnimLib: gallery requested n=%d rig=%s%s", n, tostring(rig),
         template and (" template=" .. template) or ""))
     M.SetPage(clips or {})
+end
+
+-- Restart slot i's clip now (clicking its row in the browser).
+function M.Restart(i)
+    local s = slots[i]
+    if s and s.clip then s.nextAt = 0 end
 end
 
 function M.Clear(why)

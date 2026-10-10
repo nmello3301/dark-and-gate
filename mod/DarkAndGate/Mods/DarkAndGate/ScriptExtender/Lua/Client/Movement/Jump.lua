@@ -41,6 +41,8 @@ local D = movement.jump
 
 local function nowMs() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
 
+local RATE_VARS = { "PlayRate", "JumpFlightAscendPlayRate", "JumpFlightDescendPlayRate" }
+
 local function cfg(key) return MCM.Get("jump_" .. key) end
 
 local J = {
@@ -143,19 +145,25 @@ function M.OnSpace()
     FullPov.Jump(J.seq, J.T, h, k)
     ClientNet.JumpStart(J.T, h, k)
 
-    -- Slow the clips to fit when the blueprint exposes PlayRate
-    -- (docs/spikes/anim-speed.md); otherwise the phase substitute alone.
+    -- Slow the clips to fit through blueprint play-rate variables
+    -- (docs/spikes/anim-speed.md). Gale's gameplay blueprint has no general
+    -- PlayRate but has JumpFlightAscend/DescendPlayRate; whether those
+    -- reach clips played by Osi.PlayAnimation is what this tests (the log
+    -- names the variables set; look at whether the clips slow down).
     local animPath = (#J.events > 0) and "substitute" or "none"
-    J.rateEnt = nil
+    J.rateEnt, J.rateVars = nil, nil
     local clipsAir = dur(P.ascend) + dur(P.descend)
     if #J.events > 0 and clipsAir > 0 and cfg("play_anims") then
         local okE, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
         local me = okE and ents and ents[1] or nil
         local rate = math.max(0.3, math.min(1.0, clipsAir / T))
-        local okR = me and AnimSpeed.Set(me, rate)
-        if okR then
-            J.rateEnt = me
-            animPath = string.format("genome PlayRate x%.2f + phases", rate)
+        local set = {}
+        for _, name in ipairs(RATE_VARS) do
+            if me and AnimSpeed.Set(me, rate, name) then set[#set + 1] = name end
+        end
+        if #set > 0 then
+            J.rateEnt, J.rateVars = me, set
+            animPath = string.format("phases + %s x%.2f", table.concat(set, "+"), rate)
         end
     end
     Log.Write(string.format(
@@ -182,7 +190,10 @@ local function tick()
         J.active = false
         State.jumping = false
         J.readyAt = now + D.cooldown_s * 1000
-        if J.rateEnt then AnimSpeed.Set(J.rateEnt, 1.0); J.rateEnt = nil end
+        if J.rateEnt then
+            for _, name in ipairs(J.rateVars or {}) do AnimSpeed.Set(J.rateEnt, 1.0, name) end
+            J.rateEnt, J.rateVars = nil, nil
+        end
         Log.Write(string.format("Jump: landed seq=%d after %.2fs", J.seq, (now - J.t0) / 1000))
     end
 end

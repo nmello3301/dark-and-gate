@@ -7,11 +7,11 @@
 
 | Path | What it gives | Verified |
 | --- | --- | --- |
-| `ent.AnimationSet.Entries[i].Resource` (`ls::AnimationSetComponent`, SE `Components/Visual.h`) | the AnimationSet resource ids the character uses | ☐ log: `AnimLib: <name> rig=… source=AnimationSet component sets=N` |
+| `ent.AnimationSet.Entries[i].Resource` (`ls::AnimationSetComponent`, SE `Components/Visual.h`) | the AnimationSet resource ids the character uses | ✅ 2026-10-09 Gale: 6 sets, 13184 mappings -> 6878 clips in 1.8 s, rig HUM_M |
 | `ent.AnimationWaterfall.Waterfall[i].Resource` | the same, through the waterfall (used if the first is empty) | ☐ |
 | `Ext.Resource.Get(set, "AnimationSet").AnimationBank.AnimationSubSets[sub].Animation[mappingId].ID` | mapping id → Animation resource | ✅ (Anims.lua, JumpAnims.lua) |
 | `Ext.Resource.Get(id, "Animation").SourceFile / .Duration` | clip file and length | ✅ (2026-10-09 jump scan: Ascend 0.60 s, Recover 1.70 s) |
-| Global index (every set, `!dag_animlib global`) | coverage per rig + fallback list | ☐ |
+| Global index (every set, `!dag_animlib global`) | coverage per rig + fallback list | ✅ 349713 mappings in 2331 sets, 25 s (ticks ran 2-5 ms: one big set's pair collection can't be split) |
 
 **Rig** = the most common `<RACE>_<BODY>` prefix of the clip names (e.g. `HUM_M_Rig_…`). If a character has no sets, the rig comes from the visual template name.
 
@@ -35,3 +35,15 @@ The same mapping id resolves to a different clip per weapon stance and per rig, 
 - **Inert:** `SetCanJoinCombat 0`, `SetCanFight 0`, `SetHasDialog 0`, boost `Invulnerable()` (each result logged once in `AnimLib: copy setup …`).
 - **Facing the player:** `Osi.SteerTo(copy, player, 1)` is a probe; the result is logged once.
 - **Removal:** `SetOnStage 0`, `SetHasDialog 0`, `RequestDelete`, `RequestDeleteTemporary` (Brawl's recipe). Triggered by menu close, `!dag_animlib clear`, the `Save` game state (the uuid list is kept on disk) and `LevelGameplayStarted` (leftovers from `animlib-spawned.txt`).
+
+## Playtest 1 (2026-10-09)
+
+- **Template:** `BASE_Elves_Male_Drow_Lolth_Civilian` for HUM_M (63 ms scan, 275 candidates).
+- **Spawn:** 12 copies in 547 ms.
+- **Copy setup:** `SetCanJoinCombat`, `SetCanFight`, `SetHasDialog` and the `Invulnerable()` boost all returned ok. `Osi.SteerTo` returned ok; whether the copies actually face the player is not reported yet.
+- **The copies played nothing.** No PlayAnim reached the server. The page handed to the gallery was empty: the Family dropdown offered values from the whole list (SCENE 1513 under Melee), so the combined filters matched nothing.
+- **Fix:**
+  - The dropdowns now cascade: each lists only values present under the other filters.
+  - Cutscene / photo-mode clips are hidden by default.
+  - Families have plain labels.
+  - The gallery logs `gallery page -> N clips` (warning on EMPTY) and its first plays.

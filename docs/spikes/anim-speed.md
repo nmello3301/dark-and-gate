@@ -1,6 +1,6 @@
 # Animation play rate: how QSAT does it
 
-**Status:** method found (read-only study of QSAT 2.4.0, BG3AF 1.0.0.1 and "Edited Animation Blueprint for Dani Mode" 1.0.0.4, unpacked into the scratchpad from `downloaded_mods/`). Whether it works on **gameplay** characters is still to be checked in-game with `!dag_anim_vars playrate`.
+**Status:** method found; NOT available on gameplay characters (no general PlayRate variable, see the probe result) (read-only study of QSAT 2.4.0, BG3AF 1.0.0.1 and "Edited Animation Blueprint for Dani Mode" 1.0.0.4, unpacked into the scratchpad from `downloaded_mods/`). Whether it works on **gameplay** characters is still to be checked in-game with `!dag_anim_vars playrate`.
 **Date:** 2026-10-09 · **SE:** v32 · Supersedes the "no Lua lever" conclusion of [spike 4](04-anim-control.md) for the speed part.
 
 ## What QSAT does
@@ -23,6 +23,23 @@ This is the `PlayRate` input socket that [m1b-anim-speed.md](m1b-anim-speed.md) 
   !dag_anim_vars playrate
   ```
   (client console), on Gale.
+
+## In-game probe result (2026-10-09, Gale, `!dag_anim_vars playrate`)
+
+Gale's **gameplay** blueprint has 1794 variables and **no general `PlayRate`**. The play-rate variables it does have:
+
+| # | Name | Likely scope |
+| --- | --- | --- |
+| 491 | `JumpFlightDescendPlayRate` | the blueprint's own JumpFlight descend state |
+| 536 | `JumpFlightAscendPlayRate` | the blueprint's own JumpFlight ascend state |
+| 165 | `LOCO_CharacterScalePlayRate` | locomotion, scaled by character size |
+| 364 / 608 | `LOCO_ClimbPlayRate_A` / `_B` | climbing |
+| 403 | `ATT_AdditiveStillPlayRate` | additive idle layer |
+| 28, 449, 353, 497 | `STAT_Incapacitated_*PlayRate*` | incapacitated statuses |
+
+Each value reads as a `gn::GenomeVariant` userdata with `.Type` / `.Value`. The browser's slider therefore reports "not available" on gameplay characters. The jump now tries the two JumpFlight rates; whether they affect clips started by `Osi.PlayAnimation` is being tested, and the log names the variables it set.
+
+**Decision needed (developer):** pick one of the options below for general speed (gallery slider, hit-stop). Nothing has been built for them.
 
 ## Our implementation (own code, no copying)
 

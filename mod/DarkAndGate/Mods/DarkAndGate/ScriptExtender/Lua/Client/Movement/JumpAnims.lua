@@ -308,8 +308,10 @@ function M.Register()
                 if not f or name:lower():find(f, 1, true) then
                     local okV, val = pcall(function() return inst.Variables[i] end)
                     local vs
-                    if okV and type(val) == "table" then
-                        vs = string.format("type=%s value=%s", tostring(val.Type), tostring(val.Value))
+                    local okT, typ = pcall(function() return val.Type end)
+                    local okW, v2 = pcall(function() return val.Value end)
+                    if okV and okT and okW then
+                        vs = string.format("type=%s value=%s", tostring(typ), tostring(v2))
                     else
                         vs = okV and tostring(val) or ("<" .. tostring(val) .. ">")
                     end

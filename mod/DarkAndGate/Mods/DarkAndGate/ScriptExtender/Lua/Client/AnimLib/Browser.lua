@@ -54,7 +54,7 @@ local selected = nil     -- clip
 local altIdx = 1         -- which id of the selected clip to play (1..#keys, then res)
 local preferRes = false  -- "It played" on a resource id
 local force = false
-local filters = { text = "", cat = nil, fam = nil, phase = nil }
+local filters = { text = "", cat = nil, fam = nil, phase = nil, showScenes = false }
 local templateOverride = nil
 local lastStatusAt = 0
 local lastStatus = nil
@@ -124,18 +124,87 @@ local function hasCat(c, cat)
     return false
 end
 
+-- Cutscene / cinematic / photo-mode clips: thousands of them, never useful
+-- for gameplay picks; hidden unless "show cutscene clips" is ticked.
+local SCENE_FAMILIES = { SCENE = true, CINE = true, PM = true }
+local function isScene(c)
+    if SCENE_FAMILIES[c.family] then return true end
+    for _, x in ipairs(c.cats) do if x == "SCENE" or x == "CINE" then return true end end
+    return false
+end
+
+-- Plain-language labels for the weapon-stance families seen in clip names.
+-- Larian doesn't document these; the "?" ones are educated guesses.
+local FAMILY_LABEL = {
+    DFLT = "default / unarmed", ST = "staff", BOW = "bow", XBOW = "crossbow?",
+    ["1HS"] = "1-hand slashing (sword/axe)?", ["1HP"] = "1-hand piercing (rapier/dagger)?",
+    ["1HB"] = "1-hand bludgeoning (mace)?", ["1HSSH"] = "1-hand slashing + shield?",
+    ["1HPSH"] = "1-hand piercing + shield?", ["1HBSH"] = "1-hand bludgeoning + shield?",
+    ["2H"] = "2-hand", ["2HS"] = "2-hand slashing (greatsword)?", ["2HB"] = "2-hand bludgeoning (maul)?",
+    ["2HP"] = "2-hand piercing (pike)?", DWS = "dual-wield slashing?", DWP = "dual-wield piercing?",
+    DWB = "dual-wield bludgeoning?", DWXBS = "dual hand crossbows?", JAV = "javelin / thrown?",
+    JAVSH = "javelin + shield?", SPL = "spellcasting", SCENE = "cutscene", CINE = "cinematic", PM = "photo mode",
+}
+
+local function passes(c, skip)
+    local text = (filters.text or ""):lower()
+    if text ~= "" and not c.lower:find(text, 1, true) then return false end
+    if not filters.showScenes and isScene(c) then return false end
+    if skip ~= "cat" and filters.cat and not hasCat(c, filters.cat) then return false end
+    if skip ~= "fam" and filters.fam and c.family ~= filters.fam then return false end
+    if skip ~= "phase" and filters.phase and c.phase ~= filters.phase then return false end
+    return true
+end
+
+local comboVals = { cat = { false }, fam = { false }, phase = { false } }
+
+-- Each dropdown lists only the values present under the OTHER filters,
+-- with counts for the current selection (so Family under Melee shows only
+-- melee stances). The current value stays selected.
+local function refreshFilterCombos()
+    if not W then return end
+    for key, field in pairs({ cat = "cats", fam = "family", phase = "phase" }) do
+        local counts = {}
+        for _, c in ipairs(Library.B.clips) do
+            if passes(c, key) then
+                if field == "cats" then
+                    for _, x in ipairs(c.cats) do counts[x] = (counts[x] or 0) + 1 end
+                else
+                    local v = c[field]
+                    if v and v ~= "?" then counts[v] = (counts[v] or 0) + 1 end
+                end
+            end
+        end
+        local list = {}
+        for v, n in pairs(counts) do list[#list + 1] = { v = v, n = n } end
+        table.sort(list, function(a, b) if a.n ~= b.n then return a.n > b.n end return a.v < b.v end)
+        local opts, vals, sel = { "(any)" }, { false }, 0
+        for i = 1, math.min(60, #list) do
+            local v = list[i].v
+            local label = (key == "fam" and FAMILY_LABEL[v]) and string.format("%s - %s (%d)", v, FAMILY_LABEL[v], list[i].n)
+                or string.format("%s (%d)", v, list[i].n)
+            opts[#opts + 1] = label
+            vals[#vals + 1] = v
+            if filters[key] == v then sel = #vals - 1 end
+        end
+        if filters[key] and sel == 0 then
+            opts[#opts + 1] = filters[key] .. " (0)"
+            vals[#vals + 1] = filters[key]
+            sel = #vals - 1
+        end
+        comboVals[key] = vals
+        trySet(W[key], "Options", opts)
+        trySet(W[key], "SelectedIndex", sel)
+    end
+end
+
 local function applyFilters()
     filtered = {}
-    local text = (filters.text or ""):lower()
     for _, c in ipairs(Library.B.clips) do
-        if (text == "" or c.lower:find(text, 1, true))
-            and (not filters.cat or hasCat(c, filters.cat))
-            and (not filters.fam or c.family == filters.fam)
-            and (not filters.phase or c.phase == filters.phase) then
-            filtered[#filtered + 1] = c
-        end
+        if passes(c) then filtered[#filtered + 1] = c end
     end
     page = 1
+    refreshFilterCombos()
 end
 
 local function pageCount() return math.max(1, math.ceil(#filtered / pageSize)) end
@@ -145,39 +214,6 @@ local function pageClips()
     local first = (page - 1) * pageSize
     for i = 1, pageSize do out[i] = filtered[first + i] end
     return out
-end
-
--- Combo options: "(any)" + the most common values, most common first.
-local function topValues(field, limit)
-    local counts = {}
-    for _, c in ipairs(Library.B.clips) do
-        if field == "cats" then
-            for _, x in ipairs(c.cats) do counts[x] = (counts[x] or 0) + 1 end
-        else
-            counts[c[field]] = (counts[c[field]] or 0) + 1
-        end
-    end
-    local list = {}
-    for v, n in pairs(counts) do if v and v ~= "?" then list[#list + 1] = { v = v, n = n } end end
-    table.sort(list, function(a, b) if a.n ~= b.n then return a.n > b.n end return a.v < b.v end)
-    local opts, vals = { "(any)" }, { false }
-    for i = 1, math.min(limit, #list) do
-        opts[#opts + 1] = string.format("%s (%d)", list[i].v, list[i].n)
-        vals[#vals + 1] = list[i].v
-    end
-    return opts, vals
-end
-
-local comboVals = { cat = { false }, fam = { false }, phase = { false } }
-
-local function refreshFilterCombos()
-    for key, field in pairs({ cat = "cats", fam = "family", phase = "phase" }) do
-        local opts, vals = topValues(field, 40)
-        comboVals[key] = vals
-        trySet(W[key], "Options", opts)
-        trySet(W[key], "SelectedIndex", 0)
-        filters[key] = nil
-    end
 end
 
 -- ---------------------------------------------------------------------
@@ -216,7 +252,8 @@ local function refreshRows()
             set(r, "Selected", selected == c)
         end
     end
-    set(W.pageText, "Label", string.format("page %d/%d  (%d of %d clips)", page, pageCount(), #filtered, #Library.B.clips))
+    set(W.pageText, "Label", string.format("page %d/%d  (%d of %d clips; %d per page = gallery size)",
+        page, pageCount(), #filtered, #Library.B.clips, pageSize))
     if Gallery.Active() then Gallery.SetPage(clips) end
 end
 
@@ -255,6 +292,7 @@ local function selectRow(i)
     if not c then return end
     selected, altIdx = c, 1
     refreshRows()
+    if Gallery.Active() then Gallery.Restart(i) end
     selectedInfo()
     coverageText()
 end
@@ -303,6 +341,7 @@ local function build()
         t.cat = w:AddCombo("Category")
         t.fam = w:AddCombo("Family")
         t.phase = w:AddCombo("Phase")
+        t.scenes = w:AddCheckbox("show cutscene / photo-mode clips", false)
         t.clearF = w:AddButton("Clear filters")
         t.prev = w:AddButton("< Prev"); trySet(t.prev, "SameLine", true)
         t.next = w:AddButton("Next >"); trySet(t.next, "SameLine", true)
@@ -361,8 +400,9 @@ local function build()
                 applyFilters(); refreshRows()
             end
         end
+        t.scenes.OnChange = function(_, v) filters.showScenes = v and true or false; applyFilters(); refreshRows() end
         t.clearF.OnClick = function()
-            filters = { text = "", cat = nil, fam = nil, phase = nil }
+            filters = { text = "", cat = nil, fam = nil, phase = nil, showScenes = filters.showScenes }
             trySet(t.search, "Text", "")
             for _, k in ipairs({ "cat", "fam", "phase" }) do trySet(t[k], "SelectedIndex", 0) end
             applyFilters(); refreshRows()
@@ -457,7 +497,6 @@ local function updateStatus()
     -- List finished building: fill combos and rows once.
     if B.state == "ready" and listStamp ~= B.clips then
         listStamp = B.clips
-        refreshFilterCombos()
         applyFilters()
         refreshRows()
     end
@@ -477,8 +516,10 @@ function M.RefreshTargets()
     Log.Write(string.format("AnimLib: %d targets (you, party, within %d m)", #targets, NEAR_M))
 end
 
+-- Pages wrap around, so Next on the last page goes back to the first.
 function M.Page(d)
-    page = math.max(1, math.min(pageCount(), page + d))
+    local n = pageCount()
+    page = ((page - 1 + d) % n) + 1
     refreshRows()
 end
 
