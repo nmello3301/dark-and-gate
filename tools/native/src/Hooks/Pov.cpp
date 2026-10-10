@@ -29,6 +29,7 @@
 #include "../Watchdog.h"
 #include "VisualLift.h"
 #include "AnimRate.h"
+#include "GenomeCapture.h"
 #include "MoveSpeed.h"
 #include "RealJump.h"
 
@@ -165,6 +166,7 @@ struct LuaState {
     float     moveWalk = 1.f;  // WASD speed multipliers (MoveSpeed.cpp)
     float     moveRun  = 1.f;
     bool      liftObjects = true;  // lift the meshes' render objects too (VisualLift)
+    int       genomeCapture = 0;   // 1 = log spell genome events (GenomeCapture.cpp)
     int       jumpMode = 0;        // 0 visual lift, 1 real (RealJump.cpp)
     float     strafeSign = 1.f;
     float     landSpeed = 3.f;
@@ -265,6 +267,7 @@ void PollLuaFile()
     s.moveRun  = ValF(buf, "move_run", 1.f);
     s.liftObjects = ValI(buf, "lift_objects", 1) != 0;
     s.jumpMode = ValI(buf, "jump_mode", 0);
+    s.genomeCapture = ValI(buf, "genome_capture", 0);
     s.strafeSign = ValF(buf, "strafe_sign", 1.f);
     s.landSpeed = ValF(buf, "rj_land_speed", 3.f);
     s.wallH = ValF(buf, "rj_wall_h", 1.3f);
@@ -1153,6 +1156,7 @@ void OnFrame(void* gameplayCam)
     dag::visuallift::Refresh();
     dag::animrate::Set(g_lua.animInst, g_lua.animRate);
     dag::animrate::Record(g_lua.recInst);
+    dag::genomecapture::SetCapture(g_lua.genomeCapture != 0);
     dag::animrate::SetClipRates(g_lua.clipInst, g_lua.clipRates);
     dag::movespeed::Set(g_lua.moveWalk, g_lua.moveRun);
     if (!g_lua.on) g_status.applied = false;

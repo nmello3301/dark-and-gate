@@ -78,7 +78,7 @@ void FindStringTable()
                      static_cast<unsigned long long>(g_gstPtr - reinterpret_cast<uintptr_t>(mod)));
 }
 
-bool FsText(uint32_t id, char* out, size_t cap)
+bool FsTextRaw(uint32_t id, char* out, size_t cap)
 {
     out[0] = 0;
     if (id == 0xffffffffu || !g_gstPtr) return false;
@@ -184,7 +184,7 @@ void RecordNodeLocked(void* node, uint8_t* ctx)
                   val[8], val[9], val[10], val[11], val[12], val[13], val[14], val[15]);
     uint32_t fsId = 0; std::memcpy(&fsId, val, 4);
     char name[256];
-    if (!FsText(fsId, name, sizeof(name))) std::snprintf(name, sizeof(name), "-");
+    if (!FsTextRaw(fsId, name, sizeof(name))) std::snprintf(name, sizeof(name), "-");
     std::fprintf(g_recFile, "t=%lu node=%p class=%s anim=%s raw=%s loop=%u rate=%.3f name=%s\n",
                  now - g_recStart, node, NodeClass(node), guid, raw, loopV[0], rate, name);
     std::fflush(g_recFile);
@@ -219,7 +219,7 @@ float ClipRateFor(uint8_t* ctx)
     if (!found) {
         char txt[64];
         r = 0.f;
-        if (FsText(fs, txt, sizeof(txt))) {
+        if (FsTextRaw(fs, txt, sizeof(txt))) {
             for (int i = 0; i < g_numClip; ++i) if (_stricmp(txt, g_clip[i].id) == 0) { r = g_clip[i].rate; break; }
         }
         if (g_fsCacheN < kFsCache) g_fsCache[g_fsCacheN++] = { fs, r };
@@ -416,5 +416,12 @@ void Record(uintptr_t instance)
 }
 
 long Hits() { return g_hits.load(); }
+
+bool FsText(uint32_t id, char* out, size_t cap)
+{
+    if (!out || cap == 0) return false;
+    if (!g_gstTried) FindStringTable();
+    return FsTextRaw(id, out, cap);
+}
 
 }  // namespace dag::animrate

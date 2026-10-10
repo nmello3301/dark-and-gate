@@ -48,4 +48,10 @@ uint8_t* WriteCall5(uint8_t* callSite, void* newTarget);
 // allocated near enough or if callSite[0] != 0xE8.
 uint8_t* InstallFarCall5(uint8_t* callSite, void* newTarget);
 
+// Same as InstallFarCall5 for a 5-byte `E9` tail JMP. The hook must have
+// the target's signature and return the target's result (it runs as the
+// callee). Returns the OLD jump target, or nullptr if jmpSite[0] != 0xE9
+// or no stub could be allocated in range.
+uint8_t* InstallFarJmp5(uint8_t* jmpSite, void* newTarget);
+
 }  // namespace dag::patternscan

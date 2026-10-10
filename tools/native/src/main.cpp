@@ -15,6 +15,7 @@
 
 #include "Config.h"
 #include "Hooks/Camera.h"
+#include "Hooks/GenomeCapture.h"
 #include "Hooks/Mouselook.h"
 #include "Hooks/MoveSpeed.h"
 #include "Hooks/RealJump.h"
@@ -94,6 +95,9 @@ BOOL APIENTRY DllMain(HMODULE /*module*/, DWORD reason, LPVOID /*reserved*/)
         // load, before the game's threads run that code.
         dag::movespeed::Install();
         dag::realjump::Install();
+        // Spell animation event capture (docs/spikes/genome-capture.md);
+        // patched now, logs only while native-pov.txt genome_capture=1.
+        dag::genomecapture::Install();
         // Freeze reporter (FREEZE: lines in native.log if frames stop).
         dag::watchdog::Start();
     } else if (reason == DLL_PROCESS_DETACH) {

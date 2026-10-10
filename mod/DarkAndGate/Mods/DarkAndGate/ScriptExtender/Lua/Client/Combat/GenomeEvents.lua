@@ -23,6 +23,7 @@
 local Log       = Ext.Require("Shared/Log.lua")
 local SpellAnims = Ext.Require("Client/Combat/SpellAnims.lua")
 local spells    = Ext.Require("data/spells.lua")
+local FullPov   = Ext.Require("FullPov.lua")
 
 local M = {}
 
@@ -193,7 +194,13 @@ end
 M.ProbeArgs = probeArgs
 
 function M.Register()
-    Ext.RegisterConsoleCommand("dag_genome_try", function(_, slot, role)
+    Ext.RegisterConsoleCommand("dag_genome_try", function(_, slot, role, force)
+        -- 2026-10-10: guessed args CRASHED the game (native, in the queue
+        -- call). Disabled until the native capture gives the real layout.
+        if force ~= "force" then
+            Log.Write("Genome try: disabled (guessed args crash the game); capture the real event with !dag_genome_events first")
+            return
+        end
         slot, role = slot or "all", role or "prepare"
         local me = player()
         if not me then return end
@@ -216,9 +223,13 @@ function M.Register()
         if a == "on" or a == "1" then
             logging, seen = true, {}
             Log.Write("Genome: logging the player's animation gameplay events. Cast Fire Bolt vanilla, then select + right-click cancel, then !dag_genome_events off")
+            FullPov.SetGenomeCapture(true)
+            Log.Write("Genome: native capture ON -> native-genome-capture.txt")
         else
             logging = false
             Log.Write(string.format("Genome: logging off, %d events", #seen))
+            FullPov.SetGenomeCapture(false)
+            Log.Write("Genome: native capture OFF")
             saveTemplate()
         end
     end)

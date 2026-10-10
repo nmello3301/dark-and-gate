@@ -66,6 +66,9 @@ local S = {
     -- Jump mode: 0 = visual lift (default), 1 = real position (RealJump.cpp,
     -- docs/spikes/real-lift.md). strafe_sign flips A/D steering in the air.
     jump_mode = 0,
+    -- 1 = the DLL logs every spell genome event to
+    -- native-genome-capture.txt (GenomeCapture.cpp, docs/spikes/genome-capture.md).
+    genome_capture = 0,
     strafe_sign = 1,
     rj_land_speed = 3.0,
     rj_wall_h = 1.5,
@@ -257,8 +260,8 @@ local function writeState()
     if S.on and USE_BONE_ANCHOR then refreshCache(e, now) end
 
     local line = string.format(
-        "on=%d active=%d anim_inst=%s anim_rate=%.3f clip_inst=%s clip_rates=%s rec_inst=%s lift_objects=%d jump_mode=%d strafe_sign=%d rj_land_speed=%.2f rj_wall_h=%.2f head_smooth=%.2f move_walk=%.3f move_run=%.3f visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
-        S.on and 1 or 0, active and 1 or 0, S.anim_inst, S.anim_rate, S.clip_inst, S.clip_rates, S.rec_inst, S.lift_objects, S.jump_mode, S.strafe_sign, S.rj_land_speed, S.rj_wall_h, S.head_smooth, S.move_walk, S.move_run, (S.on and cache.visual) or "0", S.anchor, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
+        "on=%d active=%d anim_inst=%s anim_rate=%.3f clip_inst=%s clip_rates=%s rec_inst=%s lift_objects=%d jump_mode=%d genome_capture=%d strafe_sign=%d rj_land_speed=%.2f rj_wall_h=%.2f head_smooth=%.2f move_walk=%.3f move_run=%.3f visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
+        S.on and 1 or 0, active and 1 or 0, S.anim_inst, S.anim_rate, S.clip_inst, S.clip_rates, S.rec_inst, S.lift_objects, S.jump_mode, S.genome_capture, S.strafe_sign, S.rj_land_speed, S.rj_wall_h, S.head_smooth, S.move_walk, S.move_run, (S.on and cache.visual) or "0", S.anchor, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
         S.jump_seq, math.floor(S.jump_ms + 0.5), S.jump_h, S.jump_k,
         S.dump, cache.sock or -1, cache.skel or 0, x, y, z,
         (S.on and #cache.meshes > 0) and table.concat(cache.meshes, ",") or "0",
@@ -328,6 +331,13 @@ function M.SetJumpMode(mode)
     pcall(writeState)
 end
 function M.JumpMode() return S.jump_mode == 1 and "real" or "visual" end
+
+-- Native capture of the spell genome events (GenomeCapture.cpp).
+function M.SetGenomeCapture(on)
+    S.genome_capture = on and 1 or 0
+    lastWrite = 0
+    pcall(writeState)
+end
 function M.SetRealJumpTuning(strafeSign, landSpeed, wallH)
     if strafeSign then S.strafe_sign = strafeSign < 0 and -1 or 1 end
     if landSpeed then S.rj_land_speed = landSpeed end

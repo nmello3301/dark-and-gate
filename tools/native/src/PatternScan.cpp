@@ -212,4 +212,40 @@ uint8_t* InstallFarCall5(uint8_t* callSite, void* newTarget)
     return WriteCall5(callSite, stub);
 }
 
+uint8_t* InstallFarJmp5(uint8_t* jmpSite, void* newTarget)
+{
+    if (!jmpSite || jmpSite[0] != 0xE9) return nullptr;
+    int32_t oldDisp;
+    std::memcpy(&oldDisp, jmpSite + 1, sizeof(oldDisp));
+    uint8_t* oldTarget = jmpSite + 5 + oldDisp;
+
+    // Same 12-byte MOV RAX / JMP RAX stub as InstallFarCall5. RAX is
+    // volatile at a tail jump, so clobbering it is safe.
+    void* reach = newTarget;
+    const ptrdiff_t direct = reinterpret_cast<uint8_t*>(newTarget) - (jmpSite + 5);
+    if (direct > INT32_MAX || direct < INT32_MIN) {
+        constexpr size_t kStubSize = 16;
+        uint8_t* stub = AllocNearRWX(jmpSite, kStubSize);
+        if (!stub) return nullptr;
+        stub[0] = 0x48;
+        stub[1] = 0xB8;
+        std::memcpy(stub + 2, &newTarget, sizeof(void*));
+        stub[10] = 0xFF;
+        stub[11] = 0xE0;
+        std::memset(stub + 12, 0xCC, kStubSize - 12);
+        FlushInstructionCache(GetCurrentProcess(), stub, kStubSize);
+        reach = stub;
+    }
+
+    const int32_t disp32 =
+        static_cast<int32_t>(reinterpret_cast<uint8_t*>(reach) - (jmpSite + 5));
+    DWORD oldProtect = 0;
+    if (!VirtualProtect(jmpSite, 5, PAGE_EXECUTE_READWRITE, &oldProtect)) return nullptr;
+    std::memcpy(jmpSite + 1, &disp32, sizeof(disp32));
+    DWORD tmp = 0;
+    VirtualProtect(jmpSite, 5, oldProtect, &tmp);
+    FlushInstructionCache(GetCurrentProcess(), jmpSite, 5);
+    return oldTarget;
+}
+
 }  // namespace dag::patternscan

@@ -48,4 +48,9 @@ void SetClipRates(uintptr_t instance, const char* spec);
 // Calls scaled by a clip rate since the spec was set.
 long ClipHits();
 
+// FixedString id -> text through ls::gGlobalStringTable (found lazily on
+// the first call). SEH-guarded; false and "" on any failure. Used by
+// GenomeCapture.cpp.
+bool FsText(uint32_t id, char* out, size_t cap);
+
 }  // namespace dag::animrate
