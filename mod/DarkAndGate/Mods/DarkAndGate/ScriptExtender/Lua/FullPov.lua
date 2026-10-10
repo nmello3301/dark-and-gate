@@ -65,7 +65,7 @@ local S = {
     jump_mode = 0,
     strafe_sign = 1,
     rj_land_speed = 3.0,
-    rj_wall_h = 1.3,
+    rj_wall_h = 1.5,
     -- WASD speed multipliers for the DLL's ground-speed lever
     -- (Client/Movement/Movement.lua, docs/spikes/move-speed.md).
     move_walk = 1.0,

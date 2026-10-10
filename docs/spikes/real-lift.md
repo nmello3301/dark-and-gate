@@ -245,6 +245,6 @@ Lever **L1** in `tools/native/src/Hooks/RealJump.cpp`, behind `!dag_jump_mode re
 
 - **Physics scene:** the falling Update's call to `GroundProbe` (`0x141bd7480`, unique pattern `4C 8B 42 30 4C 8D 4D 60 48 8B 92 80 00 00 00 48 8D 4D 70 F3 0F 11 74 24 28 F3 0F 11 44 24 20 E8`, +31) is patched to learn the physics scene (r8).
 - **Sweep:** `scene->vt[0x50](scene, float radius, vec3* from, vec3* to, Result*, 5, 0x20, 0x8100080, 1, -1, -1)`, read from GroundProbe. `Result` is 0x40 bytes; distance at +0x18, `FLT_MAX` = no hit.
-- **Walls:** sphere r = 0.25, swept along the frame's step + 0.35 m at chest height (`jump.wall_check_m`, 1.3 m above the feet). A hit stops horizontal motion (`RJUMP wall …`). The first version also swept at the knee (0.45 m); the 2026-10-10 playtest showed rocks and debris catching the jump.
+- **Walls:** sphere r = 0.25, swept along the frame's step + 0.35 m at chest height (`jump.wall_check_m`, 1.5 m above the feet; 1.3 m in the first chest-only build). A hit stops horizontal motion (`RJUMP wall …`). The first version also swept at the knee (0.45 m); the 2026-10-10 playtest showed rocks and debris catching the jump.
 - **Ceiling:** while rising, a sweep from head (feet + 1.6 m) to the next head height + 0.15 m. A hit hands the state back with vy = 0, so the engine's gravity takes over (`RJUMP ceiling …`).
 - **Landing:** hand-back fall speed capped (`jump.land_speed`, 3 m/s; the k = 3 curve ends at about 13 m/s). Lua clears the last jump clip at touchdown (`__stop__`).

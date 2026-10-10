@@ -101,7 +101,7 @@ return {
         mode          = "real",   -- 2026-10-10 playtest: real jump approved
         strafe_sign   = -1,       -- A/D in the air (playtest: +1 was reversed)
         land_speed    = 3.0,      -- m/s, max fall speed handed back at the end of the curve
-        wall_check_m  = 1.3,      -- real mode: wall check height above the feet (chest; rocks pass under)
+        wall_check_m  = 1.5,      -- real mode: wall check height above the feet (chest; rocks pass under; 2026-10-10 tuned 1.3 -> 1.5)
         -- 2026-10-10: no take-off windup (the Cast clip felt clunky; jumps
         -- that skipped it felt much better) -> ascend, descend only.
         use_cast      = false,
