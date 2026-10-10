@@ -314,6 +314,17 @@ function M.Jump(seq, durMs, height, flatness)
     pcall(writeState)
 end
 
+-- Hand the DLL the starting seq without a jump (jump_ms 0). The DLL treats
+-- the first seq it reads as a sync, not a jump; with jump_seq left at 0
+-- (= its own default) that sync never happened and the FIRST real jump of
+-- a session was swallowed (playtest 2026-10-10: "first couple of jumps
+-- glitch"). Called once at load by Jump.lua.
+function M.SyncJumpSeq(seq)
+    S.jump_seq, S.jump_ms = seq, 0
+    lastWrite = 0
+    pcall(writeState)
+end
+
 -- Per-character play rate through the DLL's PlayAnimation hook.
 -- inst: hex address of ent.AnimationBlueprint.Instance (nil = off).
 function M.SetAnimRate(inst, rate)

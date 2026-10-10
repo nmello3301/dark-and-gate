@@ -1,6 +1,6 @@
 # Spell animations: which clips, and who plays them
 
-**Status:** 2026-10-10. Recording plus stats verified; event layouts captured ([genome-capture.md](genome-capture.md)); playback by replaying BG3's select / cancel events is built, not verified in-game yet.
+**Status:** 2026-10-10. **Verified in-game**: each spell's prepare → loop → cast → recover plays through BG3's own select / cancel events. The clips come from the caster's class casting set (see the last sections), with the prepare VFX and sounds. Works while moving and in the air; Fire Bolt, Fireball and Misty Step all checked.
 
 ## The recording ([anim-record-2026-10-10.txt](../anim-record-2026-10-10.txt))
 

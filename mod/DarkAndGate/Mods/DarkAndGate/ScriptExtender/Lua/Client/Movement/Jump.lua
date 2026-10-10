@@ -362,6 +362,7 @@ local function onActions(busy, label)
 end
 
 function M.Register()
+    FullPov.SyncJumpSeq(J.seq)   -- so the DLL doesn't take the first jump for its sync
     MCM.DefineBool("jump_enabled", D.enabled, "Jump on Space (first person)")
     -- Osi.PlayAnimation is an Osiris task; if it roots Gale while moving,
     -- !dag_jump_play_anims off keeps the lift without the clips.
