@@ -271,12 +271,13 @@ function M.Register(side)
     -- Keep the head hidden: the engine sometimes writes RenderPasses back.
     -- Movement round (2026-10-09): a 1000 ms safety check (was 100 ms) plus
     -- an immediate re-hide when the player's equipment or visual changes
-    -- (Spike11.WatchVisualEvents), which is when new head / helmet
+    -- (Spike11.PollVisualChange, a 200 ms signature check), which is when new head / helmet
     -- renderables appear.
     local ENFORCE_MS = 1000
     local lastEnforceMs = 0
     local function tickHeadHide()
         local now = Ext.Utils.MonotonicTime()
+        if lastHideHead and Spike11 and Spike11.PollVisualChange then pcall(Spike11.PollVisualChange) end
         local due = Spike11 and Spike11.TakeEventRequest and Spike11.TakeEventRequest()
         if lastHideHead and (due or now - lastEnforceMs >= ENFORCE_MS) and Spike11 and Spike11.Enforce then
             lastEnforceMs = now

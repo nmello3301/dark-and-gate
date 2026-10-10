@@ -254,44 +254,53 @@ function M.Enforce(why)
     end
 end
 
--- Equipment / visual change events on the player ask for an immediate
--- Enforce (picked up by NativeBridge's tick, so the new renderables exist).
--- Which subscriptions the client accepts is logged once.
+-- Equipment / visual changes on the player ask for an immediate Enforce
+-- (picked up by NativeBridge's tick). 2026-10-09: subscribing with
+-- Ext.Entity.OnChange / OnCreateDeferred at load crashed the game before
+-- the main menu (native, not catchable), so instead a cheap signature of
+-- the player's visual (root attachments + helmet sub-visuals) is compared
+-- every 200 ms while the head is hidden; a change = gear / visual swap.
 local eventRequest = nil
-local function playerHandle()
+local lastSig, lastSigAt = nil, 0
+local function visualSignature()
     local okE, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
-    return okE and ents and ents[1] or nil
+    local eh = okE and ents and ents[1] or nil
+    if not eh then return nil end
+    local ent = Ext.Entity.Get(eh)
+    if ent == nil then return nil end
+    local parts = { tostring(eh) }
+    pcall(function()
+        local root = ent.Visual.Visual
+        parts[#parts + 1] = tostring(root)
+        for _, att in ipairs(root.Attachments) do parts[#parts + 1] = tostring(att.Visual) end
+    end)
+    pcall(function()
+        for slot, data in pairs(ent.ClientEquipmentVisuals.Equipment) do
+            if tostring(slot) == "Helmet" then
+                for _, sub in ipairs(data.SubVisuals or {}) do parts[#parts + 1] = tostring(sub) end
+            end
+        end
+    end)
+    return table.concat(parts, "|")
 end
-local function onEvent(name)
-    return function(ent)
-        local p = playerHandle()
-        if p and ent and tostring(ent) ~= tostring(p) then return end
-        eventRequest = name
-    end
+function M.PollVisualChange()
+    local now = Ext.Utils.MonotonicTime()
+    if now - lastSigAt < 200 then return end
+    lastSigAt = now
+    local sig = visualSignature()
+    if sig and lastSig and sig ~= lastSig then eventRequest = "visual/equipment change" end
+    lastSig = sig
 end
 function M.TakeEventRequest()
     local r = eventRequest
     eventRequest = nil
     return r
 end
-function M.WatchVisualEvents()
-    local ok = {}
-    for _, c in ipairs({ "ClientEquipmentVisuals", "Visual", "EquipmentVisual" }) do
-        local okS = pcall(Ext.Entity.OnChange, c, onEvent(c))
-        if okS then ok[#ok + 1] = c .. "(change)" end
-    end
-    for _, c in ipairs({ "VisualChangedEvent", "EquipmentSlotChangedEvent", "VisualLoaded" }) do
-        local okS = pcall(Ext.Entity.OnCreateDeferred, c, onEvent(c))
-        if okS then ok[#ok + 1] = c .. "(create)" end
-    end
-    Log.Write("Spike11: head re-hide watches " .. (#ok > 0 and table.concat(ok, ", ") or "NOTHING (periodic 1 s check only)"))
-end
 
 function M.Register()
     Ext.RegisterConsoleCommand("dag11_dump", function() dump() end)
     Ext.RegisterConsoleCommand("dag11_hide", function() apply(true) end)
     Ext.RegisterConsoleCommand("dag11_show", function() apply(false) end)
-    M.WatchVisualEvents()
     Log.Write("Spike11: registered dag11_dump / dag11_hide / dag11_show (v5 RenderPasses)")
 end
 

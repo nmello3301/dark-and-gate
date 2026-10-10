@@ -63,9 +63,8 @@ If 5.1 shows the wrong clip, paste nothing: the `SpellAnimation` line has every 
 
 | # | Do | Expect (log) | Tell me |
 | --- | --- | --- | --- |
-| 6.1 | At load the client logs `Spike11: head re-hide watches …` (which events it subscribed to) | — | — |
-| 6.2 | MMB (cursor), open the inventory, unequip and re-equip the helmet / chest armour, close, MMB back | `Spike11: re-hide on <Component> event -> N renderable(s) re-hidden` | Head/face stays hidden after the swap? Any flash? |
-| 6.3 | Walk around 30 s | no `re-hid` spam; at most a few `Spike11: re-hid …` lines (1 s check) | Face showing at any point? |
+| 6.1 | MMB (cursor), open the inventory, unequip and re-equip the helmet / chest armour, close, MMB back | `Spike11: re-hide on visual/equipment change event -> N renderable(s) re-hidden` (a 200 ms check of the player's visual attachments; the first build's engine event subscriptions crashed the game at load and are gone) | Head/face stays hidden after the swap? Any flash? |
+| 6.2 | Walk around 30 s | no `re-hid` spam; at most a few `Spike11: re-hid …` lines (1 s check) | Face showing at any point? |
 
 ## Feel questions (the log can't answer these)
 
