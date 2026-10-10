@@ -22,6 +22,7 @@
 
 local Log       = Ext.Require("Shared/Log.lua")
 local SpellAnims = Ext.Require("Client/Combat/SpellAnims.lua")
+local spells    = Ext.Require("data/spells.lua")
 
 local M = {}
 
@@ -130,10 +131,22 @@ local function value(a)
     return a.Value
 end
 
+local probeArgs   -- defined with the probe below
+
 -- Queue the spell event for `anims` (SpellAnims.For result). Returns ok, why.
 function M.PlaySpell(ent, anims)
     local t = loadTemplate()
-    if not t then return false, "no template (run the !dag_genome_events capture once)" end
+    local layout = spells.spell_anims and spells.spell_anims.event_slots
+    if not t and layout then
+        -- Slots found with !dag_genome_try (data/spells.lua event_slots).
+        local args = probeArgs(-1, "")
+        for role, idx in pairs(layout) do
+            if anims[role] and args[idx + 1] then args[idx + 1].Value = anims[role].key end
+        end
+        local ok, err = pcall(function() Ext.System.AnimationBlueprint:QueueGameplayEventToGenome(ent, M.SPELL_EVENT, args) end)
+        return ok, ok and "genome event (data slots)" or tostring(err)
+    end
+    if not t then return false, "no template and no data/spells.lua spell_anims.event_slots yet (find them with !dag_genome_try)" end
     local args = {}
     for i, a in ipairs(t.args) do
         local v = value(a)
@@ -155,7 +168,49 @@ function M.Cancel(ent)
     return ok, ok and ("event " .. t.cancel) or tostring(err)
 end
 
+-- Probe (2026-10-10): the to-genome queue is hidden from Lua, so the
+-- vanilla args can't be captured there. Send the event with the documented
+-- 21-arg type layout and our ids in chosen slots, and watch what plays.
+--   !dag_genome_try all [role]   every AnimationSimpleName slot = role's id
+--   !dag_genome_try <i> [role]   only slot i (0-based) = role's id
+-- role = prepare (default) | loop | cast | recover (Fire Bolt's ids).
+local TYPES = { "AnimationSimpleName", "AnimationSimpleName", "AnimationSimpleName", "AnimationSimpleName",
+    "AnimationSimpleName", "AnimationSimpleName", "ShortNameSet", "ShortNameSet", "ShortNameSet",
+    "AnimationSimpleName", "AnimationSimpleName", "AnimationSimpleName", "Bool", "Bool", "Enum", "Bool",
+    "Enum", "Bool", "Enum", "FixedString", "AnimationSetID" }
+probeArgs = function(slot, id)
+    local args = {}
+    for i, ty in ipairs(TYPES) do
+        local v
+        if ty == "AnimationSimpleName" then v = ((slot == "all") or (tonumber(slot) == i - 1)) and id or ""
+        elseif ty == "Bool" then v = false
+        elseif ty == "Enum" then v = 0
+        else v = "" end
+        args[i] = { Type = ty, Value = v }
+    end
+    return args
+end
+M.ProbeArgs = probeArgs
+
 function M.Register()
+    Ext.RegisterConsoleCommand("dag_genome_try", function(_, slot, role)
+        slot, role = slot or "all", role or "prepare"
+        local me = player()
+        if not me then return end
+        local a = SpellAnims.For("Projectile_FireBolt", me)
+        local id = a and a[role] and a[role].key
+        if not id then Log.Write("Genome try: no " .. role .. " id"); return end
+        for _, n in ipairs({ 21, 12 }) do
+            local args = probeArgs(slot, id)
+            while #args > n do table.remove(args) end
+            local ok, err = pcall(function()
+                Ext.System.AnimationBlueprint:QueueGameplayEventToGenome(me, M.SPELL_EVENT, args)
+            end)
+            Log.Write(string.format("Genome try: event %s slot=%s %s=%s (%d args) -> %s", M.SPELL_EVENT:sub(1, 8), slot, role,
+                id:sub(1, 8), n, ok and "queued (watch Gale)" or ("ERROR " .. tostring(err))))
+            if ok then break end
+        end
+    end)
     Ext.Events.Tick:Subscribe(function() if logging then pcall(poll) end end)
     Ext.RegisterConsoleCommand("dag_genome_events", function(_, a)
         if a == "on" or a == "1" then
