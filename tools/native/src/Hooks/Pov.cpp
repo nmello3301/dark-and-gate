@@ -157,6 +157,7 @@ struct LuaState {
     uintptr_t visual = 0;      // player's root rf Visual (body lift)
     uintptr_t animInst = 0;    // GenomeBlueprintInstance to play at animRate (AnimRate.cpp)
     float     animRate = 1.f;
+    uintptr_t recInst  = 0;    // instance to record animations of (AnimRate.cpp)
     float     smooth   = 0.f;  // head-bone smoothing 0..0.9 (0 = raw pose)
     float     moveWalk = 1.f;  // WASD speed multipliers (MoveSpeed.cpp)
     float     moveRun  = 1.f;
@@ -239,6 +240,9 @@ void PollLuaFile()
         s.animInst = static_cast<uintptr_t>(std::strtoull(v, nullptr, 16));
     }
     s.animRate = ValF(buf, "anim_rate", 1.f);
+    if (const char* v = FindVal(buf, "rec_inst")) {
+        s.recInst = static_cast<uintptr_t>(std::strtoull(v, nullptr, 16));
+    }
     s.smooth   = ValF(buf, "head_smooth", 0.f);
     if (s.smooth < 0.f) s.smooth = 0.f;
     if (s.smooth > 0.9f) s.smooth = 0.9f;
@@ -1101,6 +1105,7 @@ void OnFrame(void* gameplayCam)
     dag::visuallift::SetLift(g_jump.lift);
     dag::visuallift::Refresh();
     dag::animrate::Set(g_lua.animInst, g_lua.animRate);
+    dag::animrate::Record(g_lua.recInst);
     dag::movespeed::Set(g_lua.moveWalk, g_lua.moveRun);
     if (!g_lua.on) g_status.applied = false;
     dag::watchdog::Stage("WriteStatus");
@@ -1203,14 +1208,14 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
             // while walking the Visual reported the lift but the mesh (and
             // the head bone) stayed down, so the rise is measured on the
             // head mesh's render object, not taken from the Visual.
+            // 2026-10-10: the mesh object at MeshBinding+0x28 never moved
+            // (meshRise=0 on every jump), so the camera added the full lift
+            // on top of a head that already rose: 2x at a 10x jump. The
+            // rise is now measured on the head bone itself (its height
+            // above the pivot vs the same at rest).
             float missing = lift;
-            float meshY = 0;
-            bool meshOk = false;
-            {
-                void* obj = nullptr;
-                if (dag::safemem::ReadPtr(reinterpret_cast<void*>(g_head.mb), 0x28, obj) && obj)
-                    meshOk = dag::safemem::ReadFloat(obj, 0x1C, meshY) && std::isfinite(meshY);
-            }
+            const float meshY = head[1];
+            const bool meshOk = std::isfinite(meshY);
             if (meshOk && pivotOk) {
                 const float off = meshY - pivot[1];
                 if (!g_jump.active) {

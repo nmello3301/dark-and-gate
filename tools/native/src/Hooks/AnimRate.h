@@ -30,4 +30,12 @@ const char* State();
 // of that character, e.g. locomotion not driven by PlayAnimation nodes).
 long Hits();
 
+// Animation recorder (2026-10-10): while `instance` is set, every
+// PlayAnimation-type node that runs for it logs a line to
+// DarkAndGate/native-anim-rec.txt when its animation input (socket 0)
+// starts or changes: time, node class, the 16 raw bytes of the input
+// (formatted as a GUID too), LoopAnimation, PlayRate. Lua resolves the ids
+// to clip names (!dag_anim_record off). 0 = stop.
+void Record(uintptr_t instance);
+
 }  // namespace dag::animrate

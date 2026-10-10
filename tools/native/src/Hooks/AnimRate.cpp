@@ -15,6 +15,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 #include "../Log.h"
@@ -46,6 +47,98 @@ Slot g_slots[kSlots];
 std::atomic<long> g_hits{ 0 };
 bool g_hitLogged = false;
 
+// ---- recorder ------------------------------------------------------
+std::atomic<uintptr_t> g_recInst{ 0 };
+FILE*  g_recFile = nullptr;
+long   g_recLines = 0;
+DWORD  g_recStart = 0;
+uintptr_t g_base = 0;
+struct RecNode { uintptr_t node; uint8_t val[16]; DWORD lastSeen; };
+constexpr int kRecNodes = 64;
+RecNode g_rec[kRecNodes] = {};
+
+// Pointer to socket `s`'s variable value (16 bytes), or nullptr.
+uint8_t* SocketVar(uint8_t* ctx, int s)
+{
+    __try {
+        uint8_t* socks = *reinterpret_cast<uint8_t**>(ctx + 0x48);
+        if (!socks) return nullptr;
+        const uint16_t idx = *reinterpret_cast<uint16_t*>(socks + s * 2);
+        uint8_t** storePtr = *reinterpret_cast<uint8_t***>(ctx + 0x78 + static_cast<size_t>(idx >> 15) * 8);
+        if (!storePtr || !*storePtr) return nullptr;
+        uint8_t* p = *storePtr + static_cast<size_t>(idx & 0x7fff) * 16;
+        volatile uint8_t probe = p[15];
+        (void)probe;
+        return p;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return nullptr;
+    }
+}
+
+bool Copy16(const uint8_t* p, uint8_t out[16])
+{
+    __try { std::memcpy(out, p, 16); return true; } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
+const char* NodeClass(void* node)
+{
+    uintptr_t vt = 0;
+    __try { vt = *reinterpret_cast<uintptr_t*>(node); } __except (EXCEPTION_EXECUTE_HANDLER) { return "?"; }
+    switch (vt - g_base) {
+    case 0x5891200: return "PlayAnimation";
+    case 0x588DCE0: return "FromActiveSet";
+    case 0x588DC78: return "FromSpecificSet";
+    default: return "other";
+    }
+}
+
+std::atomic_flag g_recLock = ATOMIC_FLAG_INIT;   // Genome may run on worker threads
+
+void RecordNodeLocked(void* node, uint8_t* ctx);
+void RecordNode(void* node, uint8_t* ctx)
+{
+    if (g_recLock.test_and_set(std::memory_order_acquire)) return;   // busy: skip, never block the game
+    RecordNodeLocked(node, ctx);
+    g_recLock.clear(std::memory_order_release);
+}
+
+void RecordNodeLocked(void* node, uint8_t* ctx)
+{
+    uint8_t* a = SocketVar(ctx, 0);
+    uint8_t val[16];
+    if (!a || !Copy16(a, val)) return;
+    const DWORD now = GetTickCount();
+    const uintptr_t n = reinterpret_cast<uintptr_t>(node);
+    RecNode* slot = nullptr;
+    RecNode* oldest = &g_rec[0];
+    for (auto& r : g_rec) {
+        if (r.node == n) { slot = &r; break; }
+        if (r.lastSeen < oldest->lastSeen) oldest = &r;
+    }
+    // New node, changed animation, or the node ran again after a pause
+    // (a clip restarted) -> one line.
+    const bool fresh = !slot || std::memcmp(slot->val, val, 16) != 0 || now - slot->lastSeen > 300;
+    if (!slot) { slot = oldest; slot->node = n; }
+    std::memcpy(slot->val, val, 16);
+    slot->lastSeen = now;
+    if (!fresh || !g_recFile) return;
+    uint8_t loopV[16] = {}, rateV[16] = {};
+    if (uint8_t* l = SocketVar(ctx, 1)) Copy16(l, loopV);
+    if (uint8_t* r = SocketVar(ctx, 2)) Copy16(r, rateV);
+    float rate = 0; std::memcpy(&rate, rateV, 4);
+    char raw[40]; int rl = 0;
+    for (int i = 0; i < 16; ++i) rl += std::snprintf(raw + rl, sizeof(raw) - rl, "%02x", val[i]);
+    // GUID as BG3 prints it: little-endian Data1..3, then 8 bytes as-is.
+    char guid[40];
+    std::snprintf(guid, sizeof(guid), "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+                  val[3], val[2], val[1], val[0], val[5], val[4], val[7], val[6],
+                  val[8], val[9], val[10], val[11], val[12], val[13], val[14], val[15]);
+    std::fprintf(g_recFile, "t=%lu node=%p class=%s anim=%s raw=%s loop=%u rate=%.3f\n",
+                 now - g_recStart, node, NodeClass(node), guid, raw, loopV[0], rate);
+    std::fflush(g_recFile);
+    ++g_recLines;
+}
+
 bool Lookup(uintptr_t inst, float& r)
 {
     for (auto& s : g_slots) {
@@ -76,6 +169,7 @@ void __fastcall HookExec(void* node, uint8_t* ctx)
 {
     float r;
     const uintptr_t inst = ctx ? *reinterpret_cast<uintptr_t*>(ctx + 0x18) : 0;
+    if (inst && inst == g_recInst.load(std::memory_order_relaxed)) RecordNode(node, ctx);
     if (!inst || !Lookup(inst, r)) { g_orig(node, ctx); return; }
     float* p = PlayRateVar(ctx);
     if (!p) { g_orig(node, ctx); return; }
@@ -92,6 +186,7 @@ void Install()
 {
     g_state = -1;
     HMODULE mod = GetModuleHandleW(nullptr);
+    g_base = reinterpret_cast<uintptr_t>(mod);
     uint8_t* fn = dag::patternscan::Find(mod, kExecPattern);
     if (!fn) { strcpy_s(g_why, "failed: Execute pattern not found (game patched?)"); dag::log::Writef("RATE: %s", g_why); return; }
 
@@ -160,6 +255,34 @@ void Set(uintptr_t instance, float rate)
 }
 
 const char* State() { return g_why; }
+
+void Record(uintptr_t instance)
+{
+    const uintptr_t cur = g_recInst.load();
+    if (instance == cur) return;
+    if (instance && g_state == 0) Install();
+    if (instance && g_state != 1) return;
+    if (cur) {
+        g_recInst.store(0);
+        while (g_recLock.test_and_set(std::memory_order_acquire)) Sleep(1);
+        if (g_recFile) { std::fclose(g_recFile); g_recFile = nullptr; }
+        g_recLock.clear(std::memory_order_release);
+        dag::log::Writef("RATE: animation recorder OFF (%ld lines in native-anim-rec.txt)", g_recLines);
+    }
+    if (!instance) return;
+    wchar_t buf[MAX_PATH];
+    const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return;
+    wchar_t path[MAX_PATH * 2];
+    swprintf_s(path, L"%s\\Larian Studios\\Baldur's Gate 3\\Script Extender\\DarkAndGate\\native-anim-rec.txt", buf);
+    if (_wfopen_s(&g_recFile, path, L"w") != 0) g_recFile = nullptr;
+    std::memset(g_rec, 0, sizeof(g_rec));
+    g_recLines = 0;
+    g_recStart = GetTickCount();
+    g_recInst.store(instance);
+    dag::log::Writef("RATE: animation recorder ON for instance %p (file %s)", reinterpret_cast<void*>(instance),
+                     g_recFile ? "open" : "FAILED");
+}
 
 long Hits() { return g_hits.load(); }
 

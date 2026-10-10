@@ -88,3 +88,5 @@ Ext.Require("Client/Movement/Movement.lua").Register()
 -- Swing.lua and the jump (Client/AnimLib/Tags.lua).
 local AnimBrowser = Ext.Require("Client/AnimLib/Browser.lua")
 AnimBrowser.Register()
+-- !dag_anim_record on|off: which clips BG3 itself plays on the player.
+Ext.Require("Client/AnimLib/Recorder.lua").Register()
