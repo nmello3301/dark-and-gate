@@ -293,6 +293,20 @@ Damage = (weapon or spell dice + modifiers) × zone × swing scale × (1 − DR)
 
 All numbers here are starting values for playtest tuning, exposed in MCM where practical.
 
+## Real-time combat rules (decided 2026-10-12)
+
+Full rules: [design/combat-rules.md](design/combat-rules.md) and [design/interaction-and-world.md](design/interaction-and-world.md); one row per decision in DECISIONS.md. Built 2026-10-12, playtest [playtest/realtime-combat.md](playtest/realtime-combat.md).
+
+- **Fights are real time on Brawl's loop.** No turns; vanilla combat groups join together. Rules stay BG3's at **1 turn = 6 s**. All reactions and Sneak Attack are off for now, each with a rework note ([rework-list.md](rework-list.md)). `!dag_rt off` is for debugging only.
+- **Enemy AI uses our rules.** Pathfinding and choices are Brawl's / BG3's. Melee goes through our swing (same weapon data, committed direction, arc, wall stop, shield). Archers and casters go through our projectiles, with human-like aim: reaction delay, error cone, misjudged lead (`data/ai.lua`). Other spells take our cast time; area spells commit their point when the cast starts.
+- **Getting hit.** The player has no hit reaction; enemies keep BG3's and die at 0 HP. A hit doesn't interrupt a cast.
+- **Shields are passive.** About 40 % comes off any hit that lands on the shield disc.
+- **Downed.** At 0 HP the camera orbits the body (spectate with Space) for a **3 min bleed-out**, paused while someone revives. Revive = **hold F 3 s within 1.5 m**: up at 1 HP; only letting go of F or another action cancels it. Companions revive first (except in camp). Death is undone only the vanilla ways.
+- **C = crouch = BG3's sneak.** Crouched speed is 60 %, and the vision cones are hidden in first person. Standing in an enemy's cone = detected. Crouched in a cone = d20 + Stealth vs passive Perception once per enemy per 6 s; failing pulls its group into the fight.
+- **F interacts** with what the crosshair is on (talk, loot, doors, levers, pick up, climb), exactly like a click; only interactive things are highlighted. A downed ally in range wins: hold F to revive. BG3's panels (dialogue, loot, trade, inventory, map) free the mouse and pause our input.
+- **V** cycles companions between Follow, Wait and Go to camp. **M** opens BG3's map; fast travel works, and first person comes back after it.
+- **Targeted spells:** LMB picks characters under the crosshair (line of sight, BG3's range). The spell fires at the max count once READY; the key again fires early; RMB cancels. **Area spells** show BG3's own ring at the crosshair point, clamped to range, from arming to cast or cancel.
+
 ## Impact feedback and HUD
 
 Hits should feel as heavy as Blade & Sorcery through layered animation, effects and camera work, without simulating bodies physically.

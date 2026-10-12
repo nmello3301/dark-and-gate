@@ -212,10 +212,40 @@ Checklist folded in from the old step 0. These items were written on 2026-10-09 
 - [ ] Our swings, spells, mana and jump keep working while the loop runs. Remove the "skip swing animations in turn-based" workaround.
 - [ ] Dialogue and cutscenes pause the fight and resume it, and the fight ends cleanly. Companions take part through Brawl; their M3 behaviour comes later.
 
-**Real-time rules (task of 2026-10-12, Part 1).** Built 2026-10-12, not yet verified in-game:
-- [ ] Brawl's loop drives every fight: hostile groups never drop into turn-based, vanilla combat groups join together, `!dag_rt off` gives BG3's turn-based back (debugging only; also typed in the client console).
-- [ ] 1 turn = 6 s, logged the first time each timed status lands in a fight (`RT: status BLESS on Gale: 10 turns -> 60 s`).
-- [ ] Reactions and Sneak Attack are off in real-time fights: the hidden status `DAG_NO_REACTIONS` (`ActionResourceBlock(ReactionActionPoint)` + `ActionResourceBlock(SneakAttack_Charge)`) on every fighter, removed when it leaves combat or on `!dag_rt off` (`Server/Combat/NoReactions.lua`).
+**Real-time combat pass (task of 2026-10-12, Parts 1-11).** Built 2026-10-12 (`cb90cdf`..`df5a8a8`), none of it verified in-game yet. Playtest: [playtest/realtime-combat.md](playtest/realtime-combat.md), one pass, 13 steps.
+- [ ] Part 1: Brawl's loop drives every fight: hostile groups never drop into turn-based, vanilla combat groups join together, `!dag_rt off` gives BG3's turn-based back (debugging only; also typed in the client console).
+- [ ] Part 1: 1 turn = 6 s, logged the first time each timed status lands in a fight (`RT: status BLESS on Gale: 10 turns -> 60 s`).
+- [ ] Part 1: reactions and Sneak Attack are off in real-time fights: the hidden status `DAG_NO_REACTIONS` (`ActionResourceBlock(ReactionActionPoint)` + `ActionResourceBlock(SneakAttack_Charge)`) on every fighter, removed when it leaves combat or on `!dag_rt off` (`Server/Combat/NoReactions.lua`).
+- [ ] Part 2: AI on our rules (`Server/Combat/NpcCombat.lua`). Melee goes through our server swing (the longsword data: committed direction, arc, reach, wall stop, shield; weapon dice on our damage path). Ranged goes through our projectiles, with reaction delay, aim error and a misjudged lead (`data/ai.lua`). Casters wait our cast time; area spells commit their point at cast start.
+- [ ] Part 2: the player takes hits with no hit reaction (`Server/Combat/Damage.lua`, direct Health write; the lethal hit uses `Osi.ApplyDamage`); enemies keep theirs.
+- [ ] Part 3: passive shields, 40 % off hits that land on the disc (all hit paths).
+- [ ] Part 4: downed: bleed-out 3 min (our self-stabilising downed status), orbit camera (DLL) with spectate, hold-F revive (3 s, 1.5 m, 1 HP), companions revive first, banner + timer + bar.
+- [ ] Part 5: C = crouch = BG3 sneaking (x0.6 speed, the eye follows the head, cones hidden), our stealth checks (d20 + Stealth vs passive Perception, one per NPC per 6 s), uncrouched in a cone = detected.
+- [ ] Part 6: knobs `!dag_ai_aim`, `!dag_ai_react`, `!dag_bleedout`, `!dag_revive_time`, `!dag_shield_pct`, `!dag_crouch_speed`, `!dag_stealth_debug`; per-tick watchdog (`!dag_watchdog`).
+- [ ] Part 7: `Client/LookAt.lua`: what the crosshair is on (world point, character, interactive object), server classification ([spikes/lookat.md](spikes/lookat.md)).
+- [ ] Part 8: F interacts like a click (talk, loot, doors, levers, pickup, climb); BG3 panels pause our input.
+- [ ] Part 9: V cycles Follow / Wait / Go to camp, with a toast.
+- [ ] Part 10: M opens BG3's map, fast travel works, first person comes back cleanly (level_seq reset, settle after loads / teleports).
+- [ ] Part 11: targeted spells (LMB picks, auto-fire at max when READY, key again = early, RMB cancels), area indicators (BG3's ring at the crosshair; walls / cones as rows of rings).
+
+Built on assumptions the playtest has to confirm (each logs which way it went):
+- `hit.Shape.PhysicsObject.Entity` names entities (else the nearby scan is used).
+- `GetEntitiesAroundPosition` works on the client (else a sliced item scan).
+- Our MultiEffectInfos load and `FXScale` scales the ring (else the vanilla 4 m ring).
+- `Darkness.SneakingConesVisibility` is writable.
+- NPC visual clones animate through the cast request queue.
+- `Osi.Use` opens containers like a click.
+- The camp procs work on one companion.
+- `Shield.Forward`'s sign is right (checked against walking, flips itself).
+- `Stats.Skills[7]` is Stealth.
+
+Known gaps (not bugs yet, rework later):
+- Weapon actions picked by Brawl (Topple, Piercing Shot...) deal plain weapon damage; their extra effects are lost.
+- Throws stay vanilla.
+- NPCs show no cast bar while casting.
+- Area-spell explosions hit the player with a hit reaction unless a player-controlled character is inside the clone's `area_m` (then none for everyone in it).
+- Instant-kill effects can still kill a downed player.
+- Direct-HP damage skips concentration checks and on-damage passives.
 
 Rework notes, one per disabled rule (full table in [rework-list.md](rework-list.md)):
 - [ ] Opportunity attacks: real-time melee has no "leaving reach" moment. Could return as a free swing when an enemy turns its back inside your reach.
