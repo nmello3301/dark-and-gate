@@ -31,6 +31,7 @@ Estimate changes vs. 2026-10-07 originals:
 - M3 shrunk 3–6 → 2–4 weeks because the Brawl AI import handles the
   tactical loop; M3 is now mostly archetype tuning + Follow/Wait/Camp UX.
 - Everything after M3 unchanged.
+- **2026-10-12 check-in:** the player side of M1b took four days, much faster than estimated, because BG3's own systems (genome events, class casting sets, the falling state) carried it. What's left is real-time AI (step 1) and the projectile system (step 4). Both carry engine unknowns, so the 5–8 week M1b estimate stays for now.
 
 The biggest risk to these numbers is animation work in M1 and M2, not code.
 
@@ -110,109 +111,136 @@ See **Archived (future)** below for bone reads, anim speed/cancel and ragdoll pu
 
 ## M1b — Combat vertical slice
 
-Depends on M1a camera + mouselook being usable. Everything else in M1a can
-land in parallel with M1b work.
+**Gate 1 needs:** the Emerald Grove gate fight in DEV-SAVE played start to finish, in real time and in first person:
+- a longsword plus Fire Bolt, Fireball and Misty Step;
+- goblins that fight back;
+- and it has to feel tight.
 
-### Status (2026-10-08): player-side combat works in first person ✅
+### Status (2026-10-12): the player side works; the enemy side doesn't exist yet
 
-Verified in-game on DEV-SAVE (fixes 1–5, `patches/m1b-fix*`):
+What works in first person:
+- Gale walks, runs and jumps for real.
+- He swings a 3-hit chain.
+- He channels spells with BG3's own class casting animations, VFX and sounds, aims them along the crosshair, and pays mana for them.
 
-- **LMB** swings a melee chain: 3 swings, real BG3 one-handed attack clip, hits land through a camera-relative swing arc (geometric cone + line of sight) and the server applies the damage.
-- **1–0** arm a spell, **LMB** casts it at the crosshair, **RMB** or the same key cancels. Fire Bolt hits the character under the crosshair (6° aim assist) or the ground/object you aim at; Fireball and Misty Step land where you look.
-- **Mana** is server-owned: pool from class level + casting stat, regeneration, per-spell cost, refund if a cast fails.
-- **HUD**: crosshair + one status line (mana, armed spell, what you are aiming at).
-- **MMB** toggles mouse-look; with the cursor visible, LMB/RMB go to the vanilla UI.
-- `!dag_spawn_dummy [hostile] [name]` spawns an adult goblin to test on.
+What doesn't: as soon as the goblins turn hostile, BG3's turn-based combat takes over. The Brawl import (`Server/Brawl/`) is still quarantined (nothing requires it), so every test so far has been against idle goblins or spawned dummies. **Real-time fights are the critical path.**
 
-Lessons recorded for the next pass: `Ext.Require` only works at load time; `hit.Distance` is a 0–1 fraction of the ray; BG3's view forward is `+InvViewMatrix` column 3; ray hits can't name an entity from Lua; Fire Bolt is `Projectile_FireBolt`; `Osi.UseSpellAtPosition` takes 6 args; scripted `PlayAnimation` stalls the player during turn-based combat.
+Lessons recorded:
+- `Ext.Require` only works at load time.
+- `hit.Distance` is a 0–1 fraction of the ray.
+- BG3's view forward is `+InvViewMatrix` column 3.
+- Ray hits can't name an entity from Lua.
+- Fire Bolt is `Projectile_FireBolt`.
+- `Osi.UseSpellAtPosition` takes 6 args.
+- Scripted `Osi.PlayAnimation` roots the walk and stalls in turn-based combat. BG3's own genome events don't.
 
-### Tooling (M1b)
+### Done (verified in-game)
 
-- [x] **Animation browser + gallery** (`!dag_animlib`) *(verified 2026-10-09: browsing, filters, paged gallery, notes, per-character play rate; 9 picks in [anim-picks-2026-10-09.txt](anim-picks-2026-10-09.txt))*: per-character clip list with filters, solo play, tagging by mapping id (per-rig overrides, DFLT fallback), coverage by rig, a looping grid of preview copies with floating labels, play-rate slider when the blueprint exposes `PlayRate`. Written 2026-10-09, playtest: [playtest/animlib.md](playtest/animlib.md).
+Movement and camera:
+- [x] Walk by default, Left Shift toggles run. *(2026-10-09: "walking and running feel great")*
+- [x] Real jump: body and camera move together, base height 0.8 m, gentle touchdown, wall and ceiling collision, ascend + descend clips, momentum kept while walking or running. *(2026-10-10: "chef's kiss")*
 
-- [x] **Per-character animation play rate** (DLL hook on the shared PlayAnimation-node Execute, [anim-clock.md](spikes/anim-clock.md)): slow motion, freeze and 2x on Gale's clips. *(verified 2026-10-09)*
-- [ ] Use the 9 picks: swing chain, prepare -> loop, left-hand attack, jump cast/ascend/descend/recover, with their noted speeds. Needs **exact-clip playback** (a mapping id plays the character's own stance version; see DECISIONS 2026-10-09).
-
-### Known issues (M1b)
-
-- **WASD dead after LMB spam** (reproducible, 3 fast clicks): queued `Osi.PlayAnimation` tasks stalled the Osiris queue. Fix written 2026-10-09 (queue purge before each clip + watchdog + swing recovery gate); `!dag_unstick` remains the manual escape. Awaiting playtest.
-- **First swing animation only plays on the second LMB** (damage lands on the first): queue purge now runs before every clip (2026-10-09), awaiting playtest.
-- **Jump while walking showed no lift** with the head-bone camera: the camera now adds any lift the body is missing; the DLL re-lifts the body when an engine write bypasses the hooks and logs `body writes: hook/refresh/external` per jump, plus `JUMP lift … liftSrc=body|body+camera-fill|camera-only` (2026-10-09 movement round).
-- **Jump clips while moving:** `Osi.PlayAnimation` may stop the walk. `data.jump.moving_anims = "auto"` checks the first moving jump and skips clips on moving jumps if they root the walk (logged); awaiting playtest.
-- **Face shows for a moment** while playing: the engine writes the hidden head's `RenderPasses` back. Re-hide check every 1000 ms (was 100 ms) plus an immediate re-hide when the player's visual / equipment changes (200 ms signature check; engine event subscriptions crashed the game at load), helmet sub-visuals included, written 2026-10-09; playtest [movement-round.md](playtest/movement-round.md) step 6.
-- **Turn-based takes over** as soon as an enemy turns hostile — the real-time loop (Brawl import) is the fix. Until then swing animations are skipped in turn-based combat; `!dag_unstick` clears a stuck action queue.
-- **Attack animations move Gale ahead of the camera**: the camera follows the engine pivot, not the body. Head-bone anchor written 2026-10-09 (`Head_M` via the Granny world pose, [m1b-head-bone.md](spikes/m1b-head-bone.md)); awaiting playtest.
-- Camera can dip under the map while casting in turn-based (moot once combat is real-time).
-- Rare frames of Gale's head showing while walking.
-- All 3 swings use the same clip (`HUM_M_Rig_DFLT_CMBT_Melee_RHand_01_Attack`); per-swing clips and timing come with the animation pass.
-- Head-zone hits need target height (bone reads); hits are torso/limbs for now.
-
-### Checklist
-
-- [ ] Brawl import wired in: `Server/Brawl/` strips committed, `BrawlAdapter.lua` bridges Brawl's AI into our net channels and mana check.
-- [ ] Real-time combat loop (Brawl's RealTime pulse) running on DEV-SAVE goblins.
-- [x] Generic melee chain: 3 swings with timing data, one shared attack clip. *(2026-10-08 — uses `data/weapons/longsword.lua` values for whatever is equipped)*
-- [ ] Longsword: tested with a longsword actually equipped; chain picked from the equipped weapon's family.
+Melee:
+- [x] Single-click 3-swing chain with the developer's clip picks (RHand, LHand, RHand). *(2026-10-09, unarmed only)*
 - [x] Interim hit check: camera-relative swing arc (cone + line of sight), torso / limb zones, server-validated damage. *(2026-10-08)*
-- [ ] Blade-path hit check, with head / torso / limb zones. Uses `GetBoneWorldPos`.
-- [ ] **AI melee goes through our swing + blade-path system, not BG3 attack rolls.** `Pick.decideActionOnTarget` adapted so melee choices resolve through the swing scheduler, not `Osi.UseSpell`.
-- [ ] **First-person movement: floaty Space jump** (visual lift of body + camera, BG3 jump clips in phases, `data/movement.lua`). Written 2026-10-09, awaiting playtest.
-- [ ] **Cylinder hitboxes** for every character (aim, melee, server validation), lifted while jumping. Written 2026-10-09, awaiting playtest.
-- [ ] **Head-bone camera anchor** (`Head_M` from the live Granny world pose; fixes the camera falling behind Gale during attacks). Written 2026-10-09, awaiting playtest.
-
-**Movement round (2026-10-09), written, awaiting playtest** ([playtest/movement-round.md](playtest/movement-round.md)):
-
-- [ ] Camera A/B: `!dag_pov_anchor head|pivot` identical at rest; head glued to the body walking / running / attacking / jumping. Per-frame `CAM delta` stats in native.log and on the status line; optional `!dag_pov_smooth` (off by default).
-- [x] Walk by default, Left Shift toggles run (BG3WASD config; Shift+W autoforward unbound). *(verified 2026-10-09: "walking and running feel great")*
-- [ ] Speed knob: `move.walk_speed / run_speed / speed_mult` (`data/movement.lua`, MCM), `Movement.AddModifier / RemoveModifier`, `!dag_speed_mult / !dag_walk_speed / !dag_run_speed`. Native lever: the MoveController template fetch ([move-speed.md](spikes/move-speed.md)).
-- [ ] Locomotion clips play at the gait's speed multiplier (no foot sliding).
-- [ ] Jump while walking / running keeps the movement and steering; same arc; no double jump; lift source logged per jump. **2026-10-09 playtest: no visible jump while moving**, although the DLL lifted the Visual every frame. Fix 2: the camera measures the head mesh's real rise and fills the rest; the body re-applies the lift after engine writes when the mesh doesn't follow (`LIFT: … force on`, `JUMP lift … meshRise=`).
-- [x] Jump while walking / running (camera + body rise, movement kept). *(verified 2026-10-09)*
-- [x] Single-click swing chain. *(verified 2026-10-09, unarmed; weapons not tested yet)*
-- [x] Standing jump. *(verified 2026-10-09)* Clips now cast → ascend → descend fitted to the airtime (x1.35); the Recover clip is dropped (developer: unneeded).
-- [ ] Swing / cast / spell prepare loop in the air take priority over the jump clips; the arc continues; landing waits for the action.
-- [x] Spell prepare loop while a spell is armed (ids from the spell's `SpellAnimation` stats); LMB casts, RMB / same key cancels to idle. *(verified 2026-10-10)*
-- [x] Channelled casting, straight-line aim, unlimited range, momentum in the air. *(verified 2026-10-10: "spells feel great, aim feels perfect")*
-- [ ] **Casting slows instead of blocking** (2026-10-10): the prepare animation is off for now (it stopped all movement); while the cast time runs on the ground, speed x0.7 (`casting_speed_mult`, Movement modifier "casting"); ready to release = full speed. Next pass: casting animation without rooting.
-- [ ] **Channelled casting** (2026-10-09): selecting a hotbar spell starts casting (prepare animation, priority over the jump clips); held indefinitely; LMB releases only after the cast time (`data/spells.lua` `cast_time_s = 2.0`, server-checked via `SpellArm`). Later: cast time scaled by character traits.
-- [ ] **Shooting spells have no max range**: aim point up to 100 m along the crosshair, spell `TargetRadius` raised to 100 at stats load (`Shared/SpellRange.lua`).
-- [ ] **Straight-line spell aim** (2026-10-10): one ray from the eye along the crosshair; first hit wins (character hitbox cylinder exactly on the line, else world, else the point 100 m out). No cone assist, no ground-plane / 18 m "ahead" fallback. HUD shows `character|world|far <distance>` from the same function.
-- [ ] **Momentum kept when arming in the air**: the prepare clip (an Osiris PlayAnimation, which stops the walk) waits for the landing while airborne and moving.
-- [ ] **Animation recorder** (`!dag_anim_record on|off`, 2026-10-10): the DLL logs every animation BG3 starts on the player (PlayAnimation-node Execute hook, socket 0); Lua resolves ids to clip names -> `anim-record.txt`. Use: record BG3's own jump (Z) and spell casts to pick the right jump / prepare clips.
-- **Recorder first run (2026-10-10):** the node's animation input is a FixedString (`0x28400001`-style ids), not a GUID; the DLL now decodes it through the game's global string table (`name=` in `native-anim-rec.txt`).
-- [x] **Real jump** works *(verified 2026-10-10: body moves with the camera, "everything is awesome")*; now the default (`jump.mode = "real"`), base height 0.8 m, A/D fixed (`strafe_sign = -1`).
-- [x] Real jump polish: gentle touchdown (fall speed capped at 3 m/s), jump clip cleared at touchdown, wall (chest height, 1.5 m) and ceiling collision in the air, no take-off windup (ascend + descend). *(verified 2026-10-10: "chef's kiss")*
-- [ ] **Real jump lift** (native, decided 2026-10-10): the character's real height follows the jump curve; body, camera, hitbox and collision together; clears low obstacles ([real-lift.md](spikes/real-lift.md)). First build: `RealJump.cpp` pushes the client Falling state and steers it from its Update hook (curve height, take-off momentum + WASD); the engine lands it. `!dag_jump_mode real` (default still visual). Not yet: lateral wall collision in the air, the server's copy of the arc.
-- **Body follows the jump (2026-10-10):** result: the engine rewrites the render objects every frame (7904 of 7920 lifted writes), so at 5.5 m the body still trailed ~3 m below the camera. Visual lift = fallback only.
-- **Body follows the jump (2026-10-10, attempt):** the drawn body is the meshes' render objects (`MeshBinding+0x28`), which the root-Visual lift never moved (head rose 0.26 of 5.5 m). The jump now lifts every render object through its own `SetWorldTranslate` (`JUMP objects …` line per jump; `!dag_lift_objects off` for A/B).
-- **10x jump test (2026-10-10):** casting in the air plays the cast animation in the air (wanted). At 5.5 m the camera rose ~2x the body (camera fill measured on a mesh object that never moves, `meshRise=0`) -> now measured on the head bone; the body parts looked disjointed (visual lift vs attachments at big heights). Candidate: use BG3's real jump movement instead of the visual lift.
-- [x] **Spell channel animations** *(verified 2026-10-10: "plays the correct animation, works while moving, overall perfect"; Fire Bolt, Fireball, Misty Step)*: each spell's own prepare (stretched to the cast time) -> loop at READY -> cast -> recover, via BG3's spell animation event (no rooting); `!dag_spell_anims`, cast-time modifiers, `!dag_cast_time`; capture of the event template with `!dag_genome_events` (playtest [spell-anims.md](playtest/spell-anims.md)).
-- [ ] Later: upper-body casting while walking (own blueprint with a masked layer, or an additive overlay experiment).
-- [x] **Class casting animations** *(verified 2026-10-10)*: the clip comes from the caster's class casting set (most levels; DECISIONS 2026-10-10), forced first in `AnimationSet` while channelling (`CastTags.lua`). Found by a vanilla-vs-ours state snapshot (`!dag_anim_state`) and a variants gallery (`!dag_spell_variants <spell> gallery`). Prepare VFX + sounds from the spell's stats (`SpellFx.lua`). Playback = BG3's own select / cancel genome events captured natively ([genome-capture.md](spikes/genome-capture.md)), so nothing roots the caster.
-- [ ] **First jump of a session swallowed** (playtest 2026-10-10: "the first couple of jumps glitch, then work"). Cause found: the DLL takes the first jump seq it reads as a sync and Lua started at 0 (= the DLL's default), so the first real jump became the sync. Fix: `FullPov.SyncJumpSeq` at load. Verify; if the second jump still glitches, look at the Falling Update hook being installed on the first jump (`RJUMP: Falling Update hooked`).
-- [x] (superseded) Spell prepare animations were the wrong clips (developer, 2026-10-10; fix later): check the logged `SpellAnimation` slot order.
-- **Known limitation:** any scripted clip (`Osi.PlayAnimation`) stops WASD movement on the ground too (jump clips, prepare loop). Animation playback that doesn't go through Osiris (native) would fix it; not scheduled.
-- [ ] First swing animates on a single click; single-click chain 1→2→3. **2026-10-09: cause found** — the auto-picked swing-1 clip was BG3's ranged attack (no clip in melee stances), so click 1 played nothing and click 2 (swing 2) did. Swings 1–3 now use the developer's picks (RHand, LHand, RHand) via `data/anim_tags.lua`; ranged clips excluded from the auto-pick.
-- [ ] Blocking and parry: **custom animations**; block only with a shield equipped, parry only with a weapon that can parry (decided 2026-10-08).
-- [x] Fire Bolt aimed at the crosshair (character aim assist, or ground / object point). *(2026-10-08)*
-- [x] Fireball cast at the crosshair. *(2026-10-08)*
-- [ ] Fireball ground preview.
-- [ ] **Projectile system v1 for spells** (decided 2026-10-10, [design/projectiles.md](design/projectiles.md)): Fire Bolt + Fireball fly our simulated path, swept-sphere hits against current cylinders (moving goblins can be hit), game projectile steered by the DLL, impact through an instant impact-variant spell.
-- [ ] **Spell cast charge bar** on the HUD: fills over the cast time, READY state when the loop starts; cancels / drains on RMB.
-- [ ] **Melee wall stop** (`wall = stop` default): swing damage window ends when the blade path hits world geometry; overhead / thrust ignore side walls.
-- [x] Misty Step to the crosshair (`Osi.UseSpellAtPosition`, 6 args). *(2026-10-08)*
-- [x] Mana pool, regeneration and costs (server-owned). *(2026-10-08)*
-- [x] Hotbar on keys 1–0, arm-then-cast (LMB cast, RMB / same key cancel). *(2026-10-08)*
-- [ ] Hotbar setup window (ImGui; `!dag_hotbar <slot> <spell>` works meanwhile — native tab is M4).
 - [x] Hit reactions (BG3's own, triggered by our server-side damage). *(2026-10-08)*
-- [ ] Blood / spark effects at the hit point.
-- [ ] Goblin enemies on the shared Brawl-adapted AI.
-- [ ] The Emerald Grove gate fight playable start to finish in DEV-SAVE.
-- [ ] **Gate 1 — combat feels tight.** Playtest notes written; go / no-go recorded in `DECISIONS.md`.
+
+Spells:
+- [x] Hotbar on keys 1–0: arm, LMB casts, RMB or the same key cancels. *(2026-10-08)*
+- [x] Mana pool, regeneration and costs (server-owned). *(2026-10-08)*
+- [x] Fire Bolt, Fireball and Misty Step at the crosshair. *(2026-10-08)*
+- [x] Channelled casting: 2 s cast time (server-checked), held as long as wanted. Straight-line aim (first cylinder on the line, else the world, else 100 m out), no max range for shooting spells, momentum kept when arming in the air. *(2026-10-10: "spells feel great, aim feels perfect")*
+- [x] Spell channel animations through BG3's own select / cancel events, with no rooting: each spell's prepare (stretched to the cast time), then the loop at READY, then cast, then recover. *(2026-10-10)*
+- [x] Class casting animations from the caster's top class (DECISIONS 2026-10-10), plus prepare VFX and sounds from the spell's stats. *(2026-10-10: "plays the correct animation, works while moving"; Fire Bolt, Fireball, Misty Step)*
+
+Tooling:
+- [x] Animation browser and gallery (`!dag_animlib`), per-character play rate (DLL). *(2026-10-09)*
+- [x] Animation recorder (`!dag_anim_record`), genome event capture (`!dag_genome_events`), animation state snapshot (`!dag_anim_state`), spell variants gallery (`!dag_spell_variants <spell> gallery`). *(2026-10-10)*
+
+### Road to Gate 1 (proposed order, 2026-10-12)
+
+Each step is one or two play sessions. Tick a box only after it is verified in-game.
+
+**Step 0: re-check sweep (one short session).** These items were written on 2026-10-09 and 10-10 and have been played over since, but were never signed off one by one. Do one pass on DEV-SAVE, then tick each item or reopen it as a bug.
+- [ ] The first jump of a session works (fix `42ba492`). If the second jump still glitches, look at the Falling Update hook being installed on the first jump (`RJUMP: Falling Update hooked`).
+- [ ] LMB spam (3 fast clicks) never leaves WASD dead, and `!dag_unstick` is never needed.
+- [ ] Head-bone camera: the view stays glued to the body while attacking, with no body drifting ahead of the camera.
+- [ ] Gale's face never flashes, including after a gear change.
+- [ ] Cylinder hitboxes: swing reach is measured to the cylinder's surface, and a goblin's cylinder matches its body.
+- [ ] Casting slows to x0.7 on the ground and returns to full speed at READY. The speed knob (`!dag_speed_mult`) works.
+- [ ] Locomotion clips play at the gait's speed (no foot sliding).
+- [ ] Swing or cast in the air: the action plays, the arc continues, and the landing waits for it.
+
+**Step 1: real-time fights (critical path).** Nothing else can be judged against a real fight until this works.
+- [ ] Wire the Brawl import: strip Swarm Mode and Leaderboard (one commit each), add `BrawlAdapter.lua`, and run the RealTime pulse so the DEV-SAVE gate fight never drops into turn-based.
+- [ ] Goblins act on Brawl's AI as it is, with BG3 attack rolls through `Osi.UseSpell` (temporary, replaced in step 2).
+- [ ] Our swings, spells, mana and jump keep working while the loop runs. Remove the "skip swing animations in turn-based" workaround.
+- [ ] Dialogue and cutscenes pause the fight and resume it; the fight ends cleanly; companions don't break it. Companions are part of the fight via Brawl; their M3 behaviour comes later.
+
+**Step 2: enemies use our combat rules.**
+- [ ] AI melee goes through our swing scheduler and hit check, validated by the same server code as the player's swings (DECISIONS 2026-10-08).
+- [ ] Getting hit: reaction, damage, and what a hit does to the player's channel (open question below).
+
+**Step 3: melee feel.**
+- [ ] A longsword actually equipped, with the chain picked from the equipped weapon's family. Needs exact-clip playback for picks that must be one specific clip (DECISIONS 2026-10-09).
+- [ ] Melee wall stop (`wall = stop`, the default): the swing's damage window ends when its path hits world geometry; overhead swings and thrusts ignore side walls.
+- [ ] Blood and spark effects at the hit point.
+- [ ] At the gate, decide whether the interim swing arc is good enough, or whether the blade-path check (weapon bone reads, see Archived) is needed for Gate 1.
+
+**Step 4: projectile system v1 for Fire Bolt and Fireball** ([design/projectiles.md](design/projectiles.md)). This step has the most engine unknowns, so it starts with a static Ghidra spike.
+- [ ] Spike, part 1: steer BG3's own projectile entity from the DLL and remove it on our hit. Fallback: the spell's trail effect on an invisible mover.
+- [ ] Spike, part 2: the instant, projectile-free "impact variant" of a spell. Can it be built at stats load from the original spell, or does it need shipped stats?
+- [ ] Server-owned flight and swept-sphere hits against current cylinders, so moving goblins can be hit.
+- [ ] The server's copy of a jumping player's height. The real jump is client-side, so today the server sees a jumping player standing on the ground (wrong for hits on or by jumpers).
+- [ ] Fireball ground preview.
+
+**Step 5: HUD stand-ins (ImGui, small, can slot in anywhere).** The full custom HUD is M4.
+- [ ] Spell cast charge bar: fills over the cast time, shows READY when the loop starts, drains on cancel.
+- [ ] Health and mana readable at a glance during the fight.
+- [ ] Optional: a hotbar setup window. `!dag_hotbar <slot> <spell>` covers it until the M4 tab.
+
+**Step 6: Gate 1.**
+- [ ] The Emerald Grove gate fight is playable start to finish in DEV-SAVE.
+- [ ] **Gate 1: combat feels tight.** Playtest notes written; go / no-go recorded in `DECISIONS.md`.
+
+### Open questions for the road ahead
+
+- **Getting hit while channelling.** DESIGN says a melee hit interrupts a cast of level 1+ and refunds half the mana. With 2 s channels, should a hit cancel the channel, reset its timer, or do nothing?
+- **Blocking and parry.** Proposed: move to M2 with the defence animations (they reuse the wall-stop path), not Gate 1.
+- **DESIGN.md has drifted** from the logged decisions:
+  - cast time;
+  - range;
+  - Q vs RMB to cancel;
+  - wall bounce vs stop;
+  - the projectile model;
+  - the HUD;
+  - the native plugin's role.
+
+  Proposed: one sync pass of DESIGN.md and its live artifact.
+
+### Known issues (open)
+
+- Turn-based combat takes over when enemies turn hostile (step 1). Until then, swing animations are skipped in turn-based combat, and the camera can dip under the map while casting there.
+- Ending the prepare loop sound stops **all** of the caster's sounds at that moment (`Ext.Audio.Stop`).
+- Prepare VFX, casting animations and the real jump are local only; other players see none of it yet (M6).
+- Forcing the casting set rewrites `AnimationSet.Entries`, which drops the engine's hidden per-entry tag pointers until a reload. No visible effect seen so far.
+- Bards and Sorcerers have no class casting set, so they use the default sets' first variant (a Bard gets the violin one).
+- Head-zone hits come from the cylinder's height fraction, not bones.
+- Rare frames of Gale's head showing while walking (re-check in step 0).
+
+### History (superseded, kept for the trail)
+
+- **Visual-only floaty jump (2026-10-09) → real jump (2026-10-10).** The engine rewrites the mesh render objects every frame, so a visual lift detached the body from the camera at height ([m1b-visual-lift.md](spikes/m1b-visual-lift.md), [real-lift.md](spikes/real-lift.md)).
+- **Spell prepare via `Osi.PlayAnimation` (rooted the walk) → BG3's genome select / cancel events (2026-10-10).** Along the way, the prepare was briefly turned off, and the "draw the weapon on arm" theory was tried and dropped (vanilla doesn't draw the staff).
+- **Aim-assist cone and ground / 18 m fallback → one straight line (2026-10-10).**
+- **Auto-picked swing-1 clip was BG3's ranged attack (played nothing in melee stances) → the developer's picks (2026-10-09).**
+- **Animation recorder, first run:** the node's animation input is a FixedString, which is now decoded through the global string table.
+- **Not scheduled:** upper-body casting while walking (own blueprint with a masked layer, or an additive overlay). The full-body cast pose while walking is accepted (DECISIONS 2026-10-10).
 
 ## M2 — Combat breadth
 
 - [ ] All 10 weapon families with their chains
+- [ ] Blocking and parry with **custom animations**: block only with a shield, parry only with a parry-capable weapon (decided 2026-10-08). Reuses the melee "swing obstructed" path (DECISIONS 2026-10-10). Moved from M1b on 2026-10-12, pending the developer's OK.
 - [ ] All spell types from the targeting table (projectile, area, cone, single target, teleport, wall, summon, self, reaction)
 - [ ] Bows, crossbows and thrown weapons — draw / hold-forever / release, damage+speed by draw, reload for crossbows; arrows on the shared projectile system with a **DLL-driven arrow** that sticks into walls and targets ([design/projectiles.md](design/projectiles.md))
 - [ ] **Bow draw charge bar** (separate style from the spell bar): draw %, a marker at the ~30% minimum shot, full-draw tick
