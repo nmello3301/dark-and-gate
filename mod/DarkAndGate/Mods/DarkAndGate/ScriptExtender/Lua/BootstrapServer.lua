@@ -59,6 +59,8 @@ Ext.Require("Server/Combat/Interact.lua").Register()
 local Downed = Ext.Require("Server/Combat/Downed.lua")
 Downed.Register()
 Ext.Require("Server/Combat/NpcCombat.lua").SetReviveHandler(Downed)
+-- Crouch = sneaking, and our stealth checks.
+Ext.Require("Server/Combat/Stealth.lua").Register()
 
 -- Animation browser + gallery (server side: preview copies).
 local AnimLib = Ext.Require("Server/AnimLib.lua")

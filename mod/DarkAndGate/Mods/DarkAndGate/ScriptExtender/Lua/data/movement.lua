@@ -128,6 +128,13 @@ return {
         loco_deadband = 0.03,
         idle_speed    = 0.3,
     },
+    -- C = crouch = BG3's sneaking (Client/Crouch.lua, DECISIONS 2026-10-12).
+    --   speed_mult   walk / run x this while crouched (SNEAKING also caps to walk)
+    --   hide_cones   hide BG3's vision cones while in first person
+    crouch = {
+        speed_mult = 0.6,
+        hide_cones = true,
+    },
     air_action = {
         swing_s      = 0.9,
         cast_s       = 1.2,

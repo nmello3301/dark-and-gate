@@ -96,9 +96,11 @@ Ext.Require("Client/HUD/Overlay.lua").Register()
 Ext.Require("Client/Interact.lua").Register()
 -- Downed: orbit camera, spectate, banner, revive bar.
 Ext.Require("Client/Downed.lua").Register()
+-- C = crouch (BG3 sneaking): speed, eye, cones.
+Ext.Require("Client/Crouch.lua").Register()
 Ext.Require("Shared/ConsoleForward.lua").Forward({
     "dag_ai", "dag_ai_aim", "dag_ai_react", "dag_ai_debug", "dag_shield_pct", "dag_shield_debug",
-    "dag_bleedout", "dag_revive_time", "dag_downme",
+    "dag_bleedout", "dag_revive_time", "dag_downme", "dag_stealth", "dag_stealth_debug",
 })
 
 -- First-person movement: floaty Space jump (visual lift in the DLL,
