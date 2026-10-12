@@ -197,6 +197,9 @@ Lessons recorded for the next pass: `Ext.Require` only works at load time; `hit.
 - [x] Fire Bolt aimed at the crosshair (character aim assist, or ground / object point). *(2026-10-08)*
 - [x] Fireball cast at the crosshair. *(2026-10-08)*
 - [ ] Fireball ground preview.
+- [ ] **Projectile system v1 for spells** (decided 2026-10-10, [design/projectiles.md](design/projectiles.md)): Fire Bolt + Fireball fly our simulated path, swept-sphere hits against current cylinders (moving goblins can be hit), game projectile steered by the DLL, impact through an instant impact-variant spell.
+- [ ] **Spell cast charge bar** on the HUD: fills over the cast time, READY state when the loop starts; cancels / drains on RMB.
+- [ ] **Melee wall stop** (`wall = stop` default): swing damage window ends when the blade path hits world geometry; overhead / thrust ignore side walls.
 - [x] Misty Step to the crosshair (`Osi.UseSpellAtPosition`, 6 args). *(2026-10-08)*
 - [x] Mana pool, regeneration and costs (server-owned). *(2026-10-08)*
 - [x] Hotbar on keys 1–0, arm-then-cast (LMB cast, RMB / same key cancel). *(2026-10-08)*
@@ -211,7 +214,9 @@ Lessons recorded for the next pass: `Ext.Require` only works at load time; `hit.
 
 - [ ] All 10 weapon families with their chains
 - [ ] All spell types from the targeting table (projectile, area, cone, single target, teleport, wall, summon, self, reaction)
-- [ ] Bows, crossbows and thrown weapons
+- [ ] Bows, crossbows and thrown weapons — draw / hold-forever / release, damage+speed by draw, reload for crossbows; arrows on the shared projectile system with a **DLL-driven arrow** that sticks into walls and targets ([design/projectiles.md](design/projectiles.md))
+- [ ] **Bow draw charge bar** (separate style from the spell bar): draw %, a marker at the ~30% minimum shot, full-draw tick
+- [ ] Projectile system v2: all projectile spells, instant rays, cone / area shape tests; Magic Missile stays homing
 - [ ] Class features in real time (Sneak Attack, Divine Smite, Rage, Action Surge, and the rest of the table)
 - [ ] AC as damage reduction; crits; advantage and disadvantage
 - [ ] First two-instance multiplayer smoke test
@@ -228,7 +233,7 @@ Lessons recorded for the next pass: `Ext.Require` only works at load time; `hit.
 ## M4 — Native UI
 
 - [ ] Prepare Hotbar tab in the native character menu
-- [ ] First-person HUD: crosshair and reticles, health and mana, hotbar strip
+- [ ] First-person HUD: crosshair and reticles, health and mana, hotbar strip — **developer's design in [design/hud.md](design/hud.md)** (health orb, mana orb, 10 slots, potion slots, XP bar, cast / draw charge bars); vanilla HUD hidden in first person
 - [ ] Enemy cast bars, hit markers, directional damage
 - [ ] Traversal highlights on vines, ladders, climbable walls, stairs and ledges
 
