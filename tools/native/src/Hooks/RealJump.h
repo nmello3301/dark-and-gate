@@ -50,4 +50,8 @@ void SetCameraForward(float fx, float fz);
 bool Active();
 const char* State();
 
+// A level change or a teleport (Lua bumps level_seq): the remembered WASD
+// character may be gone; forget it until the next WASD move.
+void ForgetCharacter();
+
 }  // namespace dag::realjump

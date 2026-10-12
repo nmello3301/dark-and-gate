@@ -22,6 +22,11 @@ return {
         revive_range_m   = 1.5,   -- reviver within this distance of the body
         revive_hp        = 1,     -- HP after a revive
         companion_range_m = 25,   -- companions come to revive from this far
-        orbit_distance_m = 3.5,   -- downed camera
+        orbit_distance_m = 3.5,   -- downed camera: distance from the body
+        orbit_up_m       = 0.6,   -- the point it circles, above the body's root
+        orbit_pitch_min  = -10,   -- degrees (+ = above, looking down)
+        orbit_pitch_max  = 70,
+        orbit_spin_deg_s = 120,   -- A / D or LMB / RMB held
+        orbit_tilt_deg_s = 60,    -- W / S held
     },
 }

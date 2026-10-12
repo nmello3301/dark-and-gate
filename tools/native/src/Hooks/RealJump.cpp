@@ -404,6 +404,13 @@ void NoteCharacter(void* character)
     }
 }
 
+void ForgetCharacter()
+{
+    if (g_char.exchange(nullptr)) dag::log::Writef("RJUMP: level change / teleport -> WASD character forgotten (re-learned on the next move)");
+    g_lastPosT.QuadPart = 0;
+    g_measVel[0] = g_measVel[1] = 0.f;
+}
+
 void SetStrafeSign(float s) { g_strafeSign = s < 0.f ? -1.f : 1.f; }
 void SetLandSpeed(float vmax) { if (vmax > 0.1f && vmax < 50.f) g_landSpeed = vmax; }
 void SetWallHeight(float h) { if (h > 0.2f && h < 3.f) g_wallH = h; }
@@ -413,6 +420,9 @@ void MeasureFrame()
     // Inertia: measured horizontal velocity of the WASD character.
     void* c = g_char.load(std::memory_order_relaxed);
     if (!c) return;
+    // A freed or reused object (after a level change) no longer has the
+    // character vtable: drop it instead of calling through it.
+    if (!VtIs(c, kCharVtRva)) { g_char.store(nullptr); g_lastPosT.QuadPart = 0; return; }
     float p[3];
     LARGE_INTEGER now; QueryPerformanceCounter(&now);
     if (!ReadPos(c, p)) return;
@@ -435,6 +445,7 @@ bool Start(float durMs, float h, float k, const float camFwdXZ[2], int seq)
     if (!g_getState || !g_counter) { dag::log::Writef("RJUMP: not available (%s)", g_why); return false; }
     uint8_t* c = static_cast<uint8_t*>(g_char.load());
     if (!c) { dag::log::Writef("RJUMP: no WASD character seen yet (move once first) -> visual lift"); return false; }
+    if (!VtIs(c, kCharVtRva)) { g_char.store(nullptr); dag::log::Writef("RJUMP: the WASD character is stale (level change?) -> visual lift"); return false; }
     if (camFwdXZ) SetCameraForward(camFwdXZ[0], camFwdXZ[1]);
     uint8_t* machine = nullptr;
     uint8_t* st = nullptr;

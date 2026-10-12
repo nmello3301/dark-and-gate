@@ -76,7 +76,23 @@ local S = {
     -- (Client/Movement/Movement.lua, docs/spikes/move-speed.md).
     move_walk = 1.0,
     move_run = 1.0,
+    -- Crouch = sneaking (Client/Crouch.lua): the DLL pauses its eye-height
+    -- calibration while crouched (the head bone lowers by itself).
+    crouch = 0,
+    -- Bumped on a level load / fast travel / teleport: the DLL resets its
+    -- head selection and forgets the WASD character (stale pointers).
+    level_seq = 0,
+    -- Downed orbit camera (Client/Downed.lua, Pov.cpp OrbitCommit).
+    orbit = 0, orbit_seq = 0, orbit_dist = 3.5, orbit_up = 0.6, orbit_pmin = -10, orbit_pmax = 70,
+    orbit_spin = 0, orbit_tilt = 0, orbit_rate = 120, orbit_tilt_rate = 60, orbit_vis = "0",
+    orbit_x = 0, orbit_y = 0, orbit_z = 0,
 }
+
+-- Level loads and teleports (2026-10-12, fast travel): first person goes
+-- inactive while the world is (re)loading and comes back after a settle
+-- delay, so the DLL re-presses Camera Rotate once BG3 takes input again.
+local settle = { loading = false, untilMs = 0, lastPos = nil, why = nil }
+local SETTLE_LOAD_MS, SETTLE_TP_MS, TELEPORT_M = 1000, 500, 8.0
 
 -- ---------------------------------------------------------------------
 -- Helpers
@@ -257,10 +273,24 @@ local function writeState()
         local tx, ty, tz = readTranslate(e)
         if tx then x, y, z = tx, ty, tz end
     end
+    -- A same-level teleport (waypoint, portal) changes no game state: a jump
+    -- of more than TELEPORT_M between two writes counts as one.
+    if e and settle.lastPos and not settle.loading then
+        local dx, dy, dz = x - settle.lastPos[1], y - settle.lastPos[2], z - settle.lastPos[3]
+        if dx * dx + dy * dy + dz * dz > TELEPORT_M * TELEPORT_M then M.Settle("teleport", SETTLE_TP_MS) end
+    end
+    if e then settle.lastPos = { x, y, z } end
+    if settle.loading or now < settle.untilMs then active = false
+    elseif settle.why then
+        Log.Write("FullPov: first person back after " .. tostring(settle.why) .. " (level_seq " .. S.level_seq .. ")")
+        settle.why = nil
+    end
     if S.on and USE_BONE_ANCHOR then refreshCache(e, now) end
 
     local line = string.format(
-        "on=%d active=%d menu=%d anim_inst=%s anim_rate=%.3f clip_inst=%s clip_rates=%s rec_inst=%s lift_objects=%d jump_mode=%d genome_capture=%d strafe_sign=%d rj_land_speed=%.2f rj_wall_h=%.2f head_smooth=%.2f move_walk=%.3f move_run=%.3f visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
+        "orbit=%d orbit_seq=%d orbit_dist=%.2f orbit_up=%.2f orbit_pmin=%.1f orbit_pmax=%.1f orbit_spin=%d orbit_tilt=%d orbit_rate=%.1f orbit_tilt_rate=%.1f orbit_vis=%s orbit_x=%.3f orbit_y=%.3f orbit_z=%.3f crouch=%d level_seq=%d on=%d active=%d menu=%d anim_inst=%s anim_rate=%.3f clip_inst=%s clip_rates=%s rec_inst=%s lift_objects=%d jump_mode=%d genome_capture=%d strafe_sign=%d rj_land_speed=%.2f rj_wall_h=%.2f head_smooth=%.2f move_walk=%.3f move_run=%.3f visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
+        S.orbit, S.orbit_seq, S.orbit_dist, S.orbit_up, S.orbit_pmin, S.orbit_pmax, S.orbit_spin, S.orbit_tilt, S.orbit_rate,
+        S.orbit_tilt_rate, S.orbit_vis, S.orbit_x, S.orbit_y, S.orbit_z, S.crouch, S.level_seq,
         S.on and 1 or 0, active and 1 or 0, S.menu and 1 or 0, S.anim_inst, S.anim_rate, S.clip_inst, S.clip_rates, S.rec_inst, S.lift_objects, S.jump_mode, S.genome_capture, S.strafe_sign, S.rj_land_speed, S.rj_wall_h, S.head_smooth, S.move_walk, S.move_run, (S.on and cache.visual) or "0", S.anchor, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
         S.jump_seq, math.floor(S.jump_ms + 0.5), S.jump_h, S.jump_k,
         S.dump, cache.sock or -1, cache.skel or 0, x, y, z,
@@ -416,6 +446,58 @@ local function abLine()
 end
 M.ABLine = abLine
 
+-- Go inactive now, bump level_seq, come back after ms (level load /
+-- fast travel / teleport; the server also sends PovSettle on Teleported).
+function M.Settle(why, ms)
+    settle.untilMs = Ext.Utils.MonotonicTime() + (ms or SETTLE_TP_MS)
+    settle.why = why
+    S.level_seq = S.level_seq + 1
+    cache.at = -100000
+    Log.Write(string.format("FullPov: %s -> first person paused %d ms, level_seq %d", tostring(why), ms or SETTLE_TP_MS, S.level_seq))
+    lastWrite = 0
+    pcall(writeState)
+end
+
+-- Crouch flag for the DLL (eye calibration paused while crouched).
+function M.SetCrouch(on)
+    local v = on and 1 or 0
+    if S.crouch == v then return end
+    S.crouch = v
+    lastWrite = 0
+    pcall(writeState)
+end
+
+-- Downed orbit camera. on: third person around the watched character
+-- (visHex = its root Visual address, pos = its feet); the head shows again.
+function M.SetOrbit(on, opts)
+    opts = opts or {}
+    local v = on and 1 or 0
+    if v ~= S.orbit then
+        S.orbit = v
+        S.orbit_seq = S.orbit_seq + 1
+        setHideHead(not on and S.on)
+        Log.Write("FullPov: orbit camera " .. (on and "ON" or "OFF"))
+    end
+    for _, k in ipairs({ "dist", "up", "pmin", "pmax", "rate", "tilt_rate" }) do
+        if opts[k] then S["orbit_" .. k] = opts[k] end
+    end
+    lastWrite = 0
+    pcall(writeState)
+end
+function M.SetOrbitTarget(visHex, pos, newTarget)
+    S.orbit_vis = visHex or "0"
+    if pos then S.orbit_x, S.orbit_y, S.orbit_z = pos[1], pos[2], pos[3] end
+    if newTarget then S.orbit_seq = S.orbit_seq + 1; lastWrite = 0; pcall(writeState) end
+end
+function M.SetOrbitInput(spin, tilt)
+    spin, tilt = spin or 0, tilt or 0
+    if spin == S.orbit_spin and tilt == S.orbit_tilt then return end
+    S.orbit_spin, S.orbit_tilt = spin, tilt
+    lastWrite = 0
+    pcall(writeState)
+end
+function M.Orbiting() return S.orbit == 1 end
+
 -- Animation browser: third person while its window is open.
 function M.SetOn(on) setOn(on and true or false) end
 function M.IsOn() return S.on end
@@ -425,6 +507,23 @@ function M.Register()
     -- previous session doesn't fire before the character exists.
     setHideHead(false)
     Ext.Events.Tick:Subscribe(function() pcall(writeState) end)
+    -- Level loads (region change, fast travel to another region, save load).
+    pcall(function()
+        Ext.Events.GameStateChanged:Subscribe(function(e)
+            local to = tostring(e.ToState)
+            if to == "UnloadLevel" or to == "LoadLevel" or to == "SwapLevel" or to == "LoadSession" then
+                if not settle.loading then Log.Write("FullPov: game state " .. to .. " -> first person paused until Running") end
+                settle.loading = true
+                settle.lastPos = nil
+                cache.meshes, cache.visual, cache.ent, cache.at = {}, nil, nil, -100000
+                lastWrite = 0
+                pcall(writeState)
+            elseif to == "Running" and settle.loading then
+                settle.loading = false
+                M.Settle("level load", SETTLE_LOAD_MS)
+            end
+        end)
+    end)
 
     Ext.RegisterConsoleCommand("dag_full_pov", function(_, arg)
         if arg == "on" or arg == "1" then setOn(true)

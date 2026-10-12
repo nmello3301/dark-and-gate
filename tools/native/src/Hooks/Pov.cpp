@@ -172,6 +172,25 @@ struct LuaState {
     float     landSpeed = 3.f;
     float     wallH = 1.3f;
     bool      menu = false;        // a BG3 panel is open (Lua, Client/HUD): mouse-look off, cursor free
+    // Crouch = sneaking (Client/Crouch.lua): the head bone lowers by itself;
+    // the eye-height calibration must not run while crouched.
+    bool      crouch = false;
+    // Bumped by Lua on a level load / fast travel / teleport (FullPov.lua):
+    // forget the head selection and the WASD character pointer.
+    int       levelSeq = 0;
+    // Downed orbit camera (Client/Downed.lua): third person around a target.
+    bool      orbit = false;
+    int       orbitSeq = 0;        // bumped on enter / target change: re-seed yaw + pitch
+    float     orbitDist = 3.5f;    // metres from the target
+    float     orbitUp = 0.6f;      // target point above the body's root
+    float     orbitPMin = -10.f;   // pitch clamp, degrees (+ = camera above)
+    float     orbitPMax = 70.f;
+    int       orbitSpin = 0;       // -1 / 0 / +1 while A/D or LMB/RMB are held
+    int       orbitTilt = 0;       // -1 / 0 / +1 while S/W are held
+    float     orbitRate = 120.f;   // deg/s for spin
+    float     orbitTiltRate = 60.f;
+    uintptr_t orbitVis = 0;        // the watched character's root Visual (0 = use orbitPos)
+    float     orbitPos[3] = { 0, 0, 0 };   // Lua's position of that character
     DWORD readTick  = 0;
 };
 
@@ -273,6 +292,24 @@ void PollLuaFile()
     s.landSpeed = ValF(buf, "rj_land_speed", 3.f);
     s.wallH = ValF(buf, "rj_wall_h", 1.3f);
     s.menu = ValI(buf, "menu", 0) != 0;
+    s.crouch = ValI(buf, "crouch", 0) != 0;
+    s.levelSeq = ValI(buf, "level_seq", g_lua.levelSeq);
+    s.orbit = ValI(buf, "orbit", 0) != 0;
+    s.orbitSeq = ValI(buf, "orbit_seq", 0);
+    s.orbitDist = ValF(buf, "orbit_dist", 3.5f);
+    if (s.orbitDist < 1.0f) s.orbitDist = 1.0f;
+    if (s.orbitDist > 12.f) s.orbitDist = 12.f;
+    s.orbitUp = ValF(buf, "orbit_up", 0.6f);
+    s.orbitPMin = ValF(buf, "orbit_pmin", -10.f);
+    s.orbitPMax = ValF(buf, "orbit_pmax", 70.f);
+    s.orbitSpin = ValI(buf, "orbit_spin", 0);
+    s.orbitTilt = ValI(buf, "orbit_tilt", 0);
+    s.orbitRate = ValF(buf, "orbit_rate", 120.f);
+    s.orbitTiltRate = ValF(buf, "orbit_tilt_rate", 60.f);
+    if (const char* v = FindVal(buf, "orbit_vis")) s.orbitVis = static_cast<uintptr_t>(std::strtoull(v, nullptr, 16));
+    s.orbitPos[0] = ValF(buf, "orbit_x", 0);
+    s.orbitPos[1] = ValF(buf, "orbit_y", 0);
+    s.orbitPos[2] = ValF(buf, "orbit_z", 0);
     if (const char* v = FindVal(buf, "visual")) {
         s.visual = static_cast<uintptr_t>(std::strtoull(v, nullptr, 16));
     }
@@ -731,7 +768,9 @@ bool PlausibleHeadAt(const float h[3], float lift)
 {
     const float dy = h[1] - g_lua.root[1] - lift;
     const float dx = h[0] - g_lua.root[0], dz = h[2] - g_lua.root[2];
-    return dy > 1.0f && dy < 2.4f && std::sqrt(dx * dx + dz * dz) < 0.7f;
+    // 2026-10-12: floor 1.0 -> 0.4 m, so a crouched human, or a halfling /
+    // gnome / dwarf standing or crouched, still gets the head-bone anchor.
+    return dy > 0.4f && dy < 2.4f && std::sqrt(dx * dx + dz * dz) < 0.7f;
 }
 
 bool ResolveHead(bool dumpToLog)
@@ -1090,7 +1129,8 @@ void WriteStatus()
         "root=%.3f,%.3f,%.3f mouselook=%d toggled=%d filter=%d meshes=%d "
         "headName=%s headBone=%d headCal=%d eyeUpAuto=%.3f lift=%.3f liftMode=%s jumpSeq=%d animRate=%.2f rateHook=%s rateHits=%ld "
         "anchor=%s delta=%.4f deltaMax=%.4f jerk=%.4f smooth=%.2f "
-        "move=%s walkX=%.2f runX=%.2f tmplStroll=%.2f tmplRun=%.2f walkT=%.3f outStroll=%.2f outRun=%.2f moveCalls=%ld t=%u\n",
+        "move=%s walkX=%.2f runX=%.2f tmplStroll=%.2f tmplRun=%.2f walkT=%.3f outStroll=%.2f outRun=%.2f moveCalls=%ld "
+        "orbit=%d crouch=%d levelSeq=%d t=%u\n",
         g_lua.on ? 1 : 0, g_lua.active ? 1 : 0, g_status.applied ? 1 : 0, g_status.src,
         g_rotOff, g_rotLogged ? 1 : 0, g_sel.valid ? 1 : 0, g_sel.bone,
         g_sel.fromSocket ? "(socket)" : "(top)", g_sel.meshIdx, g_sel.poseSlot + 1, g_sel.layout,
@@ -1106,6 +1146,7 @@ void WriteStatus()
         g_jump.lift, dag::visuallift::Mode(), g_jump.seq, g_lua.animRate, dag::animrate::State(), dag::animrate::Hits(),
         g_lua.anchor ? "head" : "pivot", g_cam.lastAvg, g_cam.lastMax, g_cam.lastJerk, g_lua.smooth,
         dag::movespeed::State(), g_lua.moveWalk, g_lua.moveRun, ms0, mr0, mt0, mso, mro, mc,
+        g_lua.orbit ? 1 : 0, g_lua.crouch ? 1 : 0, g_lua.levelSeq,
         (unsigned)now);
     WriteSmallFile(L"native-pov-status.txt", line, len);
 }
@@ -1129,6 +1170,27 @@ void OnFrame(void* gameplayCam)
         dag::log::Writef("POV: %s", g_lua.on ? "ON" : "OFF");
         if (g_lua.on) { g_sel.valid = false; g_head = HeadSel{}; }  // fresh selection on every enable
     }
+    // Level load / fast travel / teleport (FullPov.lua bumps level_seq): the
+    // meshes, the head selection and the WASD character may all be new.
+    static int s_levelSeq = -1;
+    if (g_lua.levelSeq != s_levelSeq) {
+        if (s_levelSeq != -1) {
+            g_sel.valid = false; g_head = HeadSel{}; g_meshOffOk = false;
+            dag::realjump::ForgetCharacter();
+            dag::log::Writef("POV: level_seq %d -> head selection and WASD character reset", g_lua.levelSeq);
+        }
+        s_levelSeq = g_lua.levelSeq;
+    }
+    static bool s_orbit = false;
+    if (g_lua.orbit != s_orbit) {
+        s_orbit = g_lua.orbit;
+        dag::log::Writef("POV: orbit camera %s", s_orbit ? "ON (downed)" : "OFF (first person)");
+    }
+    static bool s_crouch = false;
+    if (g_lua.crouch != s_crouch) {
+        s_crouch = g_lua.crouch;
+        dag::log::Writef("POV: crouch %s (eye calibration %s)", s_crouch ? "ON" : "OFF", s_crouch ? "paused" : "allowed");
+    }
 
     if (g_lua.on && g_lua.numMeshes > 0) {
         const DWORD now = GetTickCount();
@@ -1141,14 +1203,15 @@ void OnFrame(void* gameplayCam)
     }
 
     UpdateJump();
-    dag::visuallift::SetVisual((g_lua.on && g_lua.active) ? g_lua.visual : 0);
+    // Orbiting (downed): no body lift on the visual.
+    dag::visuallift::SetVisual((g_lua.on && g_lua.active && !g_lua.orbit) ? g_lua.visual : 0);
     // A real jump moves the character itself: no visual lift on top.
     dag::realjump::MeasureFrame();
     dag::visuallift::SetLift(g_jump.real ? 0.f : g_jump.lift);
     {
         // The meshes' render objects (MeshBinding+0x28) carry the drawn body.
         uintptr_t objs[kMaxMeshes]; int n = 0;
-        if (g_lua.on && g_lua.active) {
+        if (g_lua.on && g_lua.active && !g_lua.orbit) {
             for (int i = 0; i < g_lua.numMeshes; ++i) {
                 void* o = nullptr;
                 if (dag::safemem::ReadPtr(reinterpret_cast<void*>(g_lua.meshes[i]), 0x28, o) && o)
@@ -1168,6 +1231,111 @@ void OnFrame(void* gameplayCam)
     WriteStatus();
     dag::watchdog::Stage("game (outside our frame hook)");
 }
+
+namespace {
+
+// The commit itself: every field the engine might build its view from gets
+// the same look-at point P, the original commit runs with our eye, and the
+// fields are restored afterwards (only if still ours).
+void CommitWith(void* self, void* slotToken, float* outPos, uint8_t* cam, CommitFn original,
+                const float eye[3], const float P[3])
+{
+    static const uint32_t kFields[] = { 0x18, 0x24, 0x3C, 0x48, 0xC4 };
+    constexpr int kN = static_cast<int>(sizeof(kFields) / sizeof(kFields[0]));
+    float saved[kN][3];
+    bool  savedOk[kN];
+    for (int i = 0; i < kN; ++i) {
+        savedOk[i] = dag::safemem::ReadBytes(cam + kFields[i], saved[i], sizeof(float) * 3);
+        if (savedOk[i]) SafeWrite(cam + kFields[i], P, sizeof(float) * 3);
+    }
+
+    float eyeBuf[3] = { eye[0], eye[1], eye[2] };
+    original(self, slotToken, eyeBuf, outPos);
+
+    for (int i = 0; i < kN; ++i) {
+        if (!savedOk[i]) continue;
+        float now[3];
+        if (dag::safemem::ReadBytes(cam + kFields[i], now, sizeof(now)) &&
+            std::memcmp(now, P, sizeof(now)) == 0) {
+            SafeWrite(cam + kFields[i], saved[i], sizeof(float) * 3);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------
+// Downed orbit (Client/Downed.lua): third person around a target, the
+// engine's own mouse rotation (Camera Rotate stays held) as yaw / pitch
+// deltas plus Lua's spin / tilt keys, pitch clamped, fixed distance.
+//   eye = T + dist * dir, look-at = T   (dir in the engine's rot
+//   convention: pointing from the target to the eye)
+// T = the watched character's Visual (read every frame, rejected if it is
+// more than 3 m from Lua's position for it) + orbit_up, else Lua's position.
+// ---------------------------------------------------------------------
+struct Orbit {
+    int   seq = -1;
+    float yaw = 0, pitch = 0;          // degrees
+    float lastYawE = 0, lastPitchE = 0;
+    LARGE_INTEGER t = {};
+    bool  logged = false;
+} g_orbit;
+
+float WrapDeg(float a) { while (a > 180.f) a -= 360.f; while (a < -180.f) a += 360.f; return a; }
+
+bool OrbitCommit(void* self, void* slotToken, float* outPos, uint8_t* cam, CommitFn original, const float rot[3])
+{
+    constexpr float kDeg = 57.29578f;
+    const float yawE = std::atan2(rot[0], rot[2]) * kDeg;
+    const float pitchE = std::asin(rot[1] > 1.f ? 1.f : (rot[1] < -1.f ? -1.f : rot[1])) * kDeg;
+    LARGE_INTEGER now; QueryPerformanceCounter(&now);
+    if (g_orbit.seq != g_lua.orbitSeq) {
+        g_orbit.seq = g_lua.orbitSeq;
+        g_orbit.yaw = yawE;
+        g_orbit.pitch = pitchE < g_lua.orbitPMin ? g_lua.orbitPMin : (pitchE > g_lua.orbitPMax ? g_lua.orbitPMax : pitchE);
+        if (g_orbit.pitch < 15.f) g_orbit.pitch = 15.f;   // start a little above, looking down at the body
+        g_orbit.lastYawE = yawE; g_orbit.lastPitchE = pitchE; g_orbit.t = now;
+        g_orbit.logged = false;
+        dag::log::Writef("ORBIT start seq=%d yaw=%.0f pitch=%.0f dist=%.2f up=%.2f vis=%p",
+                         g_orbit.seq, g_orbit.yaw, g_orbit.pitch, g_lua.orbitDist, g_lua.orbitUp,
+                         reinterpret_cast<void*>(g_lua.orbitVis));
+    }
+    double dt = MsSince(g_orbit.t) / 1000.0;
+    g_orbit.t = now;
+    if (dt < 0 || dt > 0.25) dt = 0;
+    g_orbit.yaw = WrapDeg(g_orbit.yaw + WrapDeg(yawE - g_orbit.lastYawE) + g_lua.orbitSpin * g_lua.orbitRate * static_cast<float>(dt));
+    g_orbit.pitch += (pitchE - g_orbit.lastPitchE) + g_lua.orbitTilt * g_lua.orbitTiltRate * static_cast<float>(dt);
+    if (g_orbit.pitch < g_lua.orbitPMin) g_orbit.pitch = g_lua.orbitPMin;
+    if (g_orbit.pitch > g_lua.orbitPMax) g_orbit.pitch = g_lua.orbitPMax;
+    g_orbit.lastYawE = yawE; g_orbit.lastPitchE = pitchE;
+
+    float T[3] = { g_lua.orbitPos[0], g_lua.orbitPos[1], g_lua.orbitPos[2] };
+    const char* tsrc = "lua";
+    if (g_lua.orbitVis) {
+        float v[3];
+        if (dag::safemem::ReadBytes(reinterpret_cast<void*>(g_lua.orbitVis + 0x18), v, sizeof(v)) && Finite3(v)) {
+            const float dx = v[0] - T[0], dy = v[1] - T[1], dz = v[2] - T[2];
+            if (dx * dx + dy * dy + dz * dz < 9.f) { T[0] = v[0]; T[1] = v[1]; T[2] = v[2]; tsrc = "visual"; }
+        }
+    }
+    if (!Finite3(T)) return false;
+    T[1] += g_lua.orbitUp;
+    const float p = g_orbit.pitch / kDeg, y = g_orbit.yaw / kDeg;
+    const float dir[3] = { std::cos(p) * std::sin(y), std::sin(p), std::cos(p) * std::cos(y) };
+    const float eye[3] = { T[0] + g_lua.orbitDist * dir[0], T[1] + g_lua.orbitDist * dir[1], T[2] + g_lua.orbitDist * dir[2] };
+    CommitWith(self, slotToken, outPos, cam, original, eye, T);
+    if (!g_orbit.logged) {
+        g_orbit.logged = true;
+        dag::log::Writef("ORBIT first frame: target (%.2f,%.2f,%.2f) from %s, eye (%.2f,%.2f,%.2f)",
+                         T[0], T[1], T[2], tsrc, eye[0], eye[1], eye[2]);
+    }
+    g_status.applied = true;
+    g_status.src = "orbit";
+    std::memcpy(g_status.eye, eye, sizeof(eye));
+    std::memcpy(g_status.P, T, sizeof(T));
+    std::memcpy(g_status.rot, rot, sizeof(float) * 3);
+    return true;
+}
+
+}  // namespace
 
 bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, CommitFn original)
 {
@@ -1189,6 +1357,8 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
     const float rl = Len3(rot);
     if (rl < 0.5f || rl > 1.5f) return false;
     rot[0] /= rl; rot[1] /= rl; rot[2] /= rl;
+
+    if (g_lua.orbit) return OrbitCommit(self, slotToken, outPos, cam, original, rot);
 
     // Horizontal forward (the way the camera looks, flattened). Near
     // straight up/down the flattened vector degenerates, so keep the last
@@ -1229,7 +1399,7 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
         } else if (!g_head.calibrated) {
             // Learn the eye height above the head bone from the signed-off
             // pivot eye, at rest (no jump), then switch to the bone.
-            if (pivotOk && !g_jump.active) {
+            if (pivotOk && !g_jump.active && !g_lua.crouch) {
                 const float bodyY = head[1] - (bodyLift ? lift : 0.f);
                 g_head.calSum += static_cast<double>(pivot[1] + g_lua.pivotUp - bodyY);
                 if (++g_head.calN >= 30) {
@@ -1379,26 +1549,7 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
 
     // Every field the commit might build its view from gets the same
     // point, then is restored afterwards (only if still ours).
-    static const uint32_t kFields[] = { 0x18, 0x24, 0x3C, 0x48, 0xC4 };
-    constexpr int kN = static_cast<int>(sizeof(kFields) / sizeof(kFields[0]));
-    float saved[kN][3];
-    bool  savedOk[kN];
-    for (int i = 0; i < kN; ++i) {
-        savedOk[i] = dag::safemem::ReadBytes(cam + kFields[i], saved[i], sizeof(float) * 3);
-        if (savedOk[i]) SafeWrite(cam + kFields[i], P, sizeof(float) * 3);
-    }
-
-    float eyeBuf[3] = { eye[0], eye[1], eye[2] };
-    original(self, slotToken, eyeBuf, outPos);
-
-    for (int i = 0; i < kN; ++i) {
-        if (!savedOk[i]) continue;
-        float now[3];
-        if (dag::safemem::ReadBytes(cam + kFields[i], now, sizeof(now)) &&
-            std::memcmp(now, P, sizeof(now)) == 0) {
-            SafeWrite(cam + kFields[i], saved[i], sizeof(float) * 3);
-        }
-    }
+    CommitWith(self, slotToken, outPos, cam, original, eye, P);
 
     g_status.applied = true;
     g_status.src = src;

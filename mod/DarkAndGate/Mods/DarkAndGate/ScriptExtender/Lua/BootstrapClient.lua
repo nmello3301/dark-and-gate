@@ -94,8 +94,11 @@ Ext.Require("Client/LookAt.lua").Register()
 Ext.Require("Client/HUD/Overlay.lua").Register()
 -- F: tap = interact with what the crosshair is on, hold = revive.
 Ext.Require("Client/Interact.lua").Register()
+-- Downed: orbit camera, spectate, banner, revive bar.
+Ext.Require("Client/Downed.lua").Register()
 Ext.Require("Shared/ConsoleForward.lua").Forward({
     "dag_ai", "dag_ai_aim", "dag_ai_react", "dag_ai_debug", "dag_shield_pct", "dag_shield_debug",
+    "dag_bleedout", "dag_revive_time", "dag_downme",
 })
 
 -- First-person movement: floaty Space jump (visual lift in the DLL,
