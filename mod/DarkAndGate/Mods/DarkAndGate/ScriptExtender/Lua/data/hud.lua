@@ -74,6 +74,8 @@ return {
     },
     -- Our "Prepare Hotbar" menu opens beside these BG3 panels (I, K, H, Tab).
     hotbar_menu_with = { "CharacterPanel", "PartyPanel" },
+    -- In that menu the slot a spell just went into flashes green this long.
+    menu_flash_ms = 700,
     -- After the last menu closes, mouse-look waits this long (our menu window
     -- is gone by then, so the DLL's synthetic MMB press reaches BG3, not ImGui).
     menu_release_ms = 200,

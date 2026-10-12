@@ -87,9 +87,31 @@ local function clearChildren(group, list)
     for _, e in ipairs(list or {}) do pcall(function() e:Destroy() end) end
 end
 
+-- Slot frame colours (developer, 2026-10-12: "highlight the slot"): the
+-- selected slot gets a gold frame, the slot a spell just went into flashes
+-- green for menu_flash_ms. An image button's frame is its "Button" colour
+-- around the icon (FramePadding wide); "Background" only shows through
+-- transparent icon pixels, which is why the first build's highlight was
+-- invisible.
+local FRAME = {
+    selected = { 1.00, 0.78, 0.25, 1.00 },
+    flash    = { 0.35, 0.85, 0.35, 1.00 },
+    normal   = { 0.30, 0.26, 0.20, 0.70 },
+}
+local flash = { slot = nil, untilMs = 0 }
+
+local function frame(e, color)
+    for _, c in ipairs({ "Button", "ButtonHovered", "ButtonActive", "Border" }) do
+        pcall(function() e:SetColor(c, color) end)
+    end
+    pcall(function() e:SetStyle("FramePadding", 5, 5) end)
+    pcall(function() e:SetStyle("FrameBorderSize", 2) end)
+end
+
 local function assign(id)
     Hotbar.SetSlot(selected, id)
     Log.Write(string.format("HotbarMenu: slot %s = %s", slotLabel(selected), tostring(id)))
+    flash.slot, flash.untilMs = selected, now() + (cfg.menu_flash_ms or 700)
     -- next empty slot
     for k = 1, 10 do
         local j = ((selected - 1 + k) % 10) + 1
@@ -101,17 +123,18 @@ local function buildSlots()
     clearChildren(ui.slots, ui.slotKids)
     ui.slotKids = {}
     local kids = ui.slotKids
+    local flashing = flash.slot and now() < flash.untilMs
     for i = 1, 10 do
         local id = State.hotbar[i]
         local d = id and SpellDefs.Get(id) or nil
         local e
         if d and d.icon and d.icon ~= "" then
             e = ui.slots:AddImageButton("##dag_slot" .. i, d.icon, { 44, 44 })
-            if i == selected then set(e, "Background", { 1.0, 0.75, 0.25, 0.85 }) end
         else
             e = ui.slots:AddButton((i == selected and "[" .. slotLabel(i) .. "]" or (" " .. slotLabel(i) .. " ")) .. "##dag_slot" .. i)
-            pcall(function() e.Size = { 44, 44 } end)
+            pcall(function() e.Size = { 54, 54 } end)
         end
+        frame(e, (flashing and i == flash.slot) and FRAME.flash or (i == selected and FRAME.selected or FRAME.normal))
         set(e, "SameLine", i > 1)
         pcall(function()
             e:Tooltip():AddText(string.format("Key %s: %s%s", slotLabel(i), d and d.label or "empty",
@@ -127,6 +150,7 @@ local function buildSlots()
     local d = id and SpellDefs.Get(id) or nil
     local t = ui.slots:AddText(string.format("Selected: key %s = %s. Click a spell below to put it there.", slotLabel(selected),
         d and d.label or "empty"))
+    pcall(function() t:SetColor("Text", FRAME.selected) end)
     kids[#kids + 1] = t
 end
 
@@ -223,7 +247,8 @@ function M.Update(active, menuName)
     end
     local hs = {}
     for i = 1, 10 do hs[i] = tostring(State.hotbar[i] or "") end
-    local s1 = selected .. "|" .. table.concat(hs, ",")
+    local fl = (flash.slot and t < flash.untilMs) and flash.slot or 0
+    local s1 = selected .. "|" .. table.concat(hs, ",") .. "|" .. fl
     if s1 ~= slotSig then slotSig = s1; pcall(buildSlots) end
     local s2 = filter .. "|" .. (M.spellSig or "")
     if s2 ~= listSig then listSig = s2; pcall(buildList) end
@@ -235,6 +260,8 @@ function M.TogglePinned()
 end
 function M.Pinned() return pinned end
 function M.Shown() return shown end
+-- The slot the next picked spell goes into (the HUD glows it while the menu is up).
+function M.Selected() return shown and selected or nil end
 
 function M.Register()
     Ext.RegisterConsoleCommand("dag_hotbar_menu", function() M.TogglePinned() end)

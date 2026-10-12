@@ -204,19 +204,38 @@ local function pollProjectiles()
         local key = tostring(e)
         if not seenProj[key] then
             seenProj[key] = now()
-            local okC, caster, src, spell = pcall(function()
+            -- Round 3 (2026-10-12): Caster is empty on our script-cast visual
+            -- clone ("attempt to index a nil value (field 'Caster')"), so every
+            -- flight started 1.2 s late. Try Caster, Source, Owner; otherwise
+            -- match the clone's spell id near our origin.
+            local okC, info = pcall(function()
                 local c = e.ServerProjectile
-                local sp = "?"
-                pcall(function() sp = tostring(c.Spell.Prototype or c.Spell.OriginatorPrototype) end)
-                return tostring(c.Caster.Uuid.EntityUuid), { c.SourcePos[1], c.SourcePos[2], c.SourcePos[3] }, sp
+                local r = { spell = "?" }
+                pcall(function() r.spell = tostring(c.Spell.Prototype or c.Spell.OriginatorPrototype) end)
+                pcall(function() r.src = { c.SourcePos[1], c.SourcePos[2], c.SourcePos[3] } end)
+                for _, f in ipairs({ "Caster", "Source" }) do
+                    if not r.caster then pcall(function() r.caster = tostring(c[f].Uuid.EntityUuid) end) end
+                end
+                if not r.caster then pcall(function() r.caster = tostring(c.Owner.Uuid.EntityUuid) end) end
+                return r
             end)
             if not okC then
-                if not readErrLogged then readErrLogged = true; Log.Write("Projectiles: can not read a ServerProjectile: " .. tostring(caster)) end
+                if not readErrLogged then readErrLogged = true; Log.Write("Projectiles: can not read a ServerProjectile: " .. tostring(info)) end
             else
-                local p = pending[caster]
+                local p = info.caster and pending[info.caster] or nil
+                local how = "caster"
+                if not p and info.src then
+                    for _, q in pairs(pending) do
+                        if info.spell == PSpells.VisualId(q.spell) and len(sub(info.src, q.origin)) < (data.match_radius_m or 6) then
+                            p, how = q, "spell + origin"
+                            break
+                        end
+                    end
+                end
                 if p then
-                    p.srcPos = src
-                    start(p, e, string.format("BG3 projectile %s seen after %d ms", tostring(spell), math.floor(now() - p.at)))
+                    p.srcPos = info.src
+                    start(p, e, string.format("BG3 projectile %s seen after %d ms, matched by %s", tostring(info.spell),
+                        math.floor(now() - p.at), how))
                 end
             end
         end

@@ -489,8 +489,9 @@ local function updateText(u)
         local key = n > 0 and 1 or 0
         if fl and fl.lastTint ~= key then fl.lastTint = key; set(fl.e, "Tint", n > 0 and { 1, 1, 1, 1 } or cfg.no_potion_tint) end
     end
-    -- Armed glow + mana tint.
-    local a = armedSlot()
+    -- Armed glow + mana tint. While the Prepare Hotbar menu is up (pinned with
+    -- H, so our HUD is visible) the glow marks the slot it is filling instead.
+    local a = HotbarMenu.Selected() or armedSlot()
     if u.glowSlot ~= a then
         u.glowSlot = a
         set(u.glow.e, "Visible", a ~= nil)
