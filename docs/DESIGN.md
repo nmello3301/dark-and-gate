@@ -1,6 +1,6 @@
 # Dark and Gate — Design Document
 
-BG3 First-Person Action Combat Mod · Oct 7, 2026 · Nick
+BG3 First-Person Action Combat Mod · Oct 7, 2026 · Nick · synced with DECISIONS on 2026-10-12
 
 Live version with diagrams and charts: https://claude.ai/code/artifact/d9d14ee0-9dac-4e0e-b924-4dc4b54b157a
 This file is the copy Claude Code works from. When it changes, update both.
@@ -20,16 +20,17 @@ This mod turns Baldur's Gate 3 into a first-person, real-time action RPG on mous
 
 ## Platform, dependencies and licensing
 
-The mod is a Windows PC-only BG3 mod installed through BG3 Mod Manager; it needs the Script Extender, so it cannot run through the console mod system. Gameplay logic is Script Extender Lua. A small native plugin loaded through Ch4nKyy's Mod Loader is added only if a spike shows the Script Extender is too slow or lacks a hook.
+The mod is a Windows PC-only BG3 mod installed through BG3 Mod Manager; it needs the Script Extender, so it cannot run through the console mod system. Gameplay logic is Script Extender Lua. **Our own native plugin** (a C++ DLL loaded through Ch4nKyy's Mod Loader) covers what the Script Extender can't reach: the first-person camera and mouse-look, the real jump, per-character animation play rate, and engine probes. It stays small and data-driven; Lua decides, the DLL executes.
 
 | Dependency | Role | Bundled? |
 | --- | --- | --- |
 | [Script Extender](https://github.com/Norbyte/bg3se) | Lua runtime, client/server split, net messages | No, required install |
-| Ch4nKyy's Mod Loader + Native Camera Tweaks | First-person camera placement | No, required install |
-| WASD movement (existing mod or our own) | Direct movement | Decide in M0 |
+| Ch4nKyy's Mod Loader + Native Camera Tweaks | Loads our DLL; first-person camera placement | No, required install |
+| Dark and Gate native plugin | Camera follow + mouse-look, real jump, animation play rate | Yes (ours) |
+| WASD Character Movement | Direct movement (we drive its speed through our DLL) | No, required install |
 | AnimationUnlocker | Custom attack animations | No, required install |
 | Mod Configuration Menu (MCM) | Settings and keybinds | No, required install |
-| [Brawl](https://github.com/tinybike/Brawl) | Real-time combat loop and AI to fork or learn from | Decide in M0 |
+| [Brawl](https://github.com/tinybike/Brawl) | Real-time combat loop and AI | Forked: imported under GPL-3.0, credited |
 
 **Compatibility.** Spell, class and item mods should work, because spells stay BG3 data. Other combat AI or turn-based overhauls will conflict. UI overhauls such as ImpUI may conflict with the Prepare Hotbar tab.
 
@@ -48,11 +49,11 @@ The left mouse button does everything offensive: it swings the held weapon, or c
 | --- | --- |
 | W A S D | Move |
 | Mouse | Look and aim |
-| Left click | Weapon: next swing in the chain · Spell readied: cast at crosshair · Bow: hold to draw, release to fire |
-| Right click | Block with shield or weapon · Offhand attack when dual-wielding |
-| 1 2 3 4 5 6 7 8 9 0 | Use hotbar slot (see Hotbar section) |
+| Left click | Weapon: next swing in the chain · Spell channelled and ready: release it at the crosshair · Bow: hold to draw, release to fire |
+| Right click | Spell channelling: cancel it · otherwise block with shield or weapon · Offhand attack when dual-wielding |
+| 1 2 3 4 5 6 7 8 9 0 | Use hotbar slot (see Hotbar section); the channelled spell's own key again cancels it |
 | Mouse wheel (spell readied) | Change the cast level (upcasting) |
-| Q | Put the spell away, back to the weapon |
+| R / T | Drink the best health potion / mana potion |
 | F | Swap melee and ranged weapon sets |
 | E | Interact, talk, loot, help a downed ally |
 | Space | Jump |
@@ -60,7 +61,7 @@ The left mouse button does everything offensive: it swings the held weapon, or c
 | V | Companions: toggle Follow and Wait (out of combat) |
 | Esc | Game menu |
 
-**Readied state.** Pressing a spell's number readies it in the off hand: the crosshair changes to that spell's reticle, area spells show a ground preview, and its mana cost appears. Left click casts it, and it stays readied for repeat casts until Q, another slot, or the same number again.
+**Channelled casting.** Pressing a spell's number starts channelling it: the caster plays the spell's own prepare animation (their class's casting pose, as in vanilla), the spell cast bar fills over the cast time, and area spells show a ground preview. Once the cast time has passed the spell is READY and is held as long as the player wants; left click releases it at the crosshair. Right click, or the same number again, cancels it. Another number switches to that spell.
 
 **Instant slots.** Self-buffs, potions and class actions such as Rage fire on key press, without readying.
 
@@ -97,7 +98,7 @@ Each weapon family has its own chain of three swings, and the blade's path throu
 1. During the active window, sample 5 points from hilt to tip each tick.
 2. Test the swept segments between ticks against each character's hit-zone volumes.
 3. Each character is hit at most once per swing; the swing stops after its max targets.
-4. A sweep that strikes level geometry first bounces: the swing ends, recovery lengthens, the attacker briefly staggers.
+4. A sweep that strikes level geometry first is **obstructed** (`wall = off / stop / bounce`, default **stop**): the swing's damage window ends there, so nothing is hit through walls. Overhead swings and thrusts ignore side walls. `bounce` (stagger + recoil) comes later with the defence animations; parry and shield block reuse the same "swing obstructed" path.
 5. Allies are valid targets, so friendly fire is on by default.
 
 **Hit zones.** Head ×1.5 damage, torso ×1.0, arms and legs ×0.7; a leg hit also slows the target for 0.5 s. These multipliers are starting values for tuning.
@@ -111,7 +112,11 @@ Each weapon family has its own chain of three swings, and the blade's path throu
 
 **Extra Attack and dual wielding.** Extra Attack becomes +20% swing speed per tier instead of extra hits. Dual-wielders attack with the offhand on right click and lose blocking.
 
-**Ranged weapons.** Bows: hold left click to draw, release to fire at the crosshair, damage scales with draw time. Crossbows: click to fire, then a reload. Thrown weapons and grenades go on the hotbar.
+**Ranged weapons** (on the shared projectile system below).
+- **Bows:** hold left click to draw (draw time per bow × stat modifiers), release to fire at the crosshair. Damage and arrow speed scale with the draw; there is no shot below about 30 %. Full draw holds forever, with no sway or fatigue. Movement is about 60 % speed while drawing. A bow draw ring around the crosshair shows the draw.
+- **Crossbows:** click to fire, then a reload time. The bolt is flatter and faster.
+- **Thrown weapons:** the same system, with a slower throw and a higher arc. Thrown weapons and grenades go on the hotbar.
+- Arrows stick into walls and targets.
 
 ## Spellcasting
 
@@ -119,7 +124,7 @@ Every spell is the unchanged BG3 spell, cast through script at the point or targ
 
 | BG3 spell type | Examples | Crosshair rule |
 | --- | --- | --- |
-| Projectile | Fire Bolt, Eldritch Blast, Scorching Ray, Chromatic Orb | Fires along the aim ray; hits what it collides with |
+| Projectile | Fire Bolt, Eldritch Blast, Scorching Ray, Chromatic Orb | Flies along the aim line on our own simulated flight; hits whatever it touches first, anywhere mid-flight (moving targets can be led) |
 | Area at a point | Fireball, Cloud of Daggers, Hunger of Hadar | Lands where the aim ray meets the ground or a surface; preview decal while readied |
 | Cone and line | Burning Hands, Thunderwave, Lightning Bolt | Fires in the look direction from the caster |
 | Single target | Hold Person, Healing Word, Hex, Shocking Grasp | Whoever is under the crosshair, with a small aim-assist radius; self if none and the spell allows it |
@@ -129,9 +134,19 @@ Every spell is the unchanged BG3 spell, cast through script at the point or targ
 | Self | Shield of Faith, Mirror Image, Blur | Instant on key press |
 | Reaction | Shield, Counterspell, Hellish Rebuke | Used proactively (see below) |
 
-**Cast time.** A spell has a short first-person cast animation, about 0.3 s for cantrips and longer for higher levels. Movement is slowed while casting. Taking a melee hit during a cast of level 1 or higher interrupts it, and an interrupted cast refunds half its mana.
+**Cast time (channelled).** Every spell has a cast time: 2.0 s base for now (`data/spells.lua`), later scaled by character traits. The prepare animation is stretched over it, then loops at READY. The server rejects a release before the cast time. While the cast time runs on the ground, movement is slowed to ×0.7; once READY, and in the air, it is full speed. Casting never roots the caster. **A hit while channelling does not interrupt the cast**: no cancel and no timer reset.
 
-**Range.** BG3's spell ranges still apply. The reticle turns red when the point is out of range, and casting is blocked.
+**Range.** Shooting spells (projectiles) have no practical maximum range: the aim reaches 100 m along the crosshair, and their `TargetRadius` is raised so BG3 never refuses or walks the caster into range. Other spells keep BG3's ranges; the reticle turns red when the point is out of range, and casting is blocked.
+
+**Projectile system** (shared by spells, arrows and thrown weapons; [design/projectiles.md](design/projectiles.md)).
+- **Flight:** ours and server-authoritative, with speed, gravity, drag and a sphere radius per projectile.
+- **Hits:** each tick, the sphere is swept against the world and against every character's *current* cylinder. The first contact wins, anywhere mid-flight.
+- **Look:** BG3's own projectile, kept on our path and removed at our hit.
+- **Effect:** an instant, projectile-free *impact* version of the spell, applied on the hit character or at the point. BG3 still applies the damage dice, saves, statuses and hit effects, and the original projectile never deals damage.
+- **Other shapes:**
+  - instant rays use the crosshair line;
+  - Magic Missile stays homing;
+  - cones and caster-centred areas use a shape test at cast time.
 
 **Saving throws stay dice.** Hold Person, Fireball's half damage and similar spells still roll the target's save against the caster's spell DC, with advantage and disadvantage as in BG3.
 
@@ -230,7 +245,7 @@ Each character has a 10-slot hotbar on keys 1 to 0, arranged in a new **Hotbar**
 - **Character switcher:** the same tab works for every party member, so the player sets each companion's kit.
 - **Spell preparation stays native.** Wizards, Clerics, Druids and Paladins still prepare spells as usual; the list only offers what is prepared or known.
 
-**In play.** A strip at the bottom of the first-person HUD shows the 10 slots with key numbers, mana costs, cooldowns and counts; the readied slot is highlighted. A second page on Alt+1 to 0 is a later stretch goal.
+**In play.** The hotbar strip of the first-person HUD shows the 10 slots with key numbers, spell icons, mana-too-low tint, cooldowns and counts; the channelled slot glows. A second page on Alt+1 to 0 is a later stretch goal.
 
 **Implementation path.** The target is a real tab in BG3's native menu, made by extending its UI layouts. Milestone 1 uses a Script Extender ImGui window (the approach Mod Configuration Menu uses) so gameplay is not blocked on UI work; the native tab arrives in Milestone 4. Compatibility with UI overhauls such as ImpUI is an open question.
 
@@ -288,14 +303,18 @@ Hits should feel as heavy as Blade & Sorcery through layered animation, effects 
 | Hit reactions | Flinch, stagger and knockdown animations picked by hit zone, direction and stagger power | Planned |
 | Hit stop | 2–4 frame freeze on heavy hits, or camera shake if per-character time scaling is not exposed | Spike in M0 |
 | Death | Ragdoll pushed in the direction of the killing blow | Spike in M0 |
-| Weapon bounce | Recoil animation and spark when a swing hits a wall | Planned |
+| Weapon obstructed | A swing that hits a wall stops dealing damage (`wall = stop`); recoil animation and spark with the defence animations (`bounce`) | Planned |
 | Bodies swaying from each blow | Out of scope; approximated with additive hit animations | Not planned |
 | Dismemberment, embedded blades | Out of scope | Not planned |
 
-**First-person HUD.**
+**First-person HUD.** The developer's art ([design/hud.md](design/hud.md)) replaces BG3's HUD while first person is on. BG3's hotbar, portraits and combat log are hidden, and come back when first person is off and in dialogue, menus and cutscenes.
 
 - **Crosshair:** changes with the readied spell; area spells draw a ground preview, and the reticle turns red out of range.
-- **Health and mana:** bars at the bottom, with the hotbar strip between them.
+- **Health and mana:** a red health orb on the left and a blue mana orb on the right. Each one's liquid level is the current %, and the numbers ("105/110 HP") sit under the orb.
+- **Hotbar strip:** sits between the orbs, with 10 slots on keys 1–0. Each slot shows the spell's own icon, a glow on the channelled slot, and a tint when mana is too low.
+- **Potions:** health potion [R] and mana potion [T] slots, with counts.
+- **XP:** a bar under the hotbar.
+- **Charge bars:** a blue spell cast bar above the hotbar fills over the cast time, shows READY, and drains on cancel. A separate amber bow draw ring sits around the crosshair, with a 30 % mark and a full-draw tick.
 - **Party frames:** companions' health and state in the top left, with a callout and sound when one goes down.
 - **Enemy cast bars:** shown above enemy casters, which makes Counterspell and interrupting by hitting them readable.
 - **Hit markers and directional damage:** a hit marker on confirmed hits, a headshot variant, and an edge flash pointing to incoming damage.
@@ -375,7 +394,14 @@ Most campaign fights should work in real time. Scripted set pieces will break, s
 
 ## Technical architecture and reverse-engineering spikes
 
-The mod is mostly Script Extender Lua, split into client and server modules, with data files for all tuning. A native plugin exists only for gaps the spikes find.
+The mod is mostly Script Extender Lua, split into client and server modules, with data files for all tuning. The native plugin (C++ DLL, our own) fills the gaps the spikes found:
+- the camera commit, mouse-look and head-bone anchor;
+- the real jump (steering BG3's falling state);
+- the per-character animation play rate;
+- WASD speed;
+- static-analysis-guided probes, such as the genome event capture and the animation recorder.
+
+It is built from `tools/native` with `scripts/pov-build-deploy.ps1`.
 
 **Modules.**
 
@@ -439,8 +465,8 @@ If M1 fails its gate, the fallback is the native-plugin hit check before any con
 
 **Open questions.**
 
-- [ ] Fork Brawl (GPL-3.0) or start fresh?
-- [ ] Use an existing WASD movement mod or write our own?
+- [x] Fork Brawl (GPL-3.0) or start fresh? **Forked** (DECISIONS 2026-10-08).
+- [x] Use an existing WASD movement mod or write our own? **WASD Character Movement**, with our DLL driving its speed (DECISIONS 2026-10-09).
 - [ ] Offer a single-player tactical pause?
 - [ ] Keep spell preparation, or let casters put any known spell on the hotbar?
 - [ ] Final mana numbers after the M1 playtest

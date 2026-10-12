@@ -64,6 +64,10 @@ function M.Cast(spellId)
         local p = straight.pos
         if straight.target and kind == "target" then payload.targetUuid = straight.target end
         payload.hitPoint = { x = p[1], y = p[2], z = p[3] }
+        -- The aim line itself (projectile system: the server flies the
+        -- projectile from the eye along it; also right in mid-air).
+        payload.eye = { x = straight.eye[1], y = straight.eye[2], z = straight.eye[3] }
+        payload.dir = { x = straight.fwd[1], y = straight.fwd[2], z = straight.fwd[3] }
         Log.Write(string.format("Spells: %s aim %s %.1f m at (%.2f,%.2f,%.2f) from eye (%.2f,%.2f,%.2f) dir (%.3f,%.3f,%.3f)%s",
             spellId, straight.via, straight.distance, p[1], p[2], p[3],
             straight.eye[1], straight.eye[2], straight.eye[3], straight.fwd[1], straight.fwd[2], straight.fwd[3],
@@ -89,6 +93,7 @@ function M.Cast(spellId)
 
     -- Only after we're committed to firing: eat the cooldown.
     State.cooldownUntil[spellId] = nowMs() + (def.cooldown_ms or 400)
+    State.lastCastAt = nowMs()   -- the HUD cast bar: released, not cancelled
     Actions.Begin("cast", airAction.cast_s)
     Prepare.Stop("cast")
     ClientNet.Send(Net.Channels.CastSpellRequest, payload)

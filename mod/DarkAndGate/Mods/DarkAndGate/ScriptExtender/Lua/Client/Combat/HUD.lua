@@ -8,7 +8,9 @@
 -- handler gets near SE's "Dispatching event Tick ... took N ms" warning.
 --
 -- Commands:
---   !dag_hud on|off              show / hide the status line
+--   !dag_hud_status on|off       show / hide the status line (off by default
+--                                since the art HUD, Client/HUD/Hud.lua, shows
+--                                mana and the cast bar; it still shows aim distance)
 --   !dag_crosshair on|off        show / hide the crosshair
 --   !dag_crosshair <x> <y>       nudge the crosshair (pixels from centre)
 
@@ -18,11 +20,12 @@ local State  = Ext.Require("Client/Combat/State.lua")
 local Aim    = Ext.Require("Client/Combat/Aim.lua")
 local spells = Ext.Require("data/spells.lua")
 local Spells = Ext.Require("Client/Combat/Spells.lua")
+local ArtHud = Ext.Require("Client/HUD/Hud.lua")
 
 local M = {}
 
 local ui, uiFailed = nil, false
-local crossOn, hudOn = true, true
+local crossOn, hudOn = true, false
 local crossNudge = { 0, 0 }
 local shown = { cross = nil, panel = nil }
 local lastLabelAt, lastAimAt = -1e9, -1e9
@@ -119,6 +122,8 @@ local function render()
     lastLabelAt = t
 
     local want = State.povOn and State.IsCombatActive()
+    -- No art HUD (its texture didn't load): the status line stands in.
+    if ArtHud.AtlasOk() == false then hudOn = true end
     if not want then
         if ui then setShown("cross", false); setShown("panel", false) end
         return
@@ -175,7 +180,7 @@ function M.Register()
         Log.Write(string.format("HUD: crosshair %s nudge=(%d,%d)", crossOn and "on" or "off",
             crossNudge[1], crossNudge[2]))
     end)
-    Ext.RegisterConsoleCommand("dag_hud", function(_, a)
+    Ext.RegisterConsoleCommand("dag_hud_status", function(_, a)
         hudOn = not (a == "off" or a == "0")
         Log.Write("HUD: status line " .. (hudOn and "on" or "off"))
     end)

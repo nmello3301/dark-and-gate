@@ -85,6 +85,21 @@ Net.Channels = {
     AnimLibClear      = "DAG_AnimLibClear",
     -- Client -> server: { uuid, name } -- rename a gallery copy after its clip.
     AnimLibName       = "DAG_AnimLibName",
+
+    -- First-person HUD (Client/HUD/Hud.lua, Server/Combat/HudStats.lua).
+    -- Client -> server: UsePotion { kind = "health"|"mana" } (R / T).
+    -- Server -> clients, ~1 Hz: HudStats { uuid, xpCur, xpNext, level, hpPotions, manaPotions }.
+    UsePotion         = "DAG_UsePotion",
+    HudStats          = "DAG_HudStats",
+
+    -- Projectile system v1 (Server/Combat/Projectiles.lua, docs/spikes/projectiles.md).
+    -- Server -> clients: ProjectileLaunch { id, caster, spell, origin, vel, gravity, drag, radius, maxT }
+    --                    ProjectileHit { id, pos, target?, what = "character"|"world"|"expired" }
+    -- Client -> server: JumpLift { lift } -- the real jump's height above the
+    -- take-off ground, ~15 Hz while airborne (the server can't see it).
+    ProjectileLaunch  = "DAG_ProjectileLaunch",
+    ProjectileHit     = "DAG_ProjectileHit",
+    JumpLift          = "DAG_JumpLift",
 }
 
 -- Every channel both sides care about. Both server and client must register
@@ -111,6 +126,11 @@ Net.AllChannels = {
     Net.Channels.AnimLibSpawned,
     Net.Channels.AnimLibClear,
     Net.Channels.AnimLibName,
+    Net.Channels.UsePotion,
+    Net.Channels.HudStats,
+    Net.Channels.ProjectileLaunch,
+    Net.Channels.ProjectileHit,
+    Net.Channels.JumpLift,
 }
 
 return Net

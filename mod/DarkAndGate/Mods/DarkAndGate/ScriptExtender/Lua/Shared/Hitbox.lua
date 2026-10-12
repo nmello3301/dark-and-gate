@@ -14,6 +14,11 @@ local data = Ext.Require("data/hitbox.lua")
 local M = {}
 
 local jumps = {}   -- uuid -> { t0 = ms, dur = ms, h = m, k = flatness }
+-- Real jump (2026-10-10 default): the body really rises on the jumper's
+-- client, which the server can't see. That client reports its height above
+-- the take-off ground (JumpLift, ~15 Hz); a fresh sample wins over the curve.
+local samples = {} -- uuid -> { lift = m, at = ms }
+local SAMPLE_TTL_MS = 300
 
 local function now() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
 
@@ -22,8 +27,19 @@ function M.SetJump(uuid, durMs, h, k, t0)
     jumps[uuid] = { t0 = t0 or now(), dur = tonumber(durMs) or 0, h = tonumber(h) or 0, k = tonumber(k) or 2 }
 end
 
+function M.SetLiftSample(uuid, lift)
+    if not uuid then return end
+    lift = tonumber(lift) or 0
+    if lift <= 0.001 then samples[uuid] = nil else samples[uuid] = { lift = lift, at = now() } end
+end
+
 -- Current lift of a character's hitbox, metres.
 function M.Lift(uuid, t)
+    local smp = uuid and samples[uuid]
+    if smp then
+        if now() - smp.at <= SAMPLE_TTL_MS then return smp.lift end
+        samples[uuid] = nil
+    end
     local j = uuid and jumps[uuid]
     if not j or j.dur <= 0 then return 0 end
     local dt = (t or now()) - j.t0

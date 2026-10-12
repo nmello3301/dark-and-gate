@@ -123,7 +123,7 @@ What works in first person:
 - He swings a 3-hit chain.
 - He channels spells with BG3's own class casting animations, VFX and sounds, aims them along the crosshair, and pays mana for them.
 
-What doesn't: as soon as the goblins turn hostile, BG3's turn-based combat takes over. The Brawl import (`Server/Brawl/`) is still quarantined (nothing requires it), so every test so far has been against idle goblins or spawned dummies. **Real-time fights are the critical path.**
+What doesn't: as soon as the goblins turn hostile, BG3's turn-based combat takes over. The Brawl import (`Server/Brawl/`) is still quarantined (nothing requires it), so every test so far has been against idle goblins or spawned dummies. Real-time fights (Pass B) come right after the HUD + projectiles pass (developer, 2026-10-12).
 
 Lessons recorded:
 - `Ext.Require` only works at load time.
@@ -157,66 +157,77 @@ Tooling:
 - [x] Animation browser and gallery (`!dag_animlib`), per-character play rate (DLL). *(2026-10-09)*
 - [x] Animation recorder (`!dag_anim_record`), genome event capture (`!dag_genome_events`), animation state snapshot (`!dag_anim_state`), spell variants gallery (`!dag_spell_variants <spell> gallery`). *(2026-10-10)*
 
-### Road to Gate 1 (proposed order, 2026-10-12)
+### Road to Gate 1 (order set by the developer, 2026-10-12)
 
-Each step is one or two play sessions. Tick a box only after it is verified in-game.
+Each pass is one or two play sessions. Tick a box only after it is verified in-game.
 
-**Step 0: re-check sweep (one short session).** These items were written on 2026-10-09 and 10-10 and have been played over since, but were never signed off one by one. Do one pass on DEV-SAVE, then tick each item or reopen it as a bug.
+**Pass A: in-game HUD + projectile system v1** (current; playtest [playtest/hud-projectiles.md](playtest/hud-projectiles.md)).
+
+HUD, using the developer's art ([design/hud.md](design/hud.md)):
+- [ ] The engine is chosen and the vanilla HUD hide / restore lever is found ([spikes/hud-tech.md](spikes/hud-tech.md)). *Study done 2026-10-12: SE ImGui images from our own atlas texture (`DAG_HUD_Atlas`, texture bank in the pak); BG3's widgets collapsed via Noesis `Visibility`. Awaiting playtest.*
+- [x] Art sliced into layers (`tools/hud/slice.py`), and the preview sheet approved by the developer. *(2026-10-12: "mostly good"; asked for numbers under the orbs, key numbers on the hotbar, R / T potions)*
+- [ ] Live HUD in first person:
+  - health orb and mana orb;
+  - a 10-slot hotbar with the spell icons, the armed glow and a mana-too-low tint;
+  - health potion [Q] and mana potion [R];
+  - the XP bar;
+  - the crosshair kept.
+
+  The vanilla HUD is hidden in POV and restored outside it, and in dialogue, menus and cutscenes. Commands: `!dag_hud on|off|vanilla`.
+- [ ] Spell cast bar (blue): fills over the cast time, shows READY when the loop starts, drains on cancel.
+- [ ] Bow draw bar (an amber arc around the crosshair): draw %, a 30 % marker and a full-draw tick (wired to the bows when they land).
+
+Projectiles, for spells ([design/projectiles.md](design/projectiles.md), [spikes/projectiles.md](spikes/projectiles.md)):
+- [x] Study: how BG3 projectiles move, how to steer and remove them, and how to build the impact-only spell variant. *(static, 2026-10-12: [spikes/projectiles.md](spikes/projectiles.md); in-game probes in the playtest)*
+- [ ] Server-owned flight (`data/projectiles.lua`) and swept-sphere hits against current cylinders. Moving targets can be hit.
+- [ ] The server knows a jumping player's height, for hit checks and the spawn origin.
+- [ ] The game's own Fire Bolt / Fireball visual follows our path and is removed at our hit.
+- [ ] The impact variant applies BG3's damage, saves, statuses and VFX (Fireball's area at the point). The original projectile never deals damage.
+- [ ] `!dag_spawn_dummy moving`: a dummy walking back and forth over about 6 m.
+- [ ] Fireball ground preview (if time allows).
+
+**Status 2026-10-12:** all of the above is written and deployed, and awaits the one-pass playtest ([playtest/hud-projectiles.md](playtest/hud-projectiles.md)). Not built yet: the Fireball ground preview, the DLL steering of BG3's projectile (only if the Lua probe shows it is needed), and a mana potion item.
+
+Then, only if the spell projectiles pass their test, arrows and throwables:
+- bows: draw, hold forever, release;
+- crossbows: reload;
+- throwables;
+- arrows that stick in walls and targets.
+
+Checklist folded in from the old step 0. These items were written on 2026-10-09 and 10-10 and played over since, but never signed off one by one; they are ticked during the Pass A playtest:
 - [ ] The first jump of a session works (fix `42ba492`). If the second jump still glitches, look at the Falling Update hook being installed on the first jump (`RJUMP: Falling Update hooked`).
 - [ ] LMB spam (3 fast clicks) never leaves WASD dead, and `!dag_unstick` is never needed.
-- [ ] Head-bone camera: the view stays glued to the body while attacking, with no body drifting ahead of the camera.
+- [ ] Head-bone camera: the view stays glued to the body while attacking.
 - [ ] Gale's face never flashes, including after a gear change.
 - [ ] Cylinder hitboxes: swing reach is measured to the cylinder's surface, and a goblin's cylinder matches its body.
-- [ ] Casting slows to x0.7 on the ground and returns to full speed at READY. The speed knob (`!dag_speed_mult`) works.
+- [ ] Casting slows to x0.7 on the ground and returns to full speed at READY.
 - [ ] Locomotion clips play at the gait's speed (no foot sliding).
 - [ ] Swing or cast in the air: the action plays, the arc continues, and the landing waits for it.
 
-**Step 1: real-time fights (critical path).** Nothing else can be judged against a real fight until this works.
+**Pass B: real-time fights (Brawl wiring), right after Pass A.**
 - [ ] Wire the Brawl import: strip Swarm Mode and Leaderboard (one commit each), add `BrawlAdapter.lua`, and run the RealTime pulse so the DEV-SAVE gate fight never drops into turn-based.
-- [ ] Goblins act on Brawl's AI as it is, with BG3 attack rolls through `Osi.UseSpell` (temporary, replaced in step 2).
+- [ ] Goblins act on Brawl's AI as it is, with BG3 attack rolls through `Osi.UseSpell` (temporary, replaced in Pass C).
 - [ ] Our swings, spells, mana and jump keep working while the loop runs. Remove the "skip swing animations in turn-based" workaround.
-- [ ] Dialogue and cutscenes pause the fight and resume it; the fight ends cleanly; companions don't break it. Companions are part of the fight via Brawl; their M3 behaviour comes later.
+- [ ] Dialogue and cutscenes pause the fight and resume it, and the fight ends cleanly. Companions take part through Brawl; their M3 behaviour comes later.
 
-**Step 2: enemies use our combat rules.**
-- [ ] AI melee goes through our swing scheduler and hit check, validated by the same server code as the player's swings (DECISIONS 2026-10-08).
-- [ ] Getting hit: reaction, damage, and what a hit does to the player's channel (open question below).
+**Pass C: enemies use our combat rules.**
+- [ ] AI melee goes through our swing scheduler and hit check, validated by the same server code as the player's swings (DECISIONS 2026-10-08). Goblin archers' shots go on the projectile system.
+- [ ] Getting hit: reaction and damage. A hit does **not** interrupt the player's channel (DECISIONS 2026-10-12).
 
-**Step 3: melee feel.**
+**Pass D: melee feel.**
 - [ ] A longsword actually equipped, with the chain picked from the equipped weapon's family. Needs exact-clip playback for picks that must be one specific clip (DECISIONS 2026-10-09).
 - [ ] Melee wall stop (`wall = stop`, the default): the swing's damage window ends when its path hits world geometry; overhead swings and thrusts ignore side walls.
 - [ ] Blood and spark effects at the hit point.
 - [ ] At the gate, decide whether the interim swing arc is good enough, or whether the blade-path check (weapon bone reads, see Archived) is needed for Gate 1.
 
-**Step 4: projectile system v1 for Fire Bolt and Fireball** ([design/projectiles.md](design/projectiles.md)). This step has the most engine unknowns, so it starts with a static Ghidra spike.
-- [ ] Spike, part 1: steer BG3's own projectile entity from the DLL and remove it on our hit. Fallback: the spell's trail effect on an invisible mover.
-- [ ] Spike, part 2: the instant, projectile-free "impact variant" of a spell. Can it be built at stats load from the original spell, or does it need shipped stats?
-- [ ] Server-owned flight and swept-sphere hits against current cylinders, so moving goblins can be hit.
-- [ ] The server's copy of a jumping player's height. The real jump is client-side, so today the server sees a jumping player standing on the ground (wrong for hits on or by jumpers).
-- [ ] Fireball ground preview.
-
-**Step 5: HUD stand-ins (ImGui, small, can slot in anywhere).** The full custom HUD is M4.
-- [ ] Spell cast charge bar: fills over the cast time, shows READY when the loop starts, drains on cancel.
-- [ ] Health and mana readable at a glance during the fight.
-- [ ] Optional: a hotbar setup window. `!dag_hotbar <slot> <spell>` covers it until the M4 tab.
-
-**Step 6: Gate 1.**
+**Gate 1.**
 - [ ] The Emerald Grove gate fight is playable start to finish in DEV-SAVE.
 - [ ] **Gate 1: combat feels tight.** Playtest notes written; go / no-go recorded in `DECISIONS.md`.
 
-### Open questions for the road ahead
+### Open questions
 
-- **Getting hit while channelling.** DESIGN says a melee hit interrupts a cast of level 1+ and refunds half the mana. With 2 s channels, should a hit cancel the channel, reset its timer, or do nothing?
-- **Blocking and parry.** Proposed: move to M2 with the defence animations (they reuse the wall-stop path), not Gate 1.
-- **DESIGN.md has drifted** from the logged decisions:
-  - cast time;
-  - range;
-  - Q vs RMB to cancel;
-  - wall bounce vs stop;
-  - the projectile model;
-  - the HUD;
-  - the native plugin's role.
-
-  Proposed: one sync pass of DESIGN.md and its live artifact.
+- **Crouch** (C toggles it, and you can walk crouched; to build later): should crouching also be BG3 sneaking (stealth), or only the pose and speed? This is for the developer to decide before it's built.
+- Settled on 2026-10-12: a hit doesn't interrupt a channel, blocking and parry move to M2, and DESIGN.md gets one sync pass at the end of Pass A.
 
 ### Known issues (open)
 
@@ -292,6 +303,7 @@ Added 2026-10-09 (movement round).
 
 - [ ] **Strafe / dash-strafe animations** (custom). The body may turn toward the movement as long as the camera isn't forced.
 - [ ] **Defence animations:** block hold and parry (custom). Block only with a shield, parry only with a parry-capable weapon (decided 2026-10-08).
+- [ ] **Crouch** (developer, 2026-10-12): C toggles crouch, and you can walk crouched. Open question before building: BG3 sneaking (stealth) too, or only the pose and speed?
 - [ ] **Movement speed from agility:** scale walk / run speed with the character's agility (DEX), through `Movement.AddModifier` (the knob is ready; no mechanic yet, developer 2026-10-09).
 - [ ] **Weapon chain auto-guess:** propose each weapon family's chain from clip names (light 1–3, heavy, ranged draw / hold / release) and show it in the gallery for one-click accept.
 

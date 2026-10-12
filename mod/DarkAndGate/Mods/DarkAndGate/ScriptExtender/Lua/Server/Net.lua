@@ -274,6 +274,28 @@ handlers[Net.Channels.JumpStart] = function(payload, userId)
     end)
 end
 
+-- Real jump height from the jumper's client (Shared/Hitbox.lua samples).
+-- uuid cached per user: UserToCharacter needs Osi (deferred), the samples
+-- must not lag a tick each.
+local liftUuid = {}
+local liftLogged = {}
+handlers[Net.Channels.JumpLift] = function(payload, userId)
+    local uuid = liftUuid[userId]
+    if not uuid then
+        enqueueOsi(function()
+            liftUuid[userId] = userToCharacter(userId)
+            if liftUuid[userId] then Hitbox.SetLiftSample(liftUuid[userId], payload.lift) end
+        end)
+        return
+    end
+    Hitbox.SetLiftSample(uuid, payload.lift)
+    local l = tonumber(payload.lift) or 0
+    if l > 0.3 and not liftLogged[uuid] then
+        liftLogged[uuid] = true
+        Log.Write(string.format("Net: JumpLift from the client: %s is %.2f m up (server hitbox follows the real jump)", uuid, l))
+    end
+end
+
 function M.Register()
     Ext.Events.Tick:Subscribe(function() pcall(animWatchdog) end)
     for channel, handler in pairs(handlers) do

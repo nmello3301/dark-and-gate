@@ -76,6 +76,11 @@ Ext.Require("Client/Combat/SpellAnims.lua").Register()
 CombatHotbar.Register()
 CombatHUD.Register()
 CombatDebug.Register()
+-- First-person HUD with the developer's art (replaces BG3's HUD in POV).
+Ext.Require("Client/HUD/Hud.lua").Register()
+-- Projectile system v1: the clones' stats + the client-side visual probe.
+Ext.Require("Shared/ProjectileSpells.lua").Register("Client")
+Ext.Require("Client/Combat/ProjectileView.lua").Register()
 
 -- First-person movement: floaty Space jump (visual lift in the DLL,
 -- BG3's jump clips played in phases). See Client/Movement/Jump.lua.
@@ -85,6 +90,8 @@ JumpAnims.Register()
 Jump.Register()
 -- WASD speed knob + locomotion rate sync (native lever, MoveSpeed.cpp).
 Ext.Require("Client/Movement/Movement.lua").Register()
+-- The real jump's height, reported to the server (hitbox + projectile hits).
+Ext.Require("Client/Movement/JumpReport.lua").Register()
 
 -- Animation browser + gallery (!dag_animlib). Tags picked there feed
 -- Swing.lua and the jump (Client/AnimLib/Tags.lua).

@@ -15,6 +15,48 @@ local ServerNet = Ext.Require("Server/Net.lua")
 
 local M = {}
 
+-- !dag_spawn_dummy moving: dummies walking back and forth (data/projectiles.lua).
+local pdata = Ext.Require("data/projectiles.lua")
+local patrols = {}   -- uuid -> { a = {x,y,z}, b = {x,y,z}, goal = "a"|"b", issuedAt = ms }
+local function nowMs() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
+
+local function moveTo(uuid, p)
+    local md = pdata.moving_dummy or {}
+    local ok, err = pcall(function()
+        Osi.CharacterMoveToPosition(uuid, p[1], p[2], p[3], md.movement or "Walk", "DAG_DummyPatrol")
+    end)
+    return ok, err
+end
+
+local patrolCheckAt = -1e9
+local function patrolTick()
+    local t = nowMs()
+    local md = pdata.moving_dummy or {}
+    if t - patrolCheckAt < (md.repath_s or 0.5) * 1000 then return end
+    patrolCheckAt = t
+    for uuid, pt in pairs(patrols) do
+        local okE, e = pcall(Ext.Entity.Get, uuid)
+        local pos = nil
+        if okE and e then pcall(function() local tr = e.Transform.Transform.Translate; pos = { tr[1], tr[2], tr[3] } end) end
+        if not pos then
+            patrols[uuid] = nil
+        else
+            local g = pt[pt.goal]
+            local dx, dz = pos[1] - g[1], pos[3] - g[3]
+            local arrived = dx * dx + dz * dz <= (md.arrive_m or 0.6) ^ 2
+            if arrived then pt.goal = (pt.goal == "a") and "b" or "a" end
+            if arrived or t - pt.issuedAt > 4000 then
+                pt.issuedAt = t
+                local ok, err = moveTo(uuid, pt[pt.goal])
+                if not pt.logged then
+                    pt.logged = true
+                    Log.Write(string.format("Dummy: patrol %s -> %s %s", uuid, pt.goal, ok and "CharacterMoveToPosition ok" or ("ERROR " .. tostring(err))))
+                end
+            end
+        end
+    end
+end
+
 -- Ranked name patterns. First-match wins within each tier; tiers are
 -- scanned in order. "Combat_Dummy" / "Training_Dummy" character templates
 -- first (NOT the DEC_ scenery ones — those have no HP and clicks pass
@@ -229,6 +271,16 @@ function M.Register()
             local x = pos.x + 3.0
             local y = pos.y
             local z = pos.z
+            -- Moving dummy: ahead along the player's view, patrolling across it.
+            local fx, fz = 0, 1
+            if req.fwd and tonumber(req.fwd.x) and tonumber(req.fwd.z) then
+                local l = math.sqrt(req.fwd.x ^ 2 + req.fwd.z ^ 2)
+                if l > 1e-3 then fx, fz = req.fwd.x / l, req.fwd.z / l end
+            end
+            if req.moving then
+                local md = pdata.moving_dummy or {}
+                x, z = pos.x + fx * (md.ahead_m or 9), pos.z + fz * (md.ahead_m or 9)
+            end
 
             local choice, topList, err = findDummyTemplate(req.filter)
             if not choice then
@@ -273,6 +325,17 @@ function M.Register()
                 Log.Write(string.format("Dummy: hostile SetFaction ok=%s err=%s now=%s",
                     tostring(okF), tostring(errF), okG and tostring(fac) or "?"))
             end
+            if req.moving then
+                local md = pdata.moving_dummy or {}
+                local half = (md.span_m or 6) / 2
+                local px, pz = -fz, fx   -- across the view
+                patrols[tostring(spawned)] = {
+                    a = { x + px * half, y, z + pz * half }, b = { x - px * half, y, z - pz * half },
+                    goal = "a", issuedAt = -1e9,
+                }
+                Log.Write(string.format("Dummy: %s will walk between (%.1f,%.1f) and (%.1f,%.1f), %.1f m apart",
+                    tostring(spawned), x + px * half, z + pz * half, x - px * half, z - pz * half, 2 * half))
+            end
             local okH, hp = pcall(function() return Osi.GetHitpoints(spawned) end)
             Log.Write(string.format("Dummy: hp=%s hostile=%s", okH and tostring(hp) or "?", tostring(req.hostile == true)))
 
@@ -284,7 +347,8 @@ function M.Register()
             })
         end)
     end)
-    Log.Write("Dummy: registered (Ext.Template probe + client reply)")
+    Ext.Events.Tick:Subscribe(function() pcall(patrolTick) end)
+    Log.Write("Dummy: registered (Ext.Template probe + client reply, moving dummies)")
 end
 
 return M

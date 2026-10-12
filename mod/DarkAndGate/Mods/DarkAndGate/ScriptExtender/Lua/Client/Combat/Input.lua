@@ -40,6 +40,8 @@ local Jump   = Ext.Require("Client/Movement/Jump.lua")
 local Prepare = Ext.Require("Client/Combat/Prepare.lua")
 local Net       = Ext.Require("Shared/Net.lua")
 local ClientNet = Ext.Require("Client/Net.lua")
+local Hud       = Ext.Require("Client/HUD/Hud.lua")
+local hudCfg    = Ext.Require("data/hud.lua")
 
 local M = {}
 
@@ -185,6 +187,14 @@ local function onKey(event)
         return
     end
 
+    -- Potions (data/hud.lua potion_keys, default R = health, T = mana).
+    local potion = (key == hudCfg.potion_keys.health and "health") or (key == hudCfg.potion_keys.mana and "mana") or nil
+    if potion then
+        if evt == "KeyDown" and not event.Repeat then Hud.UsePotion(potion) end
+        prevent(event)
+        return
+    end
+
     local slot = KEY_TO_SLOT[key]
     if slot then
         if evt == "KeyDown" and not event.Repeat then
@@ -219,7 +229,7 @@ function M.Register()
         rawLog = (arg == "on" or arg == "1")
         Log.Write("Combat Input: raw input log " .. (rawLog and "ON" or "OFF"))
     end)
-    Log.Write("Combat Input: registered fix1 (LMB/RMB/1-0 + H hotbar + Space jump; MMB off = UI mode)")
+    Log.Write("Combat Input: registered fix1 (LMB/RMB/1-0 + H hotbar + Space jump + R/T potions; MMB off = UI mode)")
 end
 
 return M

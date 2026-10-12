@@ -14,6 +14,7 @@ local Log = Ext.Require("Shared/Log.lua")
 local Net = Ext.Require("Shared/Net.lua")
 local ServerNet = Ext.Require("Server/Net.lua")
 local Mana = Ext.Require("Server/Combat/Mana.lua")
+local Projectiles = Ext.Require("Server/Combat/Projectiles.lua")
 local spells = Ext.Require("data/spells.lua")
 
 local M = {}
@@ -152,10 +153,19 @@ function M.Register()
             -- the cast behind it (Osi.PlayAnimation is an Osiris task).
             ServerNet.StopScriptedAnim(caster, "before cast")
 
-            -- Character target if the client found one, else the point.
+            -- Projectile spells (data/projectiles.lua): our own flight and
+            -- hits; BG3 shows its projectile and applies the impact clone.
             local target = resolveTarget(caster, parsed)
             local okCast, how
-            if target then
+            local launched, why = Projectiles.Launch(caster, spellId, parsed, function(c, id, p) return castAtPosition(c, id, p) end)
+            if launched then
+                okCast, how = true, "projectile flight"
+            elseif why ~= "not a projectile spell" then
+                Log.Write("SpellCast: projectile launch failed (" .. tostring(why) .. "), casting the spell the old way")
+            end
+            if okCast then
+                -- launched
+            elseif target then
                 okCast, how = castAtTarget(caster, spellId, target), "UseSpell target=" .. tostring(target)
             elseif parsed.hitPoint then
                 okCast = castAtPosition(caster, spellId, parsed.hitPoint)

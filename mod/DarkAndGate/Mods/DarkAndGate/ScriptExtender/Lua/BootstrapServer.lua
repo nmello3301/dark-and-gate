@@ -36,6 +36,10 @@ HitValidator.Register()
 SpellCast.Register()
 Ext.Require("Shared/SpellRange.lua").Register("Server")
 Dummy.Register()
+-- Projectile system v1 (visual / impact clones + our flight) and the HUD's stats.
+Ext.Require("Shared/ProjectileSpells.lua").Register("Server")
+Ext.Require("Server/Combat/Projectiles.lua").Register()
+Ext.Require("Server/Combat/HudStats.lua").Register()
 
 -- Animation browser + gallery (server side: preview copies).
 local AnimLib = Ext.Require("Server/AnimLib.lua")

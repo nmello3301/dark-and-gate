@@ -17,6 +17,7 @@ local ClientNet = Ext.Require("Client/Net.lua")
 -- command is the same trap that broke Input.lua).
 local Spells    = Ext.Require("Client/Combat/Spells.lua")
 local Swing     = Ext.Require("Client/Combat/Swing.lua")
+local Aim       = Ext.Require("Client/Combat/Aim.lua")
 
 local M = {}
 
@@ -48,14 +49,22 @@ function M.Register()
     --   flip into turn-based combat while we test real-time hits.
     --   "hostile": also put it in the Evil NPC faction (it will fight).
     --   name-filter: pick the first template whose name contains it.
-    Ext.RegisterConsoleCommand("dag_spawn_dummy", function(_, a, b)
-        local hostile, filter = false, nil
-        for _, v in ipairs({ a, b }) do
+    --   "moving": it walks back and forth across your view (data/
+    --   projectiles.lua moving_dummy), to practise leading projectiles.
+    Ext.RegisterConsoleCommand("dag_spawn_dummy", function(_, a, b, c)
+        local hostile, moving, filter = false, false, nil
+        for _, v in ipairs({ a, b, c }) do
             if v == "hostile" then hostile = true
+            elseif v == "moving" then moving = true
             elseif v and v ~= "" then filter = v end
         end
-        ClientNet.Send(Net.Channels.SpawnDummy, { hostile = hostile, filter = filter })
-        Log.Write(string.format("SpawnDummy: requested hostile=%s filter=%s", tostring(hostile), tostring(filter)))
+        local fwd = nil
+        pcall(function()
+            local _, f = Aim.ReadInvView()
+            if f then fwd = { x = f[1], y = f[2], z = f[3] } end
+        end)
+        ClientNet.Send(Net.Channels.SpawnDummy, { hostile = hostile, filter = filter, moving = moving, fwd = fwd })
+        Log.Write(string.format("SpawnDummy: requested hostile=%s moving=%s filter=%s", tostring(hostile), tostring(moving), tostring(filter)))
     end)
 
     -- !dag_dummy_list [filter]  server logs up to 25 candidate templates.

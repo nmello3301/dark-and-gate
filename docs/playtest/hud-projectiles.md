@@ -1,0 +1,76 @@
+# Playtest: HUD + projectiles v1 (Pass A, 2026-10-12)
+
+One pass on **DEV-SAVE**. Everything is in the deployed pak (no `reset` needed). After the run, `scripts\read-log.ps1` shows the merged log. The expected log lines are quoted so they can be grepped; `<…>` marks a value that varies.
+
+Arrows and throwables (Part C) are **not built** in this pass: they come only after the spell projectiles pass this test.
+
+## 0. Start
+
+1. Load DEV-SAVE. Open the SE console, type `client`, then `!dag_full_pov`.
+2. Expected at load:
+   - `Hud: registered (art HUD, …)`
+   - `ProjectileSpells: Projectile_FireBolt -> visual DAG_V_Projectile_FireBolt created, impact DAG_I_Projectile_FireBolt created (StatsLoaded)`, and the same for `Projectile_Fireball`, on both server and client. Any `(errors: …)` there matters.
+   - `Projectiles: OnCreate(ServerProjectile) subscribed`
+   - `HudStats: registered …`
+
+## 1. HUD
+
+| # | Do | Expect on screen | Expect in the log |
+| --- | --- | --- | --- |
+| 1.1 | Enter first person | Your HUD at the bottom centre: health orb, hotbar, potion slots, XP bar, mana orb. BG3's hotbar, portraits and combat log are gone. The crosshair stays. | `Hud: atlas texture 5b0b4f6e-… found in the texture bank` (or `can't check …, drawing it anyway`), `Hud: built <w>x<h> scale <s> …, 3 slot icons`, `VanillaHud: hidden HotBar, PlayerPortraits, CombatLog, … (first person)`. Any `-- not found: <names>` is fine; it lists BG3 widgets that weren't there. |
+| 1.2 | Look at the hotbar | Slots 1–3 show the Fire Bolt, Fireball and Misty Step icons. The key numbers 1…0 are on the hotbar (where the art had them). The potion plates read **R** and **T**. Under the orbs: `<hp>/<max> HP` and `<mana>/<max> MP`. | `Hud: stats from server: XP <cur>/<next> (level <n>), potions health <n> mana 0` |
+| 1.3 | Press **1** | Slot 1 glows gold. The blue cast bar above the hotbar fills over 2 s (`Fire Bolt 1.2s`…), then turns bright and pulses (`READY Fire Bolt`). | |
+| 1.4 | **RMB** | The bar drains back to empty in about 0.3 s; the glow goes. | |
+| 1.5 | **1**, wait for READY, **LMB** at the ground | The bar flashes and disappears. | |
+| 1.6 | **2** (Fireball) with less than 32 mana (cast it until you run low) | The Fireball icon greys / blues out when the pool can't pay for it. The mana orb's liquid drops with every cast and refills slowly; the bright line rides the surface. | |
+| 1.7 | Cast **Fireball** about 3 m in front of your feet (you take damage) | The health orb drains to the new HP and the numbers update. Below 25 % the orb pulses. | |
+| 1.8 | **R** | You drink your best healing potion and the HP orb rises. The `x<n>` count drops. With no potion, nothing happens. | `Hud: potion key -> health`, then `HudStats: health potion -> <Supreme/Superior/Greater/Healing> potion <uuid>: Osi.Use ok` or `HudStats: health potion -> none in the inventory` |
+| 1.9 | **T** | The mana flask is dimmed (BG3 has no mana potions yet). | `HudStats: mana potion -> none (BG3 has no mana potions; ours comes later)` |
+| 1.10 | `!dag_bow_bar demo` | An amber ring around the crosshair fills in 1 s, with a white mark at 30 %, glows at full, then disappears after 1 more second. `!dag_bow_bar 0.5` holds it half full; `!dag_bow_bar off` hides it. | `Hud: bow ring demo` |
+| 1.11 | Talk to someone (dialogue) | Your HUD hides, BG3's comes back; after the dialogue, yours returns and BG3's hides again. | `VanillaHud: restored … (first person off / dialogue / cutscene)`, then `VanillaHud: hidden … (first person)` |
+| 1.12 | Open the inventory (I), then the pause menu (Esc) | **Tell me:** does our HUD stay drawn over them? (Menu detection uses guessed widget names.) With the inventory open, type `!dag_hud widgets`. | `Hud: BG3 HUD widgets: <Name>=<Visible/Collapsed>, …`: this gives me the real menu names. |
+| 1.13 | `!dag_hud vanilla`, then `!dag_hud off`, then `!dag_hud on` | vanilla: both HUDs. off: only BG3's. on: only ours. | `Hud: mode vanilla/off/on`, `VanillaHud: restored … (!dag_hud …)` |
+| 1.14 | `!dag_full_pov` off | BG3's HUD is fully back. | `VanillaHud: restored …` |
+
+**Look and feel (tell me):**
+- Size and placement at your resolution (`data/hud.lua`: `width_frac` 0.58, `bottom_px` 34).
+- Whether the numbers line up with the plates and slots. ImGui can't measure text from Lua, so centring is estimated.
+- Whether the text font size is right (`font_numbers` / `font_keys`).
+- Whether the art looks crisp or blurry.
+
+## 2. Projectiles: Fire Bolt and Fireball
+
+`!dag_spawn_dummy` makes a still goblin 3 m to +X; `!dag_spawn_dummy moving` makes one 9 m ahead that walks back and forth across your view over 6 m. Neither is hostile, so the game stays out of turn-based.
+
+| # | Do | Expect | Log |
+| --- | --- | --- | --- |
+| 2.1 | `!dag_spawn_dummy`, then hit it with Fire Bolt | Gale casts as before. The bolt flies at the crosshair and the goblin takes fire damage on contact. **Tell me** whether BG3's bolt vanishes at the hit or flies through. | Server: `Projectiles: Projectile_FireBolt template 792ba497…: InitialSpeed <v>, VelocityMode <m>, Acceleration <a>` (the first cast only); `PROJ #<n> launch Projectile_FireBolt: origin … speed <v> m/s …, visual clone DAG_V_Projectile_FireBolt cast at (…)`; `SpellCast: CAST projectile flight spell=Projectile_FireBolt cost=0`; `PROJ #<n> flight starts (BG3 projectile seen after <ms> ms), BG3 projectile SourcePos … is <d> m from our origin`; `PROJ #<n> HIT character <uuid> at (…) after <m> m / <s> s zone <head/torso/limbs>: impact DAG_I_Projectile_FireBolt lvl <n> via CreateExplosion(<uuid>) ok; BG3 projectile: RequestDelete set`; `PROJ #<n> target HP <a> -> <b> (damage applied)`. Client: `ProjView #<n>: launch …`, `ProjView #<n>: client projectile FOUND via <component> …; components: …` or `… NOT found …`, up to 6 `ProjView #<n>: t=<s>s BG3 visual at …, our flight at …, drift <m> m`, `ProjView #<n>: character at … (max visual drift <m> m)` |
+| 2.2 | Fireball at the still goblin | The explosion happens where our orb touched it (4 m area, Dex save). | `PROJ #<n> HIT character … via CreateExplosionAtPosition (…) ok`, `… target HP … (damage applied)` |
+| 2.3 | `!dag_spawn_dummy moving`, then Fire Bolt aimed **straight at** it while it walks | It often misses, flying past behind it. | `PROJ #<n> HIT world …` or `PROJ #<n> expired after 120.0 m (no hit)` |
+| 2.4 | Same, but **lead** the shot (aim ahead of it) | It hits mid-flight, wherever the goblin is when the bolt reaches it. **Tell me** how leading felt (speed). | `PROJ #<n> HIT character …` |
+| 2.5 | Fire Bolt at a wall or rock | It stops at the wall. BG3's bolt should vanish there. | `PROJ #<n> HIT world at (…)` |
+| 2.6 | Jump, and cast Fire Bolt at the still goblin at the top of the jump | It flies from where your eyes are in the air and hits. | `Net: JumpLift from the client: <uuid> is <m> m up (server hitbox follows the real jump)` (first jump only), `JumpReport: landed, peak lift sent to the server <m> m`, then `PROJ #<n> launch … origin (…)` with an origin about 1 m higher than a ground cast |
+| 2.7 | Misty Step | Unchanged; it isn't a projectile. | `SpellCast: CAST UseSpellAtPosition …` |
+
+Things only you can tell me:
+- Did BG3's own projectile **look** right: start at Gale's hand, follow the crosshair line, vanish on the hit?
+- Whether steering looked smooth or jittery. Both are in `ProjView` drift lines: `steering … works` means the call was accepted, not that it looked right.
+- Any double damage: the visual clone has no effect, so there should be none.
+
+## 3. Checklist (the 8 items from 2026-10-09 / 10-10, tick while you play)
+
+- [ ] **First jump of a session works** (fix `42ba492`). If the 2nd jump glitches instead, look for `RJUMP: Falling Update hooked` in native.log.
+- [ ] **LMB spam** (3 fast clicks): WASD still works, and `!dag_unstick` isn't needed.
+- [ ] **Head-bone camera**: the view stays glued to the body while attacking.
+- [ ] **Face never flashes**, including after a gear change.
+- [ ] **Cylinder hitboxes**: swing reach is measured to the body, and a goblin's cylinder matches its body (also exercised by the projectile hits above).
+- [ ] **Casting slows** to x0.7 on the ground and full speed at READY (`Spells: casting slow ON / off`).
+- [ ] **No foot sliding**: locomotion clips play at the gait's speed.
+- [ ] **Actions in the air**: a swing or cast in the air plays, the arc continues, and the landing waits.
+
+## Known, not bugs
+
+- The 2 s channel, mana and cooldowns are unchanged; only the flight and the impact are ours.
+- Fireball's flight has no gravity in v1 (`data/projectiles.lua` `gravity`), so it flies straight like Fire Bolt.
+- Fireball ground preview (B5): not in this pass.
+- A mana potion item doesn't exist yet. T is wired but finds nothing.
