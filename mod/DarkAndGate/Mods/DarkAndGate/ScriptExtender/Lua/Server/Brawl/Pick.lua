@@ -71,13 +71,13 @@ local function getSpellWeight(uuid, spellName, spell, distanceToTarget, hasLineO
     end
     -- If this spell has a damage type, favor vulnerable enemies
     -- (NB: this doesn't account for physical weapon damage, which is attached to the weapon itself -- todo)
-    if State.Settings.TurnBasedSwarmMode and spell.damageType ~= nil and spell.damageType ~= "None" then
+    if BrawlState.Settings.TurnBasedSwarmMode and spell.damageType ~= nil and spell.damageType ~= "None" then
         weight = weight + M.Pick.getResistanceWeight(spell, targetUuid)
     end
     -- Adjust by spell type (damage and healing spells are somewhat favored in general)
     weight = weight + getSpellTypeWeight(spellType)
     -- Adjust by spell level, if we're in hogwild mode
-    if State.Settings.HogwildMode then
+    if BrawlState.Settings.HogwildMode then
         weight = weight + spell.level*2
     end
     if spellType == "Damage" then
@@ -210,15 +210,15 @@ local function isCompanionSpellAvailable(uuid, targetUuid, spellName, spell, isS
     if bonusActionOnly and not spell.isBonusAction then
         return false
     end
-    if State.Settings.TurnBasedSwarmMode and spell.outOfCombatOnly then
+    if BrawlState.Settings.TurnBasedSwarmMode and spell.outOfCombatOnly then
         return false
     end
     if spell.isSelfOnly and uuid ~= targetUuid then
         return false
     end
-    if not State.Settings.HogwildMode then
+    if not BrawlState.Settings.HogwildMode then
         -- Make sure we're not exceeding the user's specified AI max spell level
-        if spell.level > State.Settings.CompanionAIMaxSpellLevel then
+        if spell.level > BrawlState.Settings.CompanionAIMaxSpellLevel then
             return false
         end
         -- Make sure we have the resources to actually cast what we want to cast
@@ -229,9 +229,9 @@ local function isCompanionSpellAvailable(uuid, targetUuid, spellName, spell, isS
     -- For defense tactics:
     --  1. Is the target already within range? Then ok to use
     --  2. If the target is out-of-range, can we hit him without moving outside of the perimeter? Then ok to use
-    if State.Settings.CompanionTactics == "Defense" then
+    if BrawlState.Settings.CompanionTactics == "Defense" then
         local range = M.Utils.convertSpellRangeToNumber(M.Utils.getSpellRange(spellName), uuid)
-        if distanceToTarget > range and targetDistanceToParty > (range + State.Settings.DefensiveTacticsMaxDistance) then
+        if distanceToTarget > range and targetDistanceToParty > (range + BrawlState.Settings.DefensiveTacticsMaxDistance) then
             return false
         end
     end
@@ -269,7 +269,7 @@ local function isEnemySpellAvailable(uuid, targetUuid, spellName, spell, isSilen
     if bonusActionOnly and not spell.isBonusAction then
         return false
     end
-    if State.Settings.TurnBasedSwarmMode or not State.Settings.HogwildMode then
+    if BrawlState.Settings.TurnBasedSwarmMode or not BrawlState.Settings.HogwildMode then
         if not M.Resources.hasEnoughToCastSpell(uuid, spellName) then
             return false
         end
@@ -296,7 +296,7 @@ local function getCompanionWeightedSpells(uuid, targetUuid, preparedSpells, excl
         if M.Pick.isNpcSpellUsable(spellName) then
             local spell = nil
             for _, spellType in ipairs(spellTypes) do
-                spell = State.Session.SpellTable[spellType][spellName]
+                spell = BrawlState.Session.SpellTable[spellType][spellName]
                 if spell ~= nil then
                     break
                 end
@@ -327,7 +327,7 @@ local function getWeightedSpells(uuid, targetUuid, preparedSpells, excludedSpell
         if M.Pick.isNpcSpellUsable(spellName) then
             local spell = nil
             for _, spellType in ipairs(spellTypes) do
-                spell = State.Session.SpellTable[spellType][spellName]
+                spell = BrawlState.Session.SpellTable[spellType][spellName]
                 if spell ~= nil then
                     break
                 end
@@ -393,7 +393,7 @@ local function selectRandomSpell(preparedSpells)
     for _, preparedSpell in pairs(preparedSpells) do
         local spellName = preparedSpell.OriginatorPrototype
         if M.Pick.isNpcSpellUsable(spellName) then
-            if State.Session.SpellTable.Damage[spellName] or State.Session.SpellTable.Control[spellName] then
+            if BrawlState.Session.SpellTable.Damage[spellName] or BrawlState.Session.SpellTable.Control[spellName] then
                 table.insert(usableSpells, spellName)
                 numUsableSpells = numUsableSpells + 1
             end
@@ -438,7 +438,7 @@ local function getBalancedWeightedTarget(distanceToTarget, targetHp, targetHpPct
     local weightedTarget
     local targetDistanceToParty = M.Osi.GetDistanceTo(targetUuid, anchorCharacterUuid)
     -- Only include potential targets that are within X meters of the party
-    if targetDistanceToParty ~= nil and targetDistanceToParty < State.Settings.DefensiveTacticsMaxDistance then
+    if targetDistanceToParty ~= nil and targetDistanceToParty < BrawlState.Settings.DefensiveTacticsMaxDistance then
         weightedTarget = 3*distanceToTarget + 0.25*targetHp
         if not canSeeTarget then
             weightedTarget = weightedTarget*1.8
@@ -466,8 +466,8 @@ local function getDefenseWeightedTarget(distanceToTarget, targetHp, targetHpPct,
     local weightedTarget
     local targetDistanceToAnchor = M.Osi.GetDistanceTo(targetUuid, anchorCharacterUuid)
     -- Only include potential targets that are within X meters of the player
-    debugPrint("def", anchorCharacterUuid, targetDistanceToAnchor, State.Settings.DefensiveTacticsMaxDistance)
-    if targetDistanceToAnchor ~= nil and targetDistanceToAnchor < State.Settings.DefensiveTacticsMaxDistance then
+    debugPrint("def", anchorCharacterUuid, targetDistanceToAnchor, BrawlState.Settings.DefensiveTacticsMaxDistance)
+    if targetDistanceToAnchor ~= nil and targetDistanceToAnchor < BrawlState.Settings.DefensiveTacticsMaxDistance then
         weightedTarget = 3*distanceToTarget + 0.25*targetHp
         if not canSeeTarget then
             weightedTarget = weightedTarget*1.8
@@ -505,19 +505,19 @@ local function getWeightedTargets(brawler, potentialTargets, bonusActionOnly, he
     local weightedTargets = {}
     local isHealer = M.Utils.isHealerArchetype(brawler.archetype)
     local isMelee = nil
-    if State.Settings.TurnBasedSwarmMode then
+    if BrawlState.Settings.TurnBasedSwarmMode then
         isMelee = M.Utils.isMeleeArchetype(brawler.archetype)
     end
     local anchorCharacterUuid
     if M.Utils.isPlayerOrAlly(brawler.uuid) then
-        if State.Settings.CompanionTactics == "Balanced" then
+        if BrawlState.Settings.CompanionTactics == "Balanced" then
             anchorCharacterUuid = M.Osi.GetClosestAlivePlayer(brawler.uuid)
             if anchorCharacterUuid == nil then
                 anchorCharacterUuid = M.Osi.GetHostCharacter()
             end
-        elseif State.Settings.CompanionTactics == "Defense" then
-            if State.Session.Players and State.Session.Players[brawler.uuid] and State.Session.Players[brawler.uuid].userId then
-                local player = State.getPlayerByUserId(State.Session.Players[brawler.uuid].userId)
+        elseif BrawlState.Settings.CompanionTactics == "Defense" then
+            if BrawlState.Session.Players and BrawlState.Session.Players[brawler.uuid] and BrawlState.Session.Players[brawler.uuid].userId then
+                local player = BrawlState.getPlayerByUserId(BrawlState.Session.Players[brawler.uuid].userId)
                 if player then
                     anchorCharacterUuid = player.uuid
                 end
@@ -538,9 +538,9 @@ local function getWeightedTargets(brawler, potentialTargets, bonusActionOnly, he
                     if M.State.hasDirectHeal(brawler.uuid, preparedSpells, false, bonusActionOnly) then
                         local targetHp = M.Osi.GetHitpoints(potentialTargetUuid)
                         local targetHpPct = M.Osi.GetHitpointsPercentage(potentialTargetUuid)
-                        if State.Settings.CompanionTactics == "Offense" then
+                        if BrawlState.Settings.CompanionTactics == "Offense" then
                             weightedTarget = M.Pick.getOffenseWeightedTarget(0, targetHp, targetHpPct, true, isHealer, false, nil, nil)
-                        elseif State.Settings.CompanionTactics == "Defense" then
+                        elseif BrawlState.Settings.CompanionTactics == "Defense" then
                             weightedTarget = M.Pick.getDefenseWeightedTarget(0, targetHp, targetHpPct, true, isHealer, false, nil, nil, brawler.uuid, potentialTargetUuid, anchorCharacterUuid)
                         else
                             weightedTarget = M.Pick.getBalancedWeightedTarget(0, targetHp, targetHpPct, true, isHealer, false, nil, nil, brawler.uuid, potentialTargetUuid, anchorCharacterUuid)
@@ -549,14 +549,14 @@ local function getWeightedTargets(brawler, potentialTargets, bonusActionOnly, he
                 else
                     local distanceToTarget = M.Osi.GetDistanceTo(brawler.uuid, potentialTargetUuid)
                     local canSeeTarget = M.Osi.CanSee(brawler.uuid, potentialTargetUuid) == 1
-                    debugPrint(brawler.displayName, "distanceToTarget", distanceToTarget, canSeeTarget, State.Session.ActiveCombatGroups[brawler.combatGroupId], State.Session.IsAttackingOrBeingAttackedByPlayer[potentialTargetUuid], isHealer, isMelee)
+                    debugPrint(brawler.displayName, "distanceToTarget", distanceToTarget, canSeeTarget, BrawlState.Session.ActiveCombatGroups[brawler.combatGroupId], BrawlState.Session.IsAttackingOrBeingAttackedByPlayer[potentialTargetUuid], isHealer, isMelee)
                     local ableToTarget = true
                     local isHostile = M.Utils.isHostileTarget(brawler.uuid, potentialTargetUuid)
-                    if not State.Settings.TurnBasedSwarmMode and (distanceToTarget > Constants.MAX_ENGAGEMENT_RANGE or (isHostile and not canSeeTarget)) then
+                    if not BrawlState.Settings.TurnBasedSwarmMode and (distanceToTarget > Constants.MAX_ENGAGEMENT_RANGE or (isHostile and not canSeeTarget)) then
                         ableToTarget = false
                     end
-                    debugPrint(isHostile, ableToTarget, State.Session.ActiveCombatGroups[brawler.combatGroupId], State.Session.IsAttackingOrBeingAttackedByPlayer[potentialTargetUuid])
-                    if M.Utils.isToT() or ableToTarget or State.Session.ActiveCombatGroups[brawler.combatGroupId] then
+                    debugPrint(isHostile, ableToTarget, BrawlState.Session.ActiveCombatGroups[brawler.combatGroupId], BrawlState.Session.IsAttackingOrBeingAttackedByPlayer[potentialTargetUuid])
+                    if M.Utils.isToT() or ableToTarget or BrawlState.Session.ActiveCombatGroups[brawler.combatGroupId] then
                         local hasPathToTarget = nil
                         local casterEntity = Ext.Entity.Get(brawler.uuid)
                         local preparedSpells = casterEntity and casterEntity.SpellBookPrepares and casterEntity.SpellBookPrepares.PreparedSpells
@@ -573,19 +573,19 @@ local function getWeightedTargets(brawler, potentialTargets, bonusActionOnly, he
                                 weightedTarget = M.Pick.getOffenseWeightedTarget(distanceToTarget, targetHp, targetHpPct, canSeeTarget, isHealer, isHostile, isMelee, hasPathToTarget)
                                 debugPrint(brawler.displayName, "Got offense weighted target", M.Utils.getDisplayName(potentialTargetUuid), weightedTarget)
                                 if brawler.combatGroupId ~= nil then
-                                    State.Session.ActiveCombatGroups[brawler.combatGroupId] = true
+                                    BrawlState.Session.ActiveCombatGroups[brawler.combatGroupId] = true
                                 end
                             else
-                                if State.Settings.CompanionTactics == "Offense" then
+                                if BrawlState.Settings.CompanionTactics == "Offense" then
                                     weightedTarget = M.Pick.getOffenseWeightedTarget(distanceToTarget, targetHp, targetHpPct, canSeeTarget, isHealer, isHostile, isMelee, hasPathToTarget)
-                                elseif State.Settings.CompanionTactics == "Defense" then
+                                elseif BrawlState.Settings.CompanionTactics == "Defense" then
                                     weightedTarget = M.Pick.getDefenseWeightedTarget(distanceToTarget, targetHp, targetHpPct, canSeeTarget, isHealer, isHostile, isMelee, hasPathToTarget, brawler.uuid, potentialTargetUuid, anchorCharacterUuid)
                                 else
                                     weightedTarget = M.Pick.getBalancedWeightedTarget(distanceToTarget, targetHp, targetHpPct, canSeeTarget, isHealer, isHostile, isMelee, hasPathToTarget, brawler.uuid, potentialTargetUuid, anchorCharacterUuid)
                                 end
                             end
                             debugPrint(brawler.displayName, "weighted target", M.Utils.getDisplayName(potentialTargetUuid), weightedTarget)
-                            if State.Settings.TurnBasedSwarmMode and weightedTarget ~= nil then
+                            if BrawlState.Settings.TurnBasedSwarmMode and weightedTarget ~= nil then
                                 if M.Utils.isConcentrating(potentialTargetUuid) then
                                     weightedTarget = weightedTarget / Constants.AI_TARGET_CONCENTRATION_WEIGHT_FACTOR
                                 end

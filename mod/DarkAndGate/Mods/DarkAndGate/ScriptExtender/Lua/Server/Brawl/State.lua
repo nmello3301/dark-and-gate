@@ -27,7 +27,8 @@ local Settings = {
     ExcludeEnemyTiers = nil,
     DisableEnemyAI = false,
 }
-if MCM then
+-- DAG: settings come from data/realtime.lua (Server/BrawlAdapter.lua), not Brawl's MCM page.
+if false and MCM then
     Settings.ModEnabled = MCM.Get("mod_enabled")
     Settings.CompanionAIEnabled = MCM.Get("companion_ai_enabled")
     Settings.TruePause = MCM.Get("true_pause")
@@ -271,7 +272,7 @@ local function isToTCombatHelper(uuid)
 end
 
 local function disableDynamicCombatCamera()
-    Ext.ServerNet.BroadcastMessage("DisableDynamicCombatCamera", "")
+    Ext.ServerNet.BroadcastMessage("DAG_BrawlNoDynamicCamera", "") -- DAG: handled by Client/BrawlClient.lua
 end
 
 local function hasDirectHeal(uuid, preparedSpells, excludeSelfOnly, bonusActionOnly)

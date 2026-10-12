@@ -17,17 +17,17 @@ local function addBrawler(entityUuid, replaceExistingBrawler)
         local level = M.Osi.GetRegion(entityUuid)
         local okToAdd = false
         if replaceExistingBrawler then
-            okToAdd = level and State.Session.Brawlers[level] ~= nil and M.Utils.isAliveAndCanFight(entityUuid)
+            okToAdd = level and BrawlState.Session.Brawlers[level] ~= nil and M.Utils.isAliveAndCanFight(entityUuid)
         else
-            okToAdd = level and State.Session.Brawlers[level] ~= nil and State.Session.Brawlers[level][entityUuid] == nil and M.Utils.isAliveAndCanFight(entityUuid)
+            okToAdd = level and BrawlState.Session.Brawlers[level] ~= nil and BrawlState.Session.Brawlers[level][entityUuid] == nil and M.Utils.isAliveAndCanFight(entityUuid)
         end
-        if State.Settings.TurnBasedSwarmMode and M.Utils.isToT() and Mods.ToT.PersistentVars.Scenario and entityUuid == Mods.ToT.PersistentVars.Scenario.CombatHelper then
+        if BrawlState.Settings.TurnBasedSwarmMode and M.Utils.isToT() and Mods.ToT.PersistentVars.Scenario and entityUuid == Mods.ToT.PersistentVars.Scenario.CombatHelper then
             okToAdd = true
         end
         if okToAdd then
             local displayName = M.Utils.getDisplayName(entityUuid)
             local entity = Ext.Entity.Get(entityUuid)
-            local existingBrawler = State.Session.Brawlers[level][entityUuid]
+            local existingBrawler = BrawlState.Session.Brawlers[level][entityUuid]
             -- Preserve actionInterval from any existing brawler entry within this combat.  The first addBrawler call (at first EnteredCombat) computes
             -- from the natural rolled init before our bumps fire; subsequent re-adds (level changes, party joins, etc.) would otherwise read the bumped InitiativeRoll.
             local actionInterval = existingBrawler and existingBrawler.actionInterval
@@ -38,7 +38,7 @@ local function addBrawler(entityUuid, replaceExistingBrawler)
                 combatGuid = M.Osi.CombatGetGuidFor(entityUuid),
                 combatGroupId = M.Osi.GetCombatGroupID(entityUuid),
                 isPaused = M.Osi.IsInForceTurnBasedMode(entityUuid) == 1,
-                archetype = State.getArchetype(entityUuid),
+                archetype = BrawlState.getArchetype(entityUuid),
                 numExtraAttacks = getNumExtraAttacks(entityUuid),
                 actionInterval = actionInterval,
                 auras = Spells.getAuras(entityUuid),
@@ -53,24 +53,24 @@ local function addBrawler(entityUuid, replaceExistingBrawler)
                 end
                 brawler.actionResources.listener = Ext.Entity.Subscribe("ActionResources", Resources.actionResourcesCallback, entity)
             end
-            if State.getArchetype(entityUuid) == "barbarian" then
+            if BrawlState.getArchetype(entityUuid) == "barbarian" then
                 brawler.rage = Spells.getRageAbility(entityUuid)
                 debugPrint(displayName, "barbarian archetype, setting rage", brawler.rage)
             end
             debugPrint(displayName, "Adding Brawler", entityUuid, brawler.actionInterval)
             local modVars = Ext.Vars.GetModVariables(ModuleUUID)
             modVars.ModifiedHitpoints = modVars.ModifiedHitpoints or {}
-            State.revertHitpoints(entityUuid)
-            State.modifyHitpoints(entityUuid)
+            BrawlState.revertHitpoints(entityUuid)
+            BrawlState.modifyHitpoints(entityUuid)
             Osi.SetCanJoinCombat(entityUuid, 1)
-            if State.Settings.TurnBasedSwarmMode then
-                State.Session.Brawlers[level][entityUuid] = brawler
+            if BrawlState.Settings.TurnBasedSwarmMode then
+                BrawlState.Session.Brawlers[level][entityUuid] = brawler
                 if M.Osi.IsPartyMember(entityUuid, 1) ~= 1 then
-                    State.Session.SwarmTurnComplete[entityUuid] = false
+                    BrawlState.Session.SwarmTurnComplete[entityUuid] = false
                     Osi.PROC_SelfHealing_Disable(entityUuid)
-                elseif State.Session.TurnBasedSwarmModePlayerTurnEnded[entityUuid] == nil then
+                elseif BrawlState.Session.TurnBasedSwarmModePlayerTurnEnded[entityUuid] == nil then
                     local newFlag = M.Utils.isPlayerTurnEnded(entityUuid)
-                    State.Session.TurnBasedSwarmModePlayerTurnEnded[entityUuid] = newFlag
+                    BrawlState.Session.TurnBasedSwarmModePlayerTurnEnded[entityUuid] = newFlag
                     debugPrint("[LATEJOIN] addBrawler player", displayName,
                         "round=", TurnOrder.getCurrentCombatRound(),
                         "RequestedEndTurn=", entity.TurnBased and tostring(entity.TurnBased.RequestedEndTurn) or "no-tb",
@@ -84,15 +84,15 @@ local function addBrawler(entityUuid, replaceExistingBrawler)
                     -- thank u lunisole/ghostboats
                     Osi.PROC_SelfHealing_Disable(entityUuid)
                 end
-                State.Session.Brawlers[level][entityUuid] = brawler
+                BrawlState.Session.Brawlers[level][entityUuid] = brawler
                 if M.Osi.IsInForceTurnBasedMode(M.Osi.GetHostCharacter()) == 0 then
                     -- Only pre-pause fresh entries (pre-APoCS); re-adds after APoCS would silently freeze the brawler.
-                    if State.Settings.AutoPauseOnCombatStart and not State.Session.APoCSScheduled then
+                    if BrawlState.Settings.AutoPauseOnCombatStart and not BrawlState.Session.APoCSScheduled then
                         brawler.isPaused = true
-                    elseif State.Session.IsInDialog then
+                    elseif BrawlState.Session.IsInDialog then
                         -- Don't start pulse actions for new combat entrants while a dialog/cutscene is in progress, otherwise turned-during-cutscene
                         -- enemies start spellcasting mid-cutscene and interrupt it.
-                    elseif State.Session.PulseActionTimers[entityUuid] == nil then
+                    elseif BrawlState.Session.PulseActionTimers[entityUuid] == nil then
                         RT.Timers.startPulseAction(brawler, Constants.INITIAL_PULSE_ACTION_DELAY)
                     end
                 else
@@ -101,24 +101,23 @@ local function addBrawler(entityUuid, replaceExistingBrawler)
                     end
                     RT.Timers.stopPulseAction(brawler)
                     Osi.ForceTurnBasedMode(entityUuid, 1)
-                    if not State.Session.Players[entityUuid] then
+                    if not BrawlState.Session.Players[entityUuid] then
                         brawler.isPaused = true
-                        if State.Settings.TruePause then
+                        if BrawlState.Settings.TruePause then
                             Pause.startTruePause(entityUuid)
                             Pause.lock(Ext.Entity.Get(entityUuid))
                         end
                     end
                 end
             end
-            -- Summon reaction override: if a summon just joined the brawl and the global mode is set, apply the override now.  No-op otherwise.
-            Loadouts.applySummonOverrideTo(entityUuid)
+            -- DAG: Brawl's summon reaction override (Loadouts.lua) stripped
         end
     end
 end
 
 local function removeBrawler(level, entityUuid)
     local combatGuid = nil
-    local brawlersInLevel = State.Session.Brawlers[level]
+    local brawlersInLevel = BrawlState.Session.Brawlers[level]
     if brawlersInLevel then
         for brawlerUuid, brawler in pairs(brawlersInLevel) do
             if brawler.targetUuid == entityUuid then
@@ -147,17 +146,17 @@ local function removeBrawler(level, entityUuid)
         Osi.SetCanJoinCombat(entityUuid, 1)
         Osi.RequestSetSwarmGroup(entityUuid, "")
         if M.Osi.IsPartyMember(entityUuid, 1) == 0 then
-            State.revertHitpoints(entityUuid)
+            BrawlState.revertHitpoints(entityUuid)
         else
-            State.Session.PlayerCurrentTarget[entityUuid] = nil
-            State.Session.PlayerMarkedTarget[entityUuid] = nil
-            State.Session.IsAttackingOrBeingAttackedByPlayer[entityUuid] = nil
+            BrawlState.Session.PlayerCurrentTarget[entityUuid] = nil
+            BrawlState.Session.PlayerMarkedTarget[entityUuid] = nil
+            BrawlState.Session.IsAttackingOrBeingAttackedByPlayer[entityUuid] = nil
         end
-        if State.Session.SwarmTurnComplete[entityUuid] ~= nil then
-            State.Session.SwarmTurnComplete[entityUuid] = true
+        if BrawlState.Session.SwarmTurnComplete[entityUuid] ~= nil then
+            BrawlState.Session.SwarmTurnComplete[entityUuid] = true
         end
-        if State.Session.ResurrectedPlayer[entityUuid] ~= nil then
-            State.Session.ResurrectedPlayer[entityUuid] = nil
+        if BrawlState.Session.ResurrectedPlayer[entityUuid] ~= nil then
+            BrawlState.Session.ResurrectedPlayer[entityUuid] = nil
         end
     end
 end
@@ -180,7 +179,7 @@ local function endBrawl(level)
         return
     end
     debugPrint("endBrawl", level)
-    local brawlersInLevel = State.Session.Brawlers[level]
+    local brawlersInLevel = BrawlState.Session.Brawlers[level]
     if brawlersInLevel then
         local uuids = {}
         for brawlerUuid, _ in pairs(brawlersInLevel) do
@@ -195,44 +194,41 @@ local function endBrawl(level)
         end
         debugDump(brawlersInLevel)
     end
-    if State.Session.CombatHelper then
-        Utils.remove(State.Session.CombatHelper)
-        State.Session.CombatHelper = nil
+    if BrawlState.Session.CombatHelper then
+        Utils.remove(BrawlState.Session.CombatHelper)
+        BrawlState.Session.CombatHelper = nil
     end
-    for combatGuid, refreshers in pairs(State.Session.RefresherCombatHelper) do
+    for combatGuid, refreshers in pairs(BrawlState.Session.RefresherCombatHelper) do
         for _, refresherUuid in ipairs(refreshers) do
             Utils.remove(refresherUuid)
         end
     end
-    State.Session.RefresherCombatHelper = {}
-    State.Session.ActiveCombatGroups = {}
-    State.Session.Brawlers[level] = {}
-    State.Session.StoryActionIDs = {}
-    State.Session.SwarmTurnComplete = {}
-    State.Session.ActionsInProgress = {}
-    State.Session.MeanInitiativeRoll = nil
-    TurnOrder.clearAllNaturalInitiative()
-    Encounters.Tracking.pruneDead()
-    State.Session.ExtraAttacksRemaining = {}
-    State.Session.FTBLockedIn = {}
-    State.Session.MovementQueue = {}
-    State.Session.PreExistingCastAtPause = {}
-    State.Session.IsAttackingOrBeingAttackedByPlayer = {}
+    BrawlState.Session.RefresherCombatHelper = {}
+    BrawlState.Session.ActiveCombatGroups = {}
+    BrawlState.Session.Brawlers[level] = {}
+    BrawlState.Session.StoryActionIDs = {}
+    BrawlState.Session.SwarmTurnComplete = {}
+    BrawlState.Session.ActionsInProgress = {}
+    BrawlState.Session.MeanInitiativeRoll = nil
+    TurnOrder.clearAllNaturalInitiative() -- DAG: Encounters stripped
+    BrawlState.Session.ExtraAttacksRemaining = {}
+    BrawlState.Session.FTBLockedIn = {}
+    BrawlState.Session.MovementQueue = {}
+    BrawlState.Session.PreExistingCastAtPause = {}
+    BrawlState.Session.IsAttackingOrBeingAttackedByPlayer = {}
     -- Cancel any pending heal-request timers before zeroing (the values are timer handles)
-    for _, timerHandle in pairs(State.Session.HealRequestedTimer) do
+    for _, timerHandle in pairs(BrawlState.Session.HealRequestedTimer) do
         Ext.Timer.Cancel(timerHandle)
     end
-    State.Session.HealRequestedTimer = {}
-    State.Session.HealRequested = {}
-    if State.Settings.TurnBasedSwarmMode then
-        Swarm.cancelTimers()
-    end
+    BrawlState.Session.HealRequestedTimer = {}
+    BrawlState.Session.HealRequested = {}
+    -- DAG: Swarm Mode stripped
 end
 
 local function getBrawlerByUuid(uuid)
     local level = M.Osi.GetRegion(uuid)
-    if level and State.Session.Brawlers[level] then
-        return State.Session.Brawlers[level][uuid]
+    if level and BrawlState.Session.Brawlers[level] then
+        return BrawlState.Session.Brawlers[level][uuid]
     end
     return nil
 end
@@ -241,8 +237,8 @@ local function getBrawlerByName(name)
     local hostCharacter = M.Osi.GetHostCharacter()
     if hostCharacter then
         local level = M.Osi.GetRegion(hostCharacter)
-        if level and State.Session.Brawlers then
-            local brawlersInLevel = State.Session.Brawlers[level]
+        if level and BrawlState.Session.Brawlers then
+            local brawlersInLevel = BrawlState.Session.Brawlers[level]
             if brawlersInLevel then
                 for uuid, brawler in pairs(brawlersInLevel) do
                     if brawler.displayName == name then
@@ -257,7 +253,7 @@ end
 local function getBrawlersSortedByDistance(entityUuid)
     local brawlersSortedByDistance = {}
     local level = M.Osi.GetRegion(entityUuid)
-    local brawlersInLevel = State.Session.Brawlers[level]
+    local brawlersInLevel = BrawlState.Session.Brawlers[level]
     if brawlersInLevel then
         for brawlerUuid, brawler in pairs(brawlersInLevel) do
             if M.Utils.isOnSameLevel(brawlerUuid, entityUuid) and M.Utils.isAliveAndCanFight(brawlerUuid) then
@@ -270,7 +266,7 @@ local function getBrawlersSortedByDistance(entityUuid)
 end
 
 local function addPlayersInEnterCombatRangeToBrawlers(brawlerUuid)
-    local players = State.Session.Players
+    local players = BrawlState.Session.Players
     for playerUuid, _ in pairs(players) do
         local distanceTo = M.Osi.GetDistanceTo(brawlerUuid, playerUuid)
         if distanceTo ~= nil and distanceTo < Constants.ENTER_COMBAT_RANGE then
@@ -282,7 +278,7 @@ end
 local function disableLockedOnTarget(uuid)
     local level = M.Osi.GetRegion(uuid)
     if level and M.Utils.isAliveAndCanFight(uuid) then
-        local brawlersInLevel = State.Session.Brawlers[level]
+        local brawlersInLevel = BrawlState.Session.Brawlers[level]
         if brawlersInLevel[uuid] then
             brawlersInLevel[uuid].lockedOnTarget = false
         end
@@ -300,7 +296,7 @@ end
 -- Shared death cleanup: lay the body flat, remove from brawler table, check if combat ended.
 -- Runs in both RT and Swarm modes. Called from each mode's onDied handler.
 local function handleDeath(level, entityUuid)
-    if level and entityUuid and State.Session.Brawlers[level] and State.Session.Brawlers[level][entityUuid] then
+    if level and entityUuid and BrawlState.Session.Brawlers[level] and BrawlState.Session.Brawlers[level][entityUuid] then
         Ext.Timer.WaitFor(Constants.LIE_ON_GROUND_TIMEOUT, function ()
             debugPrint("LieOnGround", entityUuid)
             Utils.clearOsirisQueue(entityUuid)
@@ -312,8 +308,8 @@ local function handleDeath(level, entityUuid)
 end
 
 local function initBrawlers(level)
-    State.Session.Brawlers[level] = {}
-    local players = State.Session.Players
+    BrawlState.Session.Brawlers[level] = {}
+    local players = BrawlState.Session.Players
     for playerUuid, _ in pairs(players) do
         if Osi.IsInCombat(playerUuid) == 1 then
             Listeners.onCombatStarted(M.Osi.CombatGetGuidFor(playerUuid))
@@ -323,22 +319,22 @@ local function initBrawlers(level)
 end
 
 local function getBrawlers()
-    if not State.Session.Brawlers then
+    if not BrawlState.Session.Brawlers then
         return {}
     end
     local region = M.Utils.getCurrentRegion()
-    if not State.Session.Brawlers[region] then
+    if not BrawlState.Session.Brawlers[region] then
         return {}
     end
-    return State.Session.Brawlers[region]
+    return BrawlState.Session.Brawlers[region]
 end
 
 local function setExcludedFromAI(uuid, isExcluded)
-    State.Session.ExcludedFromAI[uuid] = isExcluded
+    BrawlState.Session.ExcludedFromAI[uuid] = isExcluded
 end
 
 local function isExcludedFromAI(uuid)
-    return State.Session.ExcludedFromAI[uuid]
+    return BrawlState.Session.ExcludedFromAI[uuid]
 end
 
 return {

@@ -1,4 +1,4 @@
-ECSPrinter = require("Server/ECSPrinter.lua")
+-- DAG: ECSPrinter (Brawl's debug printer) not imported
 
 local debugPrint = Utils.debugPrint
 local debugDump = Utils.debugDump
@@ -6,9 +6,9 @@ local debugDump = Utils.debugDump
 local function cleanupAll()
     RT.Timers.stopAllPulseActionTimers()
     Movement.removeAllDashSpeedBoosts()
-    State.endBrawls()
-    State.revertAllModifiedHitpoints()
-    State.recapMovementDistances()
+    BrawlState.endBrawls()
+    BrawlState.revertAllModifiedHitpoints()
+    BrawlState.recapMovementDistances()
     Spells.resetSpellData()
 end
 
@@ -23,20 +23,14 @@ local function onStarted(level)
     M.memoizeAll()
     Spells.resetSpellData()
     Spells.buildSpellTable()
-    State.setMaxPartySize()
-    State.resetPlayers()
-    State.setIsControllingDirectly()
+    BrawlState.setMaxPartySize()
+    BrawlState.resetPlayers()
+    BrawlState.setIsControllingDirectly()
     Movement.setMovementSpeedThresholds()
-    State.setupPartyMembersHitpoints()
+    BrawlState.setupPartyMembersHitpoints()
     Roster.initBrawlers(level)
-    if State.Settings.TurnBasedSwarmMode then
-        Swarm.Listeners.onStarted()
-    else
-        RT.Listeners.onStarted()
-    end
-    Leaderboard.initialize()
-    debugDump(State.Session.Players)
-    Ext.ServerNet.BroadcastMessage("Started", level)
+    RT.Listeners.onStarted() -- DAG: Swarm Mode, Leaderboard and the client "Started" message stripped
+    debugDump(BrawlState.Session.Players)
 end
 
 local function onCombatStarted(combatGuid)
@@ -44,31 +38,29 @@ local function onCombatStarted(combatGuid)
     -- Preserve each user's pre-combat selection: by the time CombatStarted fires "after", the engine may have already swapped control to the
     -- highest-init character.  Capture the actual pre-combat controlled-char from LastControlledUuid (updated by setIsControllingDirectly), set
     -- up an expectation window, and re-assert immediately.  onGainedControl will keep correcting wrong-char picks during the window.
-    if State.Session.LastControlledUuid and next(State.Session.LastControlledUuid) then
+    if BrawlState.Session.LastControlledUuid and next(BrawlState.Session.LastControlledUuid) then
         local expectedByUser = {}
-        for userId, uuid in pairs(State.Session.LastControlledUuid) do
+        for userId, uuid in pairs(BrawlState.Session.LastControlledUuid) do
             expectedByUser[userId] = uuid
             RT.sendSelectCharacter(uuid, "Listeners.onCombatStarted")
         end
-        State.Session.ExpectedControlled = expectedByUser
-        State.Session.ExpectedControlledExpiresAt = Ext.Utils.MonotonicTime() + 3000
+        BrawlState.Session.ExpectedControlled = expectedByUser
+        BrawlState.Session.ExpectedControlledExpiresAt = Ext.Utils.MonotonicTime() + 3000
     end
-    if State.Settings.TurnBasedSwarmMode then
-        Swarm.Listeners.onCombatStarted()
-    end
+    -- DAG: Swarm Mode stripped
     -- NB: clean this up / don't reassign "constant" values
     if Utils.isToT() then
         if Mods.ToT.PersistentVars.Scenario and Mods.ToT.PersistentVars.Scenario.Round == 0 then
-            State.Session.TBSMToTSkippedPrepRound = false
+            BrawlState.Session.TBSMToTSkippedPrepRound = false
         else
-            State.Session.TBSMToTSkippedPrepRound = true
+            BrawlState.Session.TBSMToTSkippedPrepRound = true
         end
         Constants.ENTER_COMBAT_RANGE = 100
     else
         Constants.ENTER_COMBAT_RANGE = 20
     end
     Roster.addCombatParticipantsToBrawlers()
-    if not State.Settings.TurnBasedSwarmMode then
+    if not BrawlState.Settings.TurnBasedSwarmMode then
         RT.Listeners.onCombatStarted(combatGuid)
     end
 end
@@ -81,10 +73,10 @@ end
 
 -- New user joined (multiplayer).  Also fires whenever UserReservedFor changes on any entity, including engine-driven reassignments at FTB entry.
 local function onUserReservedFor(entity, _, _)
-    State.setIsControllingDirectly()
+    BrawlState.setIsControllingDirectly()
     local entityUuid = entity.Uuid.EntityUuid
-    if State.Session.Players and State.Session.Players[entityUuid] then
-        State.Session.Players[entityUuid].userId = entity.UserReservedFor.UserID
+    if BrawlState.Session.Players and BrawlState.Session.Players[entityUuid] then
+        BrawlState.Session.Players[entityUuid].userId = entity.UserReservedFor.UserID
     end
 end
 
@@ -96,29 +88,20 @@ end
 local function onCombatRoundStarted(combatGuid, round)
     debugPrint("CombatRoundStarted", combatGuid, round)
     Roster.addCombatParticipantsToBrawlers()
-    State.Session.ReactionInterruptCount = {}
-    State.Session.ReactionInterruptLoopDetected = {}
+    BrawlState.Session.ReactionInterruptCount = {}
+    BrawlState.Session.ReactionInterruptLoopDetected = {}
     debugPrint(string.format("CombatRoundStarted round=%d", round or -1))
-    if State.Settings.TurnBasedSwarmMode then
-        Swarm.Listeners.onCombatRoundStarted(round)
-    else
-        RT.Listeners.onCombatRoundStarted(combatGuid, round)
-    end
+    RT.Listeners.onCombatRoundStarted(combatGuid, round) -- DAG: Swarm Mode stripped
 end
 
 -- NB: move all of the endBrawl stuff to here
 local function onCombatEnded(combatGuid)
     debugPrint("CombatEnded", combatGuid)
-    State.Session.StoryActionIDs = {}
-    State.Session.MeanInitiativeRoll = nil
+    BrawlState.Session.StoryActionIDs = {}
+    BrawlState.Session.MeanInitiativeRoll = nil
     TurnOrder.clearAllNaturalInitiative()
-    Encounters.Tracking.pruneDead()
-    Movement.removeAllDashSpeedBoosts()
-    if State.Settings.TurnBasedSwarmMode then
-        Swarm.Listeners.onCombatEnded()
-    else
-        RT.Listeners.onCombatEnded(combatGuid)
-    end
+    Movement.removeAllDashSpeedBoosts() -- DAG: Encounters + Swarm Mode stripped
+    RT.Listeners.onCombatEnded(combatGuid)
 end
 
 local function onEnteredCombat(entityGuid, combatGuid)
@@ -127,20 +110,16 @@ local function onEnteredCombat(entityGuid, combatGuid)
     if uuid then
         -- Handle resurrection first so the entity's InitiativeRoll is set to the
         -- mean before addBrawler caches actionInterval from it.
-        if State.Session.Players and State.Session.Players[uuid] then
-            if State.Session.ResurrectedPlayer[uuid] then
-                State.Session.ResurrectedPlayer[uuid] = nil
-                TurnOrder.setInitiativeRoll(uuid, State.Session.MeanInitiativeRoll)
+        if BrawlState.Session.Players and BrawlState.Session.Players[uuid] then
+            if BrawlState.Session.ResurrectedPlayer[uuid] then
+                BrawlState.Session.ResurrectedPlayer[uuid] = nil
+                TurnOrder.setInitiativeRoll(uuid, BrawlState.Session.MeanInitiativeRoll)
             end
         end
         -- Replace existing brawler entries so actionInterval is refreshed from the
         -- now-rolled InitiativeRoll (entries added pre-combat got the default).
         Roster.addBrawler(uuid, true)
-        if State.Settings.TurnBasedSwarmMode then
-            Swarm.Listeners.onEnteredCombat(uuid)
-        else
-            RT.Listeners.onEnteredCombat(uuid)
-        end
+        RT.Listeners.onEnteredCombat(uuid) -- DAG: Swarm Mode stripped
     end
 end
 
@@ -150,8 +129,8 @@ local function onLeftCombat(entityGuid, combatGuid)
         if M.Pause.isPartyInFTB() then
             -- Defer non-player removals until FTB exits; party members get spurious LeftCombat during see-saw, skip them.
             if M.Osi.IsPartyMember(uuid, 1) ~= 1 then
-                State.Session.PendingLeftCombat = State.Session.PendingLeftCombat or {}
-                State.Session.PendingLeftCombat[uuid] = true
+                BrawlState.Session.PendingLeftCombat = BrawlState.Session.PendingLeftCombat or {}
+                BrawlState.Session.PendingLeftCombat[uuid] = true
             end
         else
             local level = M.Osi.GetRegion(M.Osi.GetHostCharacter())
@@ -166,17 +145,13 @@ local function onTurnStarted(entityGuid)
     local turnUuid = M.Osi.GetUUID(entityGuid)
     debugPrint(string.format("TurnStarted target=%s isPlayer=%s",
         M.Utils.getDisplayName(turnUuid) or tostring(entityGuid),
-        tostring(turnUuid and State.Session.Players[turnUuid] ~= nil)))
-    if State.Settings.TurnBasedSwarmMode then
-        Swarm.Listeners.onTurnStarted(M.Osi.GetUUID(entityGuid))
-    end
+        tostring(turnUuid and BrawlState.Session.Players[turnUuid] ~= nil)))
+    -- DAG: Swarm Mode stripped
 end
 
 local function onTurnEnded(entityGuid)
     debugPrint("TurnEnded", entityGuid)
-    if State.Settings.TurnBasedSwarmMode then
-        Swarm.Listeners.onTurnEnded(M.Osi.GetUUID(entityGuid))
-    end
+    -- DAG: Swarm Mode stripped
 end
 
 local function onDied(entityGuid)
@@ -186,27 +161,21 @@ local function onDied(entityGuid)
     if entityUuid then
         TurnOrder.clearNaturalInitiativeFor(entityUuid)
     end
-    if State.Settings.TurnBasedSwarmMode then
-        Swarm.Listeners.onDied(entityUuid)
-    else
-        RT.Listeners.onDied(entityUuid)
-    end
+    RT.Listeners.onDied(entityUuid) -- DAG: Swarm Mode stripped
 end
 
 local function onResurrected(entityGuid)
     debugPrint("Resurrected", entityGuid)
-    if State.Settings.TurnBasedSwarmMode then
-        Swarm.Listeners.onResurrected(M.Osi.GetUUID(entityGuid))
-    end
+    -- DAG: Swarm Mode stripped
 end
 
 -- NB: entity.ClientControl does NOT get reliably updated immediately when this fires
 local function onGainedControl(targetGuid)
     debugPrint("GainedControl", targetGuid)
     local targetUuid = M.Osi.GetUUID(targetGuid)
-    local windowActive = State.Session.ExpectedControlled
-        and State.Session.ExpectedControlledExpiresAt
-        and Ext.Utils.MonotonicTime() < State.Session.ExpectedControlledExpiresAt
+    local windowActive = BrawlState.Session.ExpectedControlled
+        and BrawlState.Session.ExpectedControlledExpiresAt
+        and Ext.Utils.MonotonicTime() < BrawlState.Session.ExpectedControlledExpiresAt
     debugPrint(string.format("GainedControl target=%s window=%s",
         M.Utils.getDisplayName(targetUuid) or tostring(targetUuid), tostring(windowActive and "active" or "expired/none")))
     if targetUuid ~= nil then
@@ -215,21 +184,21 @@ local function onGainedControl(targetGuid)
         -- happens in RT mode (Swarm doesn't use TurnOrder.Groups initiatives the same way).
         if windowActive then
             local gainedUserId = Osi.GetReservedUserID(targetUuid)
-            local expectedForUser = gainedUserId and State.Session.ExpectedControlled[gainedUserId]
+            local expectedForUser = gainedUserId and BrawlState.Session.ExpectedControlled[gainedUserId]
             if expectedForUser then
                 if targetUuid ~= expectedForUser then
                     debugPrint(string.format("GainedControl mismatch: expected=%s got=%s userId=%s - correcting",
                         M.Utils.getDisplayName(expectedForUser), M.Utils.getDisplayName(targetUuid), tostring(gainedUserId)))
-                    if not State.Settings.TurnBasedSwarmMode then
+                    if not BrawlState.Settings.TurnBasedSwarmMode then
                         TurnOrder.bumpInitiativeRollsFor(expectedForUser)
                     end
                     RT.sendSelectCharacter(expectedForUser, "Listeners.onGainedControl-windowMismatch")
                 else
                     debugPrint(string.format("GainedControl match: %s - clearing expectation for userId=%s", M.Utils.getDisplayName(targetUuid), tostring(gainedUserId)))
-                    State.Session.ExpectedControlled[gainedUserId] = nil
-                    if not next(State.Session.ExpectedControlled) then
-                        State.Session.ExpectedControlled = nil
-                        State.Session.ExpectedControlledExpiresAt = nil
+                    BrawlState.Session.ExpectedControlled[gainedUserId] = nil
+                    if not next(BrawlState.Session.ExpectedControlled) then
+                        BrawlState.Session.ExpectedControlled = nil
+                        BrawlState.Session.ExpectedControlledExpiresAt = nil
                     end
                 end
             end
@@ -252,26 +221,24 @@ local function onGainedControl(targetGuid)
                     break
                 end
             end
-            if MCM then
-                MCM.Set("active_character_archetype", isValidArchetype and archetype or "")
-            end
+            -- DAG: Brawl's MCM archetype setting stripped
         end
-        if State.Session.Players[targetUuid] then
+        if BrawlState.Session.Players[targetUuid] then
             local targetUserId = Osi.GetReservedUserID(targetUuid)
             if targetUserId then
-                State.Session.Players[targetUuid].isControllingDirectly = true
-                for playerUuid, player in pairs(State.Session.Players) do
+                BrawlState.Session.Players[targetUuid].isControllingDirectly = true
+                for playerUuid, player in pairs(BrawlState.Session.Players) do
                     if player.userId == targetUserId and playerUuid ~= targetUuid then
                         player.isControllingDirectly = false
                     end
                 end
-                State.Session.LastGainedControlAt = State.Session.LastGainedControlAt or {}
-                State.Session.LastGainedControlAt[targetUserId] = Ext.Utils.MonotonicTime()
+                BrawlState.Session.LastGainedControlAt = BrawlState.Session.LastGainedControlAt or {}
+                BrawlState.Session.LastGainedControlAt[targetUserId] = Ext.Utils.MonotonicTime()
                 -- Feed the during-pause selection tracker (consumed by allExitFTB recency heuristic).
-                if State.Session.FTBSelectionTrack and M.Pause.isPartyInFTB() then
-                    local prior = State.Session.FTBSelectionTrack[targetUserId]
+                if BrawlState.Session.FTBSelectionTrack and M.Pause.isPartyInFTB() then
+                    local prior = BrawlState.Session.FTBSelectionTrack[targetUserId]
                     if not prior or prior.current ~= targetUuid then
-                        State.Session.FTBSelectionTrack[targetUserId] = {
+                        BrawlState.Session.FTBSelectionTrack[targetUserId] = {
                             current = targetUuid,
                             currentAt = Ext.Utils.MonotonicTime(),
                             previous = prior and prior.current or nil,
@@ -279,10 +246,10 @@ local function onGainedControl(targetGuid)
                     end
                 end
             end
-            if not State.Settings.TurnBasedSwarmMode then
+            if not BrawlState.Settings.TurnBasedSwarmMode then
                 RT.Listeners.onGainedControl(targetUuid)
             end
-            Ext.ServerNet.PostMessageToUser(targetUserId, "GainedControl", targetUuid)
+            -- DAG: the client "GainedControl" message (Brawl's keybinds) stripped
         end
     end
 end
@@ -318,13 +285,13 @@ local function onClientControlDestroyed(entity)
 end
 
 local function onEnteredForceTurnBased(entityGuid)
-    if not State.Settings.TurnBasedSwarmMode then
+    if not BrawlState.Settings.TurnBasedSwarmMode then
         RT.Listeners.onEnteredForceTurnBased(M.Osi.GetUUID(entityGuid))
     end
 end
 
 local function onLeftForceTurnBased(entityGuid)
-    if not State.Settings.TurnBasedSwarmMode then
+    if not BrawlState.Settings.TurnBasedSwarmMode then
         RT.Listeners.onLeftForceTurnBased(M.Osi.GetUUID(entityGuid))
     end
 end
@@ -333,18 +300,13 @@ local function onCharacterJoinedParty(character)
     debugPrint("CharacterJoinedParty", character)
     local uuid = M.Osi.GetUUID(character)
     if uuid then
-        if State.Session.Players and not State.Session.Players[uuid] then
-            State.setupPlayer(uuid)
-            State.setupPartyMembersHitpoints()
-            if State.Settings.TurnBasedSwarmMode then
-                Swarm.Listeners.onCharacterJoinedParty(uuid)
-            else
-                State.uncapMovementDistance(uuid)
-                -- Pause.checkTruePauseParty()
-            end
+        if BrawlState.Session.Players and not BrawlState.Session.Players[uuid] then
+            BrawlState.setupPlayer(uuid)
+            BrawlState.setupPartyMembersHitpoints()
+            BrawlState.uncapMovementDistance(uuid) -- DAG: Swarm Mode stripped
         end
         if M.Osi.IsSummon(uuid) == 1 then
-            State.Session.Players[uuid].isFreshSummon = true
+            BrawlState.Session.Players[uuid].isFreshSummon = true
             local ownerUuid = Osi.CharacterGetOwner(uuid)
             if ownerUuid and not Utils.hasLoseControlStatus(uuid) then
                 local ownerInitiativeRoll = TurnOrder.getInitiativeRoll(ownerUuid)
@@ -353,7 +315,7 @@ local function onCharacterJoinedParty(character)
                 end
             end
         end
-        if State.areAnyPlayersBrawling() then
+        if BrawlState.areAnyPlayersBrawling() then
             Roster.addBrawler(uuid)
         end
     end
@@ -363,17 +325,17 @@ local function onCharacterLeftParty(character)
     debugPrint("CharacterLeftParty", character)
     local uuid = M.Osi.GetUUID(character)
     if uuid then
-        if State.Session.Players and State.Session.Players[uuid] then
-            State.Session.Players[uuid] = nil
+        if BrawlState.Session.Players and BrawlState.Session.Players[uuid] then
+            BrawlState.Session.Players[uuid] = nil
         end
-        if State.Session.PartyMembersHitpointsListeners[uuid] then
-            Ext.Entity.Unsubscribe(State.Session.PartyMembersHitpointsListeners[uuid])
-            State.Session.PartyMembersHitpointsListeners[uuid] = nil
+        if BrawlState.Session.PartyMembersHitpointsListeners[uuid] then
+            Ext.Entity.Unsubscribe(BrawlState.Session.PartyMembersHitpointsListeners[uuid])
+            BrawlState.Session.PartyMembersHitpointsListeners[uuid] = nil
         end
         -- NB: can remove this??
         -- local level = M.Osi.GetRegion(uuid)
-        -- if State.Session.Brawlers and State.Session.Brawlers[level] and State.Session.Brawlers[level][uuid] then
-        --     State.Session.Brawlers[level][uuid] = nil
+        -- if BrawlState.Session.Brawlers and BrawlState.Session.Brawlers[level] and BrawlState.Session.Brawlers[level][uuid] then
+        --     BrawlState.Session.Brawlers[level][uuid] = nil
         -- end
     end
 end
@@ -385,9 +347,9 @@ end
 local function onDownedChanged(character, isDowned)
     local uuid = M.Osi.GetUUID(character)
     debugPrint("DownedChanged", character, isDowned, uuid)
-    local player = State.Session.Players[uuid]
+    local player = BrawlState.Session.Players[uuid]
     if player then
-        if isDowned == 1 and State.Settings.AutoPauseOnDowned and player.isControllingDirectly then
+        if isDowned == 1 and BrawlState.Settings.AutoPauseOnDowned and player.isControllingDirectly then
             local brawler = M.Roster.getBrawlerByUuid(uuid)
             if brawler and not brawler.isPaused then
                 Osi.ForceTurnBasedMode(uuid, 1)
@@ -399,54 +361,7 @@ local function onDownedChanged(character, isDowned)
     end
 end
 
--- thank u laughingleader
----@param component EsvStatusApplyEventOneFrameComponent
-local function onServerStatusApplyEvent(_, _, component)
-    if State.Settings.LeaderboardEnabled then
-        if component.StatusId == "HEAL" or component.Status.ServerStatus.Type == "HEAL" then
-            if component.Target and component.Target.ServerCharacter then
-                local statusHandle = component.Status.ServerStatus.StatusHandle
-                for _, status in pairs(component.Target.ServerCharacter.StatusManager.Statuses) do
-                    if status.StatusHandle == statusHandle and status.CauseGUID and status.HealAmount and not M.Leaderboard.isExcludedHeal(status) then
-                        local healerUuid = status.CauseGUID
-                        local targetUuid = component.Target.Uuid.EntityUuid
-                        local targetMaxHp = component.Target.Health.MaxHp
-                        local healAmount = (component.Target.Health.Hp == targetMaxHp) and status.HealAmount or math.min(status.HealAmount, targetMaxHp)
-                        debugPrint("healed for", M.Utils.getDisplayName(healerUuid), M.Utils.getDisplayName(targetUuid), status.HealAmount, component.Target.Health.Hp, healAmount)
-                        Leaderboard.updateHealing(healerUuid, targetUuid, healAmount)
-                        if status.StoryActionID and State.Session.StoryActionIDs[status.StoryActionID] then
-                            local spellName = State.Session.StoryActionIDs[status.StoryActionID].spellName
-                            if spellName == "Target_TAD_TransfuseHealth" then
-                                Leaderboard.updateDamage(healerUuid, healerUuid, healAmount)
-                            end
-                        end
-                        break
-                    end
-                end
-            end
-        elseif component.StatusId == "QUIVERING_PALM_HP" then
-            if component.Target and component.Target.ServerCharacter then
-                local statusHandle = component.Status.ServerStatus.StatusHandle
-                for _, status in pairs(component.Target.ServerCharacter.StatusManager.Statuses) do
-                    if status.StatusHandle == statusHandle then
-                        local casterUuid = status.CauseGUID
-                        local targetUuid = component.Target.Uuid.EntityUuid
-                        local targetInitialHp = component.Target.Health.Hp
-                        if casterUuid and targetUuid and targetInitialHp then
-                            Leaderboard.updateDamage(casterUuid, targetUuid, targetInitialHp)
-                            Ext.Timer.WaitFor(1000, function ()
-                                if M.Osi.IsDead(targetUuid) == 1 then
-                                    Leaderboard.updateKills(casterUuid)
-                                end
-                            end)
-                        end
-                        break
-                    end
-                end
-            end
-        end
-    end
-end
+-- DAG: the Leaderboard heal tracker (ServerStatusApplyEvent) stripped
 
 local function onAttackedBy(defenderGuid, attackerGuid, attacker2, damageType, damageAmount, damageCause, storyActionID)
     debugPrint("AttackedBy", defenderGuid, attackerGuid, attacker2, damageType, damageAmount, damageCause, storyActionID)
@@ -458,17 +373,17 @@ local function onAttackedBy(defenderGuid, attackerGuid, attacker2, damageType, d
             Roster.addBrawler(defenderUuid)
         end
         if M.Osi.IsPlayer(attackerUuid) == 1 then
-            State.Session.PlayerCurrentTarget[attackerUuid] = defenderUuid
+            BrawlState.Session.PlayerCurrentTarget[attackerUuid] = defenderUuid
             if M.Osi.IsPlayer(defenderUuid) == 0 and damageAmount > 0 then
-                State.Session.IsAttackingOrBeingAttackedByPlayer[defenderUuid] = attackerUuid
+                BrawlState.Session.IsAttackingOrBeingAttackedByPlayer[defenderUuid] = attackerUuid
             end
         end
         if M.Osi.IsPlayer(defenderUuid) == 1 then
             if M.Osi.IsPlayer(attackerUuid) == 0 and damageAmount > 0 then
-                State.Session.IsAttackingOrBeingAttackedByPlayer[attackerUuid] = defenderUuid
+                BrawlState.Session.IsAttackingOrBeingAttackedByPlayer[attackerUuid] = defenderUuid
             end
         end
-        Leaderboard.updateDamage(attackerUuid, defenderUuid, damageAmount)
+        -- DAG: Leaderboard stripped
     end
     if attackerUuid ~= nil then
         Actions.handleExtraAttacks(attackerUuid, defenderUuid, storyActionID, damageType, damageAmount)
@@ -480,37 +395,31 @@ local function onKilledBy(defenderGuid, attackOwner, attackerGuid, storyActionID
     -- NB: attackOwner for summons?
     local attackerUuid = M.Osi.GetUUID(attackerGuid)
     local defenderUuid = M.Osi.GetUUID(defenderGuid)
-    Leaderboard.updateKills(attackerUuid)
-    if State.Session.StoryActionIDs[storyActionID] then
-        local spellName = State.Session.StoryActionIDs[storyActionID].spellName
-        if spellName == "Target_PowerWordKill" or spellName == "Target_ATT_PowerWordKill" then
-            Leaderboard.updateDamage(attackerUuid, defenderUuid, 100)
-        end
-    end
-    State.Session.ExtraAttacksRemaining[attackerUuid] = nil
-    State.Session.ExtraAttacksRemaining[defenderUuid] = nil
+    -- DAG: Leaderboard stripped
+    BrawlState.Session.ExtraAttacksRemaining[attackerUuid] = nil
+    BrawlState.Session.ExtraAttacksRemaining[defenderUuid] = nil
 end
 
 local function onSpellSyncTargeting(cast, _, _)
-    if not State.Settings.TurnBasedSwarmMode then
+    if not BrawlState.Settings.TurnBasedSwarmMode then
         RT.Listeners.onSpellSyncTargeting(cast.SpellCastState)
     end
 end
 
 local function onDestroySpellSyncTargeting(cast, _, _)
-    if not State.Settings.TurnBasedSwarmMode then
+    if not BrawlState.Settings.TurnBasedSwarmMode then
         RT.Listeners.onDestroySpellSyncTargeting(cast.SpellCastState)
     end
 end
 
 local function onSpellCastStateCreated(cast, _, _)
-    if not State.Settings.TurnBasedSwarmMode and cast and cast.SpellCastState then
+    if not BrawlState.Settings.TurnBasedSwarmMode and cast and cast.SpellCastState then
         RT.Listeners.onSpellCastStateCreated(cast.SpellCastState)
     end
 end
 
 local function onSpellCastStateDestroyed(cast, _, _)
-    if not State.Settings.TurnBasedSwarmMode and cast and cast.SpellCastState then
+    if not BrawlState.Settings.TurnBasedSwarmMode and cast and cast.SpellCastState then
         RT.Listeners.onSpellCastStateDestroyed(cast.SpellCastState)
     end
 end
@@ -519,12 +428,12 @@ end
 -- storyActionID (e.g. the Target_Counterspell_Success metaspell that fires after a successful counter) don't clobber the original cast's
 -- requestUuid -- the counterspell handler in onCastedSpell needs the original to look up and fail the right action precisely.
 local function captureStoryActionRequestUuid(storyActionID, casterUuid, spellName)
-    if State.Session.StoryActionIDs[storyActionID].requestUuid then
+    if BrawlState.Session.StoryActionIDs[storyActionID].requestUuid then
         return
     end
     local action = Actions.getActionInProgressByName(casterUuid, spellName)
     if action then
-        State.Session.StoryActionIDs[storyActionID].requestUuid = action.requestUuid
+        BrawlState.Session.StoryActionIDs[storyActionID].requestUuid = action.requestUuid
     end
 end
 
@@ -533,12 +442,12 @@ local function onUsingSpellOnTarget(casterGuid, targetGuid, spellName, spellType
     local targetUuid = M.Osi.GetUUID(targetGuid)
     if casterUuid and targetUuid and spellName then
         -- debugPrint(M.Utils.getDisplayName(casterUuid), "UsingSpellOnTarget", M.Utils.getDisplayName(targetUuid), spellName, spellType, spellElement, storyActionID)
-        if not State.Session.StoryActionIDs[storyActionID] then
-            State.Session.StoryActionIDs[storyActionID] = {}
+        if not BrawlState.Session.StoryActionIDs[storyActionID] then
+            BrawlState.Session.StoryActionIDs[storyActionID] = {}
         end
-        State.Session.StoryActionIDs[storyActionID].casterUuid = casterUuid
-        State.Session.StoryActionIDs[storyActionID].spellName = spellName
-        State.Session.StoryActionIDs[storyActionID].targetUuid = targetUuid
+        BrawlState.Session.StoryActionIDs[storyActionID].casterUuid = casterUuid
+        BrawlState.Session.StoryActionIDs[storyActionID].spellName = spellName
+        BrawlState.Session.StoryActionIDs[storyActionID].targetUuid = targetUuid
         captureStoryActionRequestUuid(storyActionID, casterUuid, spellName)
         -- NB: what other instakill effects are there? Word of Bhaal, chasms...?
         -- if spellName == "Target_PowerWordKill" or spellName == "Target_ATT_PowerWordKill" then
@@ -552,12 +461,12 @@ local function onUsingSpellOnZoneWithTarget(casterGuid, targetGuid, spellName, s
     local targetUuid = M.Osi.GetUUID(targetGuid)
     if casterUuid and targetUuid and spellName then
         -- debugPrint("UsingSpellOnZoneWithTarget", casterGuid, targetGuid, spell, spellType, spellElement, storyActionID)
-        if not State.Session.StoryActionIDs[storyActionID] then
-            State.Session.StoryActionIDs[storyActionID] = {}
+        if not BrawlState.Session.StoryActionIDs[storyActionID] then
+            BrawlState.Session.StoryActionIDs[storyActionID] = {}
         end
-        State.Session.StoryActionIDs[storyActionID].casterUuid = casterUuid
-        State.Session.StoryActionIDs[storyActionID].spellName = spellName
-        State.Session.StoryActionIDs[storyActionID].targetUuid = targetUuid
+        BrawlState.Session.StoryActionIDs[storyActionID].casterUuid = casterUuid
+        BrawlState.Session.StoryActionIDs[storyActionID].spellName = spellName
+        BrawlState.Session.StoryActionIDs[storyActionID].targetUuid = targetUuid
         captureStoryActionRequestUuid(storyActionID, casterUuid, spellName)
         -- NB: what other instakill effects are there? Word of Bhaal, chasms...?
         -- if spellName == "Target_PowerWordKill" or spellName == "Target_ATT_PowerWordKill" then
@@ -571,11 +480,11 @@ local function onUsingSpell(casterGuid, spellName, spellType, spellElement, stor
     local casterUuid = M.Osi.GetUUID(casterGuid)
     if casterUuid and spellName then
         -- debugPrint("UsingSpell", casterGuid, targetGuid, spell, spellType, spellElement, storyActionID)
-        if not State.Session.StoryActionIDs[storyActionID] then
-            State.Session.StoryActionIDs[storyActionID] = {}
+        if not BrawlState.Session.StoryActionIDs[storyActionID] then
+            BrawlState.Session.StoryActionIDs[storyActionID] = {}
         end
-        State.Session.StoryActionIDs[storyActionID].casterUuid = casterUuid
-        State.Session.StoryActionIDs[storyActionID].spellName = spellName
+        BrawlState.Session.StoryActionIDs[storyActionID].casterUuid = casterUuid
+        BrawlState.Session.StoryActionIDs[storyActionID].spellName = spellName
         captureStoryActionRequestUuid(storyActionID, casterUuid, spellName)
     end
 end
@@ -589,24 +498,23 @@ local function onCastedSpell(casterGuid, spellName, spellType, spellElement, sto
         -- debugDump(actionInProgress)
         local requestUuid = actionInProgress.requestUuid
         -- debugPrint("Spell cast succeeded! (CastedSpell)")
-        Swarm.resumeTimers() -- for interrupts, does this need to be here?
-        debugPrint("onCompleted onCastedSpell")
+        debugPrint("onCompleted onCastedSpell") -- DAG: Swarm Mode stripped
         local onCompleted = actionInProgress.onCompleted
         Actions.removeActionInProgress(casterUuid, requestUuid)
-        if not State.Settings.HogwildMode and M.Osi.IsPlayer(casterUuid) == 0 then
+        if not BrawlState.Settings.HogwildMode and M.Osi.IsPlayer(casterUuid) == 0 then
             Resources.deductCastedSpell(casterUuid, spellName, requestUuid)
         end
         onCompleted(spellName)
     end
     if M.Utils.isCounterspell(spellName) then
-        local originalCastInfo = State.Session.StoryActionIDs[storyActionID]
+        local originalCastInfo = BrawlState.Session.StoryActionIDs[storyActionID]
         if originalCastInfo and originalCastInfo.casterUuid and originalCastInfo.requestUuid then
             debugPrint("got counterspelled!", spellName, originalCastInfo.spellName, M.Utils.getDisplayName(originalCastInfo.targetUuid), M.Utils.getDisplayName(originalCastInfo.casterUuid))
             local originalAction = Actions.getActionInProgress(originalCastInfo.casterUuid, originalCastInfo.requestUuid)
             if originalAction then
                 local onFailed = originalAction.onFailed
                 Actions.removeActionInProgress(originalCastInfo.casterUuid, originalCastInfo.requestUuid)
-                State.Session.StoryActionIDs[storyActionID] = {}
+                BrawlState.Session.StoryActionIDs[storyActionID] = {}
                 onFailed("counterspelled")
             end
         end
@@ -633,9 +541,8 @@ local function onSpellCastFinishedEvent(cast, _, _)
             Actions.removeActionInProgress(casterUuid, requestUuid)
             if outcome == "None" then
                 debugPrint("Spell cast succeeded")
-                Swarm.resumeTimers() -- for interrupts, does this need to be here?
-                debugPrint("onCompleted")
-                if not State.Settings.HogwildMode and M.Osi.IsPlayer(casterUuid) == 0 then
+                debugPrint("onCompleted") -- DAG: Swarm Mode stripped
+                if not BrawlState.Settings.HogwildMode and M.Osi.IsPlayer(casterUuid) == 0 then
                     Resources.deductCastedSpell(casterUuid, spellName, requestUuid)
                 end
                 onCompleted(spellName)
@@ -652,26 +559,26 @@ local function onCastSpellFailed(casterGuid, spellName, spellType, spellElement,
 end
 
 local function onDialogStarted(...)
-    if not State.Settings.TurnBasedSwarmMode then
+    if not BrawlState.Settings.TurnBasedSwarmMode then
         RT.Listeners.onDialogStarted()
     end
 end
 
 local function onDialogEnded(...)
-    if not State.Settings.TurnBasedSwarmMode then
+    if not BrawlState.Settings.TurnBasedSwarmMode then
         RT.Listeners.onDialogEnded()
     end
 end
 
 -- NB: get rid of this??
 local function onStatusApplied(targetGuid, statusId, causeeGuid, storyActionId)
-    if not State.Settings.TurnBasedSwarmMode then
+    if not BrawlState.Settings.TurnBasedSwarmMode then
         RT.Listeners.onStatusApplied(targetGuid, statusId)
     end
 end
 
 local function onStatusRemoved(targetGuid, statusId, causeeGuid, storyActionId)
-    if not State.Settings.TurnBasedSwarmMode then
+    if not BrawlState.Settings.TurnBasedSwarmMode then
         RT.Listeners.onStatusRemoved(targetGuid, statusId)
     end
 end
@@ -684,25 +591,17 @@ end
 local function onTeleportedToCamp(character)
     debugPrint("TeleportedToCamp", character)
     local uuid = M.Osi.GetUUID(character)
-    if State.Settings.TurnBasedSwarmMode then
-        Swarm.Listeners.onTeleportedToCamp(uuid)
-    else
-        RT.Listeners.onTeleportedToCamp(uuid)
-    end
+    RT.Listeners.onTeleportedToCamp(uuid) -- DAG: Swarm Mode stripped
 end
 
 local function onLevelUnloading(level)
     debugPrint("LevelUnloading", level)
-    State.Session.Brawlers[level] = nil
+    BrawlState.Session.Brawlers[level] = nil
 end
 
 local function onFlagSet(flag, speaker, dialogInstance)
     debugPrint("FlagSet", flag, speaker, dialogInstance)
-    if State.Session.TurnBasedSwarmMode then
-        Swarm.Listeners.onFlagSet(flag)
-    else
-        RT.Listeners.onFlagSet(flag)
-    end
+    RT.Listeners.onFlagSet(flag) -- DAG: Swarm Mode stripped
 end
 
 local function onLeveledUp(character)
@@ -714,78 +613,60 @@ end
 
 local function onEntityEvent(characterGuid, eventUuid)
     debugPrint("EntityEvent", characterGuid, eventUuid)
-    if State.Session.ActiveMovements[eventUuid] then
-        Movement.finishMovement(M.Osi.GetUUID(characterGuid), eventUuid, State.Session.ActiveMovements[eventUuid])
+    if BrawlState.Session.ActiveMovements[eventUuid] then
+        Movement.finishMovement(M.Osi.GetUUID(characterGuid), eventUuid, BrawlState.Session.ActiveMovements[eventUuid])
     end
 end
 
 local function onReactionInterruptActionNeeded(characterGuid)
     debugPrint("ReactionInterruptActionNeeded", characterGuid)
-    if State.Settings.TurnBasedSwarmMode then
-        Swarm.Listeners.onReactionInterruptActionNeeded(M.Osi.GetUUID(characterGuid))
-    else
-        RT.Listeners.onReactionInterruptActionNeeded(M.Osi.GetUUID(characterGuid))
-    end
+    RT.Listeners.onReactionInterruptActionNeeded(M.Osi.GetUUID(characterGuid)) -- DAG: Swarm Mode stripped
 end
 
-local function onServerInterruptUsed(entity, label, component)
-    if State.Settings.TurnBasedSwarmMode then
-        Swarm.Listeners.onServerInterruptUsed(entity, label, component)
-    end
-end
+-- DAG: onServerInterruptUsed (Swarm Mode only) stripped
 
 -- Engine-side reaction-interrupt loop circuit-breaker.  When an actor is mid-cast (we submitted a spell, the engine never fired the completion event)
 -- and a reaction triggers (e.g. attack-of-opportunity) the engine wants to fire the reaction but can't fully commit, so it spins on ReactionInterruptUsed,
 -- which can crash the game.  Force-fail the source's pending action(s) and end their turn so the engine can move forward.
 local function forceFailReactionInterruptLoop(uuid)
     print("[REACTION_LOOP] threshold exceeded, force-failing", M.Utils.getDisplayName(uuid), uuid)
-    State.Session.ReactionInterruptLoopDetected[uuid] = true
-    local actions = State.Session.ActionsInProgress[uuid]
+    BrawlState.Session.ReactionInterruptLoopDetected[uuid] = true
+    local actions = BrawlState.Session.ActionsInProgress[uuid]
     if actions and next(actions) then
         for _, action in ipairs(actions) do
             if action.onFailed then
                 action.onFailed("reaction interrupt loop")
             end
         end
-        State.Session.ActionsInProgress[uuid] = {}
+        BrawlState.Session.ActionsInProgress[uuid] = {}
     end
-    if State.Session.ActionSequenceFailsafeTimer and State.Session.ActionSequenceFailsafeTimer[uuid] and State.Session.ActionSequenceFailsafeTimer[uuid].timer then
-        Ext.Timer.Cancel(State.Session.ActionSequenceFailsafeTimer[uuid].timer)
-        State.Session.ActionSequenceFailsafeTimer[uuid] = nil
+    if BrawlState.Session.ActionSequenceFailsafeTimer and BrawlState.Session.ActionSequenceFailsafeTimer[uuid] and BrawlState.Session.ActionSequenceFailsafeTimer[uuid].timer then
+        Ext.Timer.Cancel(BrawlState.Session.ActionSequenceFailsafeTimer[uuid].timer)
+        BrawlState.Session.ActionSequenceFailsafeTimer[uuid] = nil
     end
-    if State.Settings.TurnBasedSwarmMode then
-        Swarm.setTurnComplete(uuid)
-    end
+    -- DAG: Swarm Mode stripped
 end
 
 local function onReactionInterruptUsed(characterGuid, reactionInterruptPrototypeId, isAutoTriggered)
     debugPrint("ReactionInterruptUsed", characterGuid, reactionInterruptPrototypeId, isAutoTriggered)
     local uuid = M.Osi.GetUUID(characterGuid)
-    if uuid and not State.Session.ReactionInterruptLoopDetected[uuid] then
-        State.Session.ReactionInterruptCount[uuid] = (State.Session.ReactionInterruptCount[uuid] or 0) + 1
-        if State.Session.ReactionInterruptCount[uuid] > Constants.REACTION_INTERRUPT_LOOP_THRESHOLD then
+    if uuid and not BrawlState.Session.ReactionInterruptLoopDetected[uuid] then
+        BrawlState.Session.ReactionInterruptCount[uuid] = (BrawlState.Session.ReactionInterruptCount[uuid] or 0) + 1
+        if BrawlState.Session.ReactionInterruptCount[uuid] > Constants.REACTION_INTERRUPT_LOOP_THRESHOLD then
             forceFailReactionInterruptLoop(uuid)
             return
         end
     end
-    if State.Settings.TurnBasedSwarmMode then
-        Swarm.Listeners.onReactionInterruptUsed(uuid, isAutoTriggered)
-    else
-        RT.Listeners.onReactionInterruptUsed(uuid, isAutoTriggered)
-    end
+    RT.Listeners.onReactionInterruptUsed(uuid, isAutoTriggered) -- DAG: Swarm Mode stripped
 end
 
 local function onServerInterruptDecision()
-    if State.Settings.TurnBasedSwarmMode then
-        Swarm.Listeners.onServerInterruptDecision()
-    else
-        RT.Listeners.onServerInterruptDecision()
-    end
+    RT.Listeners.onServerInterruptDecision() -- DAG: Swarm Mode stripped
 end
 
 local function stopListeners()
     cleanupAll()
-    local listeners = State.Session.Listeners
+    local listeners = BrawlState.Session.Listeners
     for _, listener in pairs(listeners) do
         listener.stop(listener.handle)
     end
@@ -793,236 +674,215 @@ end
 
 local function startListeners()
     debugPrint("Starting listeners...")
-    State.Session.Listeners.Tick = {}
-    State.Session.Listeners.Tick.handle = Ext.Events.Tick:Subscribe(M.clear)
-    State.Session.Listeners.Tick.stop = function ()
-        Ext.Events.Tick:Unsubscribe(State.Session.Listeners.Tick.handle)
+    BrawlState.Session.Listeners.Tick = {}
+    BrawlState.Session.Listeners.Tick.handle = Ext.Events.Tick:Subscribe(M.clear)
+    BrawlState.Session.Listeners.Tick.stop = function ()
+        Ext.Events.Tick:Unsubscribe(BrawlState.Session.Listeners.Tick.handle)
     end
-    State.Session.Listeners.ResetCompleted = {}
-    State.Session.Listeners.ResetCompleted.handle = Ext.Events.ResetCompleted:Subscribe(onResetCompleted)
-    State.Session.Listeners.ResetCompleted.stop = function ()
-        Ext.Events.ResetCompleted:Unsubscribe(State.Session.Listeners.ResetCompleted.handle)
+    BrawlState.Session.Listeners.ResetCompleted = {}
+    BrawlState.Session.Listeners.ResetCompleted.handle = Ext.Events.ResetCompleted:Subscribe(onResetCompleted)
+    BrawlState.Session.Listeners.ResetCompleted.stop = function ()
+        Ext.Events.ResetCompleted:Unsubscribe(BrawlState.Session.Listeners.ResetCompleted.handle)
     end
-    State.Session.Listeners.ServerStatusApplyEvent = {
-        handle = Ext.Entity.OnCreateDeferred("ServerStatusApplyEvent", onServerStatusApplyEvent),
-        stop = Ext.Entity.Unsubscribe,
-    }
-    State.Session.Listeners.ServerInterruptUsed = {
-        handle = Ext.Entity.OnCreateDeferred("ServerInterruptUsed", onServerInterruptUsed),
-        stop = Ext.Entity.Unsubscribe,
-    }
-    State.Session.Listeners.UserReservedFor = {
+    -- DAG: ServerStatusApplyEvent (Leaderboard) and ServerInterruptUsed (Swarm Mode) listeners stripped
+    BrawlState.Session.Listeners.UserReservedFor = {
         handle = Ext.Entity.Subscribe("UserReservedFor", onUserReservedFor),
         stop = Ext.Entity.Unsubscribe,
     }
-    State.Session.Listeners.LevelGameplayStarted = {
+    BrawlState.Session.Listeners.LevelGameplayStarted = {
         handle = Ext.Osiris.RegisterListener("LevelGameplayStarted", 2, "after", onLevelGameplayStarted),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.CombatStarted = {
+    BrawlState.Session.Listeners.CombatStarted = {
         handle = Ext.Osiris.RegisterListener("CombatStarted", 1, "after", onCombatStarted),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.CombatEnded = {
+    BrawlState.Session.Listeners.CombatEnded = {
         handle = Ext.Osiris.RegisterListener("CombatEnded", 1, "after", onCombatEnded),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.CombatRoundStarted = {
+    BrawlState.Session.Listeners.CombatRoundStarted = {
         handle = Ext.Osiris.RegisterListener("CombatRoundStarted", 2, "after", onCombatRoundStarted),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.EnteredCombat = {
+    BrawlState.Session.Listeners.EnteredCombat = {
         handle = Ext.Osiris.RegisterListener("EnteredCombat", 2, "after", onEnteredCombat),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.LeftCombat = {
+    BrawlState.Session.Listeners.LeftCombat = {
         handle = Ext.Osiris.RegisterListener("LeftCombat", 2, "after", onLeftCombat),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.TurnStarted = {
+    BrawlState.Session.Listeners.TurnStarted = {
         handle = Ext.Osiris.RegisterListener("TurnStarted", 1, "after", onTurnStarted),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.TurnEnded = {
+    BrawlState.Session.Listeners.TurnEnded = {
         handle = Ext.Osiris.RegisterListener("TurnEnded", 1, "after", onTurnEnded),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.Died = {
+    BrawlState.Session.Listeners.Died = {
         handle = Ext.Osiris.RegisterListener("Died", 1, "after", onDied),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.Resurrected = {
+    BrawlState.Session.Listeners.Resurrected = {
         handle = Ext.Osiris.RegisterListener("Resurrected", 1, "after", onResurrected),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.GainedControl = {
+    BrawlState.Session.Listeners.GainedControl = {
         handle = Ext.Osiris.RegisterListener("GainedControl", 1, "after", onGainedControl),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.LeftForceTurnBased = {
+    BrawlState.Session.Listeners.LeftForceTurnBased = {
         handle = Ext.Osiris.RegisterListener("LeftForceTurnBased", 1, "after", onLeftForceTurnBased),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.EnteredForceTurnBased = {
+    BrawlState.Session.Listeners.EnteredForceTurnBased = {
         handle = Ext.Osiris.RegisterListener("EnteredForceTurnBased", 1, "after", onEnteredForceTurnBased),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.CharacterJoinedParty = {
+    BrawlState.Session.Listeners.CharacterJoinedParty = {
         handle = Ext.Osiris.RegisterListener("CharacterJoinedParty", 1, "after", onCharacterJoinedParty),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.CharacterLeftParty = {
+    BrawlState.Session.Listeners.CharacterLeftParty = {
         handle = Ext.Osiris.RegisterListener("CharacterLeftParty", 1, "after", onCharacterLeftParty),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.RollResult = {
+    BrawlState.Session.Listeners.RollResult = {
         handle = Ext.Osiris.RegisterListener("RollResult", 6, "after", onRollResult),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.DownedChanged = {
+    BrawlState.Session.Listeners.DownedChanged = {
         handle = Ext.Osiris.RegisterListener("DownedChanged", 2, "after", onDownedChanged),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.KilledBy = {
+    BrawlState.Session.Listeners.KilledBy = {
         handle = Ext.Osiris.RegisterListener("KilledBy", 4, "after", onKilledBy),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.AttackedBy = {
+    BrawlState.Session.Listeners.AttackedBy = {
         handle = Ext.Osiris.RegisterListener("AttackedBy", 7, "after", onAttackedBy),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.SpellSyncTargeting = {
+    BrawlState.Session.Listeners.SpellSyncTargeting = {
         handle = Ext.Entity.OnCreateDeferred("SpellSyncTargeting", onSpellSyncTargeting),
         stop = Ext.Entity.Unsubscribe,
     }
-    State.Session.Listeners.DestroySpellSyncTargeting = {
+    BrawlState.Session.Listeners.DestroySpellSyncTargeting = {
         handle = Ext.Entity.OnDestroy("SpellSyncTargeting", onDestroySpellSyncTargeting),
         stop = Ext.Entity.Unsubscribe,
     }
-    State.Session.Listeners.SpellCastStateCreated = {
+    BrawlState.Session.Listeners.SpellCastStateCreated = {
         handle = Ext.Entity.OnCreateDeferred("SpellCastState", onSpellCastStateCreated),
         stop = Ext.Entity.Unsubscribe,
     }
-    State.Session.Listeners.SpellCastStateDestroyed = {
+    BrawlState.Session.Listeners.SpellCastStateDestroyed = {
         handle = Ext.Entity.OnDestroy("SpellCastState", onSpellCastStateDestroyed),
         stop = Ext.Entity.Unsubscribe,
     }
-    State.Session.Listeners.UsingSpellOnTarget = {
+    BrawlState.Session.Listeners.UsingSpellOnTarget = {
         handle = Ext.Osiris.RegisterListener("UsingSpellOnTarget", 6, "after", onUsingSpellOnTarget),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.UsingSpellOnZoneWithTarget = {
+    BrawlState.Session.Listeners.UsingSpellOnZoneWithTarget = {
         handle = Ext.Osiris.RegisterListener("UsingSpellOnZoneWithTarget", 6, "after", onUsingSpellOnZoneWithTarget),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.UsingSpell = {
+    BrawlState.Session.Listeners.UsingSpell = {
         handle = Ext.Osiris.RegisterListener("UsingSpell", 5, "after", onUsingSpell),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.CastedSpell = {
+    BrawlState.Session.Listeners.CastedSpell = {
         handle = Ext.Osiris.RegisterListener("CastedSpell", 5, "after", onCastedSpell),
         stop = Ext.Osiris.UnregisterListener,
     }
-    -- State.Session.Listeners.CastSpellFailed = {
+    -- BrawlState.Session.Listeners.CastSpellFailed = {
     --     handle = Ext.Osiris.RegisterListener("CastSpellFailed", 5, "after", onCastSpellFailed),
     --     stop = Ext.Osiris.UnregisterListener,
     -- }
-    State.Session.Listeners.SpellCastFinishedEvent = {
+    BrawlState.Session.Listeners.SpellCastFinishedEvent = {
         handle = Ext.Entity.OnCreateDeferred("SpellCastFinishedEvent", onSpellCastFinishedEvent),
         stop = Ext.Entity.Unsubscribe,
     }
-    State.Session.Listeners.ClientControlCreated = {
+    BrawlState.Session.Listeners.ClientControlCreated = {
         handle = Ext.Entity.OnCreateDeferred("ClientControl", onClientControlCreated),
         stop = Ext.Entity.Unsubscribe,
     }
-    State.Session.Listeners.ClientControlDestroyed = {
+    BrawlState.Session.Listeners.ClientControlDestroyed = {
         handle = Ext.Entity.OnDestroy("ClientControl", onClientControlDestroyed),
         stop = Ext.Entity.Unsubscribe,
     }
-    State.Session.Listeners.DialogStarted = {
+    BrawlState.Session.Listeners.DialogStarted = {
         handle = Ext.Osiris.RegisterListener("DialogStarted", 2, "before", onDialogStarted),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.DialogEnded = {
+    BrawlState.Session.Listeners.DialogEnded = {
         handle = Ext.Osiris.RegisterListener("DialogEnded", 2, "after", onDialogEnded),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.StatusApplied = {
+    BrawlState.Session.Listeners.StatusApplied = {
         handle = Ext.Osiris.RegisterListener("StatusApplied", 4, "after", onStatusApplied),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.StatusRemoved = {
+    BrawlState.Session.Listeners.StatusRemoved = {
         handle = Ext.Osiris.RegisterListener("StatusRemoved", 4, "after", onStatusRemoved),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.DifficultyChanged = {
+    BrawlState.Session.Listeners.DifficultyChanged = {
         handle = Ext.Osiris.RegisterListener("DifficultyChanged", 1, "after", onDifficultyChanged),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.TeleportedToCamp = {
+    BrawlState.Session.Listeners.TeleportedToCamp = {
         handle = Ext.Osiris.RegisterListener("TeleportedToCamp", 1, "after", onTeleportedToCamp),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.LevelUnloading = {
+    BrawlState.Session.Listeners.LevelUnloading = {
         handle = Ext.Osiris.RegisterListener("LevelUnloading", 1, "after", onLevelUnloading),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.FlagSet = {
+    BrawlState.Session.Listeners.FlagSet = {
         handle = Ext.Osiris.RegisterListener("FlagSet", 3, "after", onFlagSet),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.LeveledUp = {
+    BrawlState.Session.Listeners.LeveledUp = {
         handle = Ext.Osiris.RegisterListener("LeveledUp", 1, "after", onLeveledUp),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.EntityEvent = {
+    BrawlState.Session.Listeners.EntityEvent = {
         handle = Ext.Osiris.RegisterListener("EntityEvent", 2, "after", onEntityEvent),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.ReactionInterruptActionNeeded = {
+    BrawlState.Session.Listeners.ReactionInterruptActionNeeded = {
         handle = Ext.Osiris.RegisterListener("ReactionInterruptActionNeeded", 1, "after", onReactionInterruptActionNeeded),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.ReactionInterruptUsed = {
+    BrawlState.Session.Listeners.ReactionInterruptUsed = {
         handle = Ext.Osiris.RegisterListener("ReactionInterruptUsed", 3, "after", onReactionInterruptUsed),
         stop = Ext.Osiris.UnregisterListener,
     }
-    State.Session.Listeners.ServerInterruptDecision = {
+    BrawlState.Session.Listeners.ServerInterruptDecision = {
         handle = Ext.Entity.OnSystemUpdate("ServerInterruptDecision", onServerInterruptDecision),
         stop = Ext.Entity.Unsubscribe,
     }
 end
 
-local function onMCMSettingSaved(payload)
-    if payload and payload.modUUID == ModuleUUID and payload.settingId and Commands.MCMSettingSaved[payload.settingId] then
-        Commands.MCMSettingSaved[payload.settingId](payload.value)
-    end
-end
-
-local function onNetMessage(data)
-    if Commands.NetMessage[data.Channel] then
-        Commands.NetMessage[data.Channel](data)
-    end
-end
+-- DAG: Brawl's MCM settings and client keybind messages (Commands.lua) stripped
 
 local function startSession()
-    if not State or not State.Settings then
+    if not BrawlState or not BrawlState.Settings then
         return Ext.Timer.WaitFor(250, startSession)
     end
-    if State.Settings.ModEnabled then
+    if BrawlState.Settings.ModEnabled then
         startListeners()
     else
-        Ext.Osiris.RegisterListener("LevelGameplayStarted", 2, "after", State.resetPlayers)
+        Ext.Osiris.RegisterListener("LevelGameplayStarted", 2, "after", BrawlState.resetPlayers)
     end
 end
 
 local function onSessionLoaded()
     Ext.Events.GameStateChanged:Subscribe(onGameStateChanged)
-    if MCM then
-        Ext.ModEvents.BG3MCM["MCM_Setting_Saved"]:Subscribe(onMCMSettingSaved)
-    end
-    Ext.Events.NetMessage:Subscribe(onNetMessage)
-    startSession()
+    startSession() -- DAG: MCM + client keybind messages stripped
 end
 
 return {

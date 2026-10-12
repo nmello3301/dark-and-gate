@@ -2,9 +2,9 @@ local debugPrint = Utils.debugPrint
 local debugDump = Utils.debugDump
 
 local function buildTagNameToUuid()
-    State.Session.TagNameToUuid = {}
+    BrawlState.Session.TagNameToUuid = {}
     for _, uuid in ipairs(Ext.StaticData.GetAll("Tag")) do
-        State.Session.TagNameToUuid[Ext.StaticData.Get(uuid, "Tag").Name] = uuid
+        BrawlState.Session.TagNameToUuid[Ext.StaticData.Get(uuid, "Tag").Name] = uuid
     end
 end
 
@@ -51,11 +51,11 @@ local function hasConditionList(conditionString, condition)
     for _, term in ipairs(terms) do
         local label = term:match(noPattern)
         if label then
-            table.insert(noList, (escaped == "Tagged") and State.Session.TagNameToUuid[label] or label)
+            table.insert(noList, (escaped == "Tagged") and BrawlState.Session.TagNameToUuid[label] or label)
         else
             label = term:match(yesPattern)
             if label then
-                table.insert(yesList, (escaped == "Tagged") and State.Session.TagNameToUuid[label] or label)
+                table.insert(yesList, (escaped == "Tagged") and BrawlState.Session.TagNameToUuid[label] or label)
             end
         end
     end
@@ -498,8 +498,8 @@ local function buildSpellTable()
             spellTableByName[spellName] = spell
         end
     end
-    State.Session.SpellTable = spellTable
-    State.Session.SpellTableByName = spellTableByName
+    BrawlState.Session.SpellTable = spellTable
+    BrawlState.Session.SpellTableByName = spellTableByName
 end
 
 -- Engine doesn't fire TurnStarted on enemies in RT mode, so any status whose tick-source is an enemy never ticks down.
@@ -602,7 +602,7 @@ end
 
 local function getSpellByName(name)
     if name then
-        return State.Session.SpellTableByName[name]
+        return BrawlState.Session.SpellTableByName[name]
     end
 end
 

@@ -83,6 +83,9 @@ Ext.Require("Client/HUD/HotbarMenu.lua").Register()
 -- Projectile system v1: the clones' stats + the client-side visual probe.
 Ext.Require("Shared/ProjectileSpells.lua").Register("Client")
 Ext.Require("Client/Combat/ProjectileView.lua").Register()
+-- Real-time fights, client side: keep control on our character at Brawl's
+-- round turnovers, BG3's dynamic combat camera off.
+Ext.Require("Client/BrawlClient.lua").Register()
 
 -- First-person movement: floaty Space jump (visual lift in the DLL,
 -- BG3's jump clips played in phases). See Client/Movement/Jump.lua.

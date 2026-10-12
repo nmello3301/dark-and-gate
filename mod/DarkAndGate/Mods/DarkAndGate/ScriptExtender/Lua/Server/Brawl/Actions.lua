@@ -3,7 +3,7 @@ local debugDump = Utils.debugDump
 local noop = Utils.noop
 
 local function getActionInProgress(casterUuid, requestUuid)
-    local actionsInProgress = State.Session.ActionsInProgress[casterUuid]
+    local actionsInProgress = BrawlState.Session.ActionsInProgress[casterUuid]
     if actionsInProgress and next(actionsInProgress) then
         for _, actionInProgress in ipairs(actionsInProgress) do
             -- debugPrint("checking action", actionInProgress.requestUuid, requestUuid)
@@ -15,7 +15,7 @@ local function getActionInProgress(casterUuid, requestUuid)
 end
 
 local function getActionInProgressByName(casterUuid, spellName)
-    local actionsInProgress = State.Session.ActionsInProgress[casterUuid]
+    local actionsInProgress = BrawlState.Session.ActionsInProgress[casterUuid]
     if actionsInProgress and next(actionsInProgress) then
         for _, actionInProgress in ipairs(actionsInProgress) do
             -- debugPrint("checking action by name", actionInProgress.spellName, spellName)
@@ -27,8 +27,8 @@ local function getActionInProgressByName(casterUuid, spellName)
 end
 
 local function registerActionInProgress(casterUuid, spellName, requestUuid, onCompleted, onFailed)
-    State.Session.ActionsInProgress[casterUuid] = State.Session.ActionsInProgress[casterUuid] or {}
-    table.insert(State.Session.ActionsInProgress[casterUuid], {
+    BrawlState.Session.ActionsInProgress[casterUuid] = BrawlState.Session.ActionsInProgress[casterUuid] or {}
+    table.insert(BrawlState.Session.ActionsInProgress[casterUuid], {
         spellName = spellName,
         requestUuid = requestUuid,
         onCompleted = onCompleted or noop,
@@ -37,10 +37,10 @@ local function registerActionInProgress(casterUuid, spellName, requestUuid, onCo
 end
 
 local function removeActionInProgress(casterUuid, requestUuid)
-    if State.Session.ActionsInProgress[casterUuid] then
+    if BrawlState.Session.ActionsInProgress[casterUuid] then
         local foundActionInProgress = false
         local actionsInProgressIndex = nil
-        local actionsInProgress = State.Session.ActionsInProgress[casterUuid]
+        local actionsInProgress = BrawlState.Session.ActionsInProgress[casterUuid]
         for i, actionInProgress in ipairs(actionsInProgress) do
             if actionInProgress.requestUuid == requestUuid then
                 foundActionInProgress = true
@@ -74,7 +74,7 @@ local function playAttackSound(attackerUuid, defenderUuid, damageType)
 end
 
 local function hasExtraAttacksRemaining(uuid)
-    return State.Session.ExtraAttacksRemaining[uuid] ~= nil and State.Session.ExtraAttacksRemaining[uuid] > 0
+    return BrawlState.Session.ExtraAttacksRemaining[uuid] ~= nil and BrawlState.Session.ExtraAttacksRemaining[uuid] > 0
 end
 
 local function checkExtraAttacksReady(attackerUuid, defenderUuid)
@@ -87,18 +87,18 @@ local function reapplyAttackDamage(attackerUuid, defenderUuid, damageAmount, dam
             playAttackSound(attackerUuid, defenderUuid, damageType)
             Ext.Timer.WaitFor(150, function ()
                 if checkExtraAttacksReady(attackerUuid, defenderUuid) then
-                    State.Session.ExtraAttacksRemaining[attackerUuid] = State.Session.ExtraAttacksRemaining[attackerUuid] - 1
+                    BrawlState.Session.ExtraAttacksRemaining[attackerUuid] = BrawlState.Session.ExtraAttacksRemaining[attackerUuid] - 1
                     debugPrint("Applying damage", defenderUuid, damageAmount, damageType)
                     Osi.ApplyDamage(defenderUuid, damageAmount, damageType, "")
                     Osi.ApplyStatus(defenderUuid, "INTERRUPT_RIPOSTE", 1)
-                    Leaderboard.updateDamage(attackerUuid, defenderUuid, damageAmount)
+                    -- DAG: Leaderboard stripped
                     reapplyAttackDamage(attackerUuid, defenderUuid, damageAmount, damageType)
                 else
-                    State.Session.ExtraAttacksRemaining[attackerUuid] = nil
+                    BrawlState.Session.ExtraAttacksRemaining[attackerUuid] = nil
                 end
             end)
         else
-            State.Session.ExtraAttacksRemaining[attackerUuid] = nil
+            BrawlState.Session.ExtraAttacksRemaining[attackerUuid] = nil
         end
     end)
 end
@@ -128,7 +128,7 @@ local function useBonusAttacks(uuid)
             numBonusAttacks = numBonusAttacks + 1
         end
     end
-    if not State.Settings.TurnBasedSwarmMode then
+    if not BrawlState.Settings.TurnBasedSwarmMode then
         numBonusAttacks = numBonusAttacks + useActionPointSurplus(uuid, "ActionPoint")
         numBonusAttacks = numBonusAttacks + useActionPointSurplus(uuid, "BonusActionPoint")
     end
@@ -136,26 +136,26 @@ local function useBonusAttacks(uuid)
 end
 
 local function handleExtraAttacks(attackerUuid, defenderUuid, storyActionID, damageType, damageAmount)
-    if State.Settings.TurnBasedSwarmMode then
+    if BrawlState.Settings.TurnBasedSwarmMode then
         return
     end
     if attackerUuid ~= nil and defenderUuid ~= nil and storyActionID ~= nil and damageAmount ~= nil and damageAmount > 0 then
-        if not State.Settings.TurnBasedSwarmMode or M.Utils.isPugnacious(attackerUuid) then
-            if State.Session.StoryActionIDs[storyActionID] and State.Session.StoryActionIDs[storyActionID].spellName then
-                local spellName = State.Session.StoryActionIDs[storyActionID].spellName
+        if not BrawlState.Settings.TurnBasedSwarmMode or M.Utils.isPugnacious(attackerUuid) then
+            if BrawlState.Session.StoryActionIDs[storyActionID] and BrawlState.Session.StoryActionIDs[storyActionID].spellName then
+                local spellName = BrawlState.Session.StoryActionIDs[storyActionID].spellName
                 debugPrint("Handle extra attacks", spellName, attackerUuid, defenderUuid, storyActionID, damageType, damageAmount)
-                State.Session.StoryActionIDs[storyActionID] = nil
+                BrawlState.Session.StoryActionIDs[storyActionID] = nil
                 local spell = Spells.getSpellByName(spellName)
                 if spell ~= nil and spell.triggersExtraAttack == true then
-                    if State.Settings.TurnBasedSwarmMode and M.Utils.isPugnacious(attackerUuid) and spell.isBonusAction then
+                    if BrawlState.Settings.TurnBasedSwarmMode and M.Utils.isPugnacious(attackerUuid) and spell.isBonusAction then
                         return nil
                     end
-                    if State.Session.ExtraAttacksRemaining[attackerUuid] == nil then
+                    if BrawlState.Session.ExtraAttacksRemaining[attackerUuid] == nil then
                         local brawler = M.Roster.getBrawlerByUuid(attackerUuid)
                         if brawler and M.Utils.isAliveAndCanFight(attackerUuid) and M.Utils.isAliveAndCanFight(defenderUuid) then
                             local numBonusAttacks = useBonusAttacks(attackerUuid)
                             debugPrint("Initiating extra attacks", attackerUuid, spellName, storyActionID, brawler.numExtraAttacks, numBonusAttacks)
-                            State.Session.ExtraAttacksRemaining[attackerUuid] = brawler.numExtraAttacks + numBonusAttacks
+                            BrawlState.Session.ExtraAttacksRemaining[attackerUuid] = brawler.numExtraAttacks + numBonusAttacks
                             reapplyAttackDamage(attackerUuid, defenderUuid, damageAmount, damageType)
                         end
                     end
@@ -190,7 +190,7 @@ local function buildTargets(casterUuid, spellName, targetUuid, targetingType, is
         local spell = M.Spells.getSpellByName(spellName)
         local spellRange = M.Utils.convertSpellRangeToNumber(M.Utils.getSpellRange(spellName), casterUuid)
         local level = M.Osi.GetRegion(casterUuid)
-        local brawlersInLevel = State.Session.Brawlers[level]
+        local brawlersInLevel = BrawlState.Session.Brawlers[level]
         if brawlersInLevel and spell.amountOfTargets and spell.amountOfTargets > 1 then
             local singleSelect = M.Spells.isSingleSelect(spellName)
             local counter = 0
@@ -246,7 +246,7 @@ end
 
 local function submitSpellRequest(request, insertAtFront)
     local queuedRequests = Ext.System.ServerCastRequest.OsirisCastRequests
-    local isPausedRequest = State.Settings.TruePause and Pause.isInFTB(request.Caster)
+    local isPausedRequest = BrawlState.Settings.TruePause and Pause.isInFTB(request.Caster)
     if insertAtFront or isPausedRequest then
         for i = #queuedRequests, 1, -1 do
             queuedRequests[i + 1] = queuedRequests[i]
@@ -259,19 +259,19 @@ local function submitSpellRequest(request, insertAtFront)
 end
 
 local function getCastOptions(casterUuid)
-    if State.Settings.HogwildMode then
+    if BrawlState.Settings.HogwildMode then
         return {"IgnoreHasSpell", "ShowPrepareAnimation", "IgnoreSpellRolls", "IgnoreTargetChecks", "IgnoreCastChecks"}
     end
     local isPlayer = casterUuid and M.Osi.IsPlayer(casterUuid) == 1
     if isPlayer then
         -- Players use FromClient so that game handles resources/cooldowns natively
-        if State.Settings.TurnBasedSwarmMode then
+        if BrawlState.Settings.TurnBasedSwarmMode then
             return {"FromClient", "ShowPrepareAnimation", "NoMovement"}
         end
         return {"FromClient", "ShowPrepareAnimation", "AvoidDangerousAuras", "NoMovement"}
     else
         -- NPCs use IgnoreHasSpell with Osiris source
-        if State.Settings.TurnBasedSwarmMode then
+        if BrawlState.Settings.TurnBasedSwarmMode then
             return {"IgnoreHasSpell", "ShowPrepareAnimation", "NoMovement"}
         end
         return {"IgnoreHasSpell", "ShowPrepareAnimation", "AvoidDangerousAuras", "NoMovement"}
@@ -328,7 +328,7 @@ local function useSpell(casterUuid, targetUuid, spellName, isFriendlyTarget, var
     if upcastLevel ~= nil then
         spellName = spellName .. "_" .. tostring(upcastLevel)
     end
-    if State.Settings.TurnBasedSwarmMode then
+    if BrawlState.Settings.TurnBasedSwarmMode then
         local spellRange = M.Utils.convertSpellRangeToNumber(M.Utils.getSpellRange(spellName), casterUuid)
         local distanceTo = M.Osi.GetDistanceTo(casterUuid, targetUuid)
         if distanceTo ~= nil and math.floor(distanceTo) > spellRange then
@@ -366,7 +366,7 @@ local function startRage(uuid, rage, onSubmitted, onCompleted, onFailed)
         if not Utils.startsWith(spellName, "Shout_Rage_Giant") then
             return onCompleted(spellName)
         end
-        Swarm.cancelActionSequenceFailsafeTimer(uuid)
+        -- DAG: Swarm Mode stripped
         Ext.Timer.WaitFor(Constants.TIME_BETWEEN_ACTIONS, function ()
             Actions.useSpellOnTarget(uuid, uuid, "Shout_ElementalCleaver_Thunder", true, onSubmitted, onCompleted, onFailed)
         end)
@@ -386,7 +386,7 @@ local function startAuras(uuid, auras, onSubmitted, onCompleted, onFailed)
         end
         Actions.useSpellOnTarget(uuid, uuid, aura, true, onSubmitted, function (spellName)
             debugPrint(M.Utils.getDisplayName(uuid), spellName, "aura successfully activated")
-            Swarm.cancelActionSequenceFailsafeTimer(uuid)
+            -- DAG: Swarm Mode stripped
             Ext.Timer.WaitFor(Constants.TIME_BETWEEN_ACTIONS, function ()
                 startAura(index + 1)
             end)

@@ -14,33 +14,33 @@ local function sendSelectCharacter(uuid, reason)
             M.Utils.getDisplayName(uuid) or tostring(uuid), reason or "?"))
         return
     end
-    local userId = State.Session.Players[uuid] and State.Session.Players[uuid].userId
+    local userId = BrawlState.Session.Players[uuid] and BrawlState.Session.Players[uuid].userId
     debugPrint(string.format("sendSelectCharacter target=%s userId=%s reason=%s",
         M.Utils.getDisplayName(uuid) or tostring(uuid), tostring(userId), reason or "?"))
     if userId then
-        Ext.ServerNet.PostMessageToUser(userId, "SelectCharacter", uuid)
+        Ext.ServerNet.PostMessageToUser(userId, "DAG_BrawlSelectCharacter", uuid) -- DAG: Client/BrawlClient.lua
     else
-        Ext.ServerNet.BroadcastMessage("SelectCharacter", uuid)
+        Ext.ServerNet.BroadcastMessage("DAG_BrawlSelectCharacter", uuid)
     end
 end
 
 local function getCombatRoundDuration()
-    return State.Settings.CombatRoundDuration*1000
+    return BrawlState.Settings.CombatRoundDuration*1000
 end
 
 local function stopPulseAction(brawler)
     if brawler and brawler.uuid then
-        if State.Session.PulseActionTimers[brawler.uuid] ~= nil then
+        if BrawlState.Session.PulseActionTimers[brawler.uuid] ~= nil then
             debugPrint("stop pulse action", brawler.displayName)
-            Ext.Timer.Cancel(State.Session.PulseActionTimers[brawler.uuid])
-            State.Session.PulseActionTimers[brawler.uuid] = nil
+            Ext.Timer.Cancel(BrawlState.Session.PulseActionTimers[brawler.uuid])
+            BrawlState.Session.PulseActionTimers[brawler.uuid] = nil
         end
     end
 end
 
 local function stopAllPulseActions()
     local uuids = {}
-    for uuid, _ in pairs(State.Session.PulseActionTimers) do
+    for uuid, _ in pairs(BrawlState.Session.PulseActionTimers) do
         table.insert(uuids, uuid)
     end
     for _, uuid in ipairs(uuids) do
@@ -53,16 +53,16 @@ local function pulseAction(brawler)
         -- If a "strict move" is happening (e.g., On Me, Move Party) then the pulse must not engage while a user-issued strict move is in flight.
         -- Clears once the movement exits ActiveMovements (natural arrival, timeout, or force-clear).
         if brawler.suppressPulseEventUuid then
-            if State.Session.ActiveMovements[brawler.suppressPulseEventUuid] then
+            if BrawlState.Session.ActiveMovements[brawler.suppressPulseEventUuid] then
                 return
             end
             brawler.suppressPulseEventUuid = nil
         end
-        if not Utils.canAct(brawler.uuid) or brawler.isPaused or (State.isPlayerControllingDirectly(brawler.uuid) and not State.Settings.FullAuto) then
+        if not Utils.canAct(brawler.uuid) or brawler.isPaused or (BrawlState.isPlayerControllingDirectly(brawler.uuid) and not BrawlState.Settings.FullAuto) then
             return
         end
         -- Debug toggle: skip pulse actions for non-player brawlers when DisableEnemyAI is set.  Useful for status-tick testing without dying.
-        if State.Settings.DisableEnemyAI and M.Osi.IsPlayer(brawler.uuid) == 0 then
+        if BrawlState.Settings.DisableEnemyAI and M.Osi.IsPlayer(brawler.uuid) == 0 then
             return
         end
         -- NPC brawlers in the table should always be in combat with the combat helper. Safety net against stale brawlers.
@@ -75,79 +75,79 @@ local function pulseAction(brawler)
 end
 
 local function startPulseAction(brawler, initialDelay)
-    if State.Session.Players[brawler.uuid] and not State.Settings.CompanionAIEnabled then
+    if BrawlState.Session.Players[brawler.uuid] and not BrawlState.Settings.CompanionAIEnabled then
         return false
     end
     if Constants.IS_TRAINING_DUMMY[brawler.uuid] then
         return false
     end
-    if State.Session.PulseActionTimers[brawler.uuid] == nil then
+    if BrawlState.Session.PulseActionTimers[brawler.uuid] == nil then
         debugPrint("Starting pulse action", brawler.displayName, brawler.uuid, brawler.actionInterval)
-        State.Session.PulseActionTimers[brawler.uuid] = Ext.Timer.WaitFor(initialDelay or 0, function ()
+        BrawlState.Session.PulseActionTimers[brawler.uuid] = Ext.Timer.WaitFor(initialDelay or 0, function ()
             pulseAction(brawler)
         end, brawler.actionInterval)
     end
 end
 
 local function stopAllPulseActionTimers()
-    for _, timer in pairs(State.Session.PulseActionTimers) do
+    for _, timer in pairs(BrawlState.Session.PulseActionTimers) do
         Ext.Timer.Cancel(timer)
     end
-    State.Session.PulseActionTimers = {}
+    BrawlState.Session.PulseActionTimers = {}
 end
 
 local function pauseCombatRoundTimer(combatGuid)
     debugPrint(string.format("pauseCombatRoundTimer combatGuid=%s timerWasSet=%s",
         tostring(combatGuid),
-        tostring(State.Session.CombatRoundTimer and State.Session.CombatRoundTimer[combatGuid] ~= nil)))
-    State.Session.IsNextCombatRoundQueued = false
-    if State.Session.CombatRoundTimer and State.Session.CombatRoundTimer[combatGuid] then
-        Ext.Timer.Pause(State.Session.CombatRoundTimer[combatGuid])
+        tostring(BrawlState.Session.CombatRoundTimer and BrawlState.Session.CombatRoundTimer[combatGuid] ~= nil)))
+    BrawlState.Session.IsNextCombatRoundQueued = false
+    if BrawlState.Session.CombatRoundTimer and BrawlState.Session.CombatRoundTimer[combatGuid] then
+        Ext.Timer.Pause(BrawlState.Session.CombatRoundTimer[combatGuid])
     end
 end
 
 local function resumeCombatRoundTimer(combatGuid)
-    if State.Session.CombatRoundTimer and State.Session.CombatRoundTimer[combatGuid] then
-        Ext.Timer.Resume(State.Session.CombatRoundTimer[combatGuid])
+    if BrawlState.Session.CombatRoundTimer and BrawlState.Session.CombatRoundTimer[combatGuid] then
+        Ext.Timer.Resume(BrawlState.Session.CombatRoundTimer[combatGuid])
     end
 end
 
 local function cancelCombatRoundTimer(combatGuid)
     debugPrint(string.format("cancelCombatRoundTimer combatGuid=%s timerWasSet=%s",
         tostring(combatGuid),
-        tostring(State.Session.CombatRoundTimer and State.Session.CombatRoundTimer[combatGuid] ~= nil)))
-    State.Session.IsNextCombatRoundQueued = false
-    if State.Session.CombatRoundTimer and State.Session.CombatRoundTimer[combatGuid] then
-        Ext.Timer.Cancel(State.Session.CombatRoundTimer[combatGuid])
-        State.Session.CombatRoundTimer[combatGuid] = nil
+        tostring(BrawlState.Session.CombatRoundTimer and BrawlState.Session.CombatRoundTimer[combatGuid] ~= nil)))
+    BrawlState.Session.IsNextCombatRoundQueued = false
+    if BrawlState.Session.CombatRoundTimer and BrawlState.Session.CombatRoundTimer[combatGuid] then
+        Ext.Timer.Cancel(BrawlState.Session.CombatRoundTimer[combatGuid])
+        BrawlState.Session.CombatRoundTimer[combatGuid] = nil
     end
 end
 
 local function pauseCombatRoundTimers()
     debugPrint("pauseCombatRoundTimers (all)")
-    State.Session.IsNextCombatRoundQueued = false
-    if State.Session.CombatRoundTimer and next(State.Session.CombatRoundTimer) then
-        for combatGuid, timer in pairs(State.Session.CombatRoundTimer) do
+    BrawlState.Session.IsNextCombatRoundQueued = false
+    if BrawlState.Session.CombatRoundTimer and next(BrawlState.Session.CombatRoundTimer) then
+        for combatGuid, timer in pairs(BrawlState.Session.CombatRoundTimer) do
             Ext.Timer.Pause(timer)
         end
     end
 end
 
 local function resumeCombatRoundTimers()
-    if State.Session.CombatRoundTimer and next(State.Session.CombatRoundTimer) then
-        for combatGuid, timer in pairs(State.Session.CombatRoundTimer) do
+    if BrawlState.Session.CombatRoundTimer and next(BrawlState.Session.CombatRoundTimer) then
+        for combatGuid, timer in pairs(BrawlState.Session.CombatRoundTimer) do
             Ext.Timer.Resume(timer)
         end
     end
 end
 
 local function cancelCombatRoundTimers()
-    State.Session.IsNextCombatRoundQueued = false
-    if State.Session.CombatRoundTimer and next(State.Session.CombatRoundTimer) then
-        for combatGuid, timer in pairs(State.Session.CombatRoundTimer) do
+    BrawlState.Session.IsNextCombatRoundQueued = false
+    if BrawlState.Session.CombatRoundTimer and next(BrawlState.Session.CombatRoundTimer) then
+        for combatGuid, timer in pairs(BrawlState.Session.CombatRoundTimer) do
             Ext.Timer.Cancel(timer)
         end
-        State.Session.CombatRoundTimer = {}
+        BrawlState.Session.CombatRoundTimer = {}
     end
 end
 
@@ -164,7 +164,7 @@ end
 -- NB: is the wrapping timer getting paused correctly during pause?
 local function dumpInitsForLog(tag)
     local entries = {}
-    for uuid, _ in pairs(State.Session.Players or {}) do
+    for uuid, _ in pairs(BrawlState.Session.Players or {}) do
         local entity = Ext.Entity.Get(uuid)
         local roll = entity and entity.CombatParticipant and entity.CombatParticipant.InitiativeRoll
         local rollMap
@@ -187,15 +187,15 @@ local function dumpInitsForLog(tag)
 end
 
 local function nextCombatRound()
-    State.Session.IsNextCombatRoundQueued = false
-    local targeting = State.areAnyPlayersTargeting()
-    local casting = State.isAnyDirectlyControlledCasting()
+    BrawlState.Session.IsNextCombatRoundQueued = false
+    local targeting = BrawlState.areAnyPlayersTargeting()
+    local casting = BrawlState.isAnyDirectlyControlledCasting()
     local inFTB = Pause.isPartyInFTB()
     debugPrint(string.format("nextCombatRound called: targeting=%s casting=%s inFTB=%s",
         tostring(targeting), tostring(casting), tostring(inFTB)))
     if targeting or casting then
         debugPrint(string.format("  -> queued (%s)", targeting and "targeting" or "committed cast in flight"))
-        State.Session.IsNextCombatRoundQueued = true
+        BrawlState.Session.IsNextCombatRoundQueued = true
     elseif not inFTB then
         dumpInitsForLog("nextCombatRound START")
         -- Snapshot per-user currently-controlled chars before the round-turnover mutations.  Prefer live ClientControl entities; fall back to
@@ -209,8 +209,8 @@ local function nextCombatRound()
                 intendedByUser[userId] = entityUuid
             end
         end
-        if State.Session.LastControlledUuid then
-            for userId, uuid in pairs(State.Session.LastControlledUuid) do
+        if BrawlState.Session.LastControlledUuid then
+            for userId, uuid in pairs(BrawlState.Session.LastControlledUuid) do
                 if not intendedByUser[userId] then
                     intendedByUser[userId] = uuid
                 end
@@ -221,7 +221,7 @@ local function nextCombatRound()
         local now = Ext.Utils.MonotonicTime()
         local RECENT_CLICK_WINDOW_MS = 500
         for userId, intendedUuid in pairs(intendedByUser) do
-            local lastClickAt = State.Session.LastGainedControlAt and State.Session.LastGainedControlAt[userId]
+            local lastClickAt = BrawlState.Session.LastGainedControlAt and BrawlState.Session.LastGainedControlAt[userId]
             if lastClickAt and (now - lastClickAt) < RECENT_CLICK_WINDOW_MS then
                 debugPrint(string.format("preRoundTurnover SKIP userId=%s (recent click %dms ago)",
                     tostring(userId), now - lastClickAt))
@@ -229,7 +229,7 @@ local function nextCombatRound()
                 sendSelectCharacter(intendedUuid, "RT.preRoundTurnover")
             end
         end
-        Ext.ServerNet.BroadcastMessage("NextCombatRound", "")
+        -- DAG: the client "NextCombatRound" message stripped (no listener)
         for uuid, _ in pairs(M.Roster.getBrawlers()) do
             local entity = Ext.Entity.Get(uuid)
             if entity and entity.TurnBased then
@@ -253,15 +253,15 @@ end
 
 -- NB: pause timer during interrupts
 local function startCombatRoundTimer(combatGuid)
-    -- if not State.isInCombat() then
+    -- if not BrawlState.isInCombat() then
     --     Osi.PauseCombat(combatGuid)
     -- end
     debugPrint(string.format("startCombatRoundTimer combatGuid=%s duration=%dms", tostring(combatGuid), getCombatRoundDuration()))
     cancelCombatRoundTimer(combatGuid)
     if not Utils.isToT() then
-        State.Session.CombatRoundTimer[combatGuid] = Ext.Timer.WaitFor(getCombatRoundDuration(), nextCombatRound)
+        BrawlState.Session.CombatRoundTimer[combatGuid] = Ext.Timer.WaitFor(getCombatRoundDuration(), nextCombatRound)
     else
-        State.Session.CombatRoundTimer[combatGuid] = Ext.Timer.WaitFor(getCombatRoundDuration(), function ()
+        BrawlState.Session.CombatRoundTimer[combatGuid] = Ext.Timer.WaitFor(getCombatRoundDuration(), function ()
             nextCombatRound()
             if Mods.ToT.PersistentVars.Scenario and Mods.ToT.PersistentVars.Scenario.Round < #Mods.ToT.PersistentVars.Scenario.Timeline then
                 debugPrint("ToT advancing scenario", Mods.ToT.PersistentVars.Scenario.Round, #Mods.ToT.PersistentVars.Scenario.Timeline)
@@ -281,7 +281,7 @@ local function hasEnemyBrawlers()
 end
 
 local function initializeCombat(combatGuid)
-    if not State.Session.CombatHelper then
+    if not BrawlState.Session.CombatHelper then
         debugPrint("initializeCombat: enemies present, spawning combat helper")
         TurnOrder.spawnCombatHelper(combatGuid)
         TurnOrder.setPlayersSwarmGroup()
@@ -289,8 +289,8 @@ local function initializeCombat(combatGuid)
 end
 
 local function onStarted()
-    State.disableDynamicCombatCamera()
-    State.uncapMovementDistances()
+    BrawlState.disableDynamicCombatCamera()
+    BrawlState.uncapMovementDistances()
     Pause.checkTruePauseParty()
 end
 
@@ -298,12 +298,12 @@ local function onCombatStarted(combatGuid)
     -- Cancel any pending APoCS reset timer - a fresh combat-start within the 10s reset window means we're
     -- mid-fight (combat-GUID flicker), not at the genuine end of the fight. Keep the flag set so we don't
     -- re-fire APoCS on this new combat's round 1.
-    if State.Session.APoCSResetTimer then
-        Ext.Timer.Cancel(State.Session.APoCSResetTimer)
-        State.Session.APoCSResetTimer = nil
+    if BrawlState.Session.APoCSResetTimer then
+        Ext.Timer.Cancel(BrawlState.Session.APoCSResetTimer)
+        BrawlState.Session.APoCSResetTimer = nil
     end
     if not Utils.isToT() then
-        State.uncapMovementDistances()
+        BrawlState.uncapMovementDistances()
         -- If enemies are already in the combat participants list (normal case), initialize immediately.  Otherwise, onEnteredCombat will handle it.
         if hasEnemyBrawlers() then
             initializeCombat(combatGuid)
@@ -313,10 +313,10 @@ end
 
 -- Idempotent: cancels debounce + pauses party. Driven by 5s safety OR client's APoCSCameraReady net message.
 local function fireAPoCSNow()
-    local elapsed = State.Session.APoCSStartMs and (Ext.Utils.MonotonicTime() - State.Session.APoCSStartMs) or 0
-    if State.Session.APoCSDebounceTimer then
-        Ext.Timer.Cancel(State.Session.APoCSDebounceTimer)
-        State.Session.APoCSDebounceTimer = nil
+    local elapsed = BrawlState.Session.APoCSStartMs and (Ext.Utils.MonotonicTime() - BrawlState.Session.APoCSStartMs) or 0
+    if BrawlState.Session.APoCSDebounceTimer then
+        Ext.Timer.Cancel(BrawlState.Session.APoCSDebounceTimer)
+        BrawlState.Session.APoCSDebounceTimer = nil
     end
     if not Pause.isPartyInFTB() then
         debugPrint(string.format("[+%dms] APoCS firing -> allEnterFTB", elapsed))
@@ -326,7 +326,7 @@ end
 
 -- Net-message handler for client's APoCSCameraReady. Gated on APoCSDebounceTimer to ignore non-combat camera arrivals.
 local function onAPoCSCameraReady()
-    if State.Session.APoCSDebounceTimer then
+    if BrawlState.Session.APoCSDebounceTimer then
         fireAPoCSNow()
     end
 end
@@ -337,28 +337,26 @@ local function onCombatRoundStarted(combatGuid, round)
         return Osi.PauseCombat(combatGuid)
     end
     dumpInitsForLog(string.format("RT.onCombatRoundStarted START round=%d", round or -1))
-    Ext.ServerNet.BroadcastMessage("CombatRoundStarted", "")
+    -- DAG: the client "CombatRoundStarted" message stripped (no listener)
     if not M.Utils.isToT() then
-        if not State.Session.CombatHelper then
+        if not BrawlState.Session.CombatHelper then
             print("No combat helper found, what happened?")
             -- TurnOrder.spawnCombatHelper(combatGuid)
         end
         for faction, enemyUuid in pairs(Utils.getEnemyFactions()) do
             debugPrint("combat helper set hostile to enemy faction", faction, enemyUuid, M.Utils.getDisplayName(enemyUuid))
-            if enemyUuid and faction and State.Session.CombatHelper then
-                Osi.SetHostileAndEnterCombat(Constants.COMBAT_HELPER.faction, faction, State.Session.CombatHelper, enemyUuid)
+            if enemyUuid and faction and BrawlState.Session.CombatHelper then
+                Osi.SetHostileAndEnterCombat(Constants.COMBAT_HELPER.faction, faction, BrawlState.Session.CombatHelper, enemyUuid)
             end
         end
         Ext.Timer.WaitFor(1000, function ()
-            if State.Session.CombatHelper then
-                Osi.EndTurn(State.Session.CombatHelper)
+            if BrawlState.Session.CombatHelper then
+                Osi.EndTurn(BrawlState.Session.CombatHelper)
             end
         end)
     end
-    for uuid, _ in pairs(M.Roster.getBrawlers()) do
-        Swarm.unsetTurnComplete(uuid)
-    end
-    for uuid, _ in pairs(State.Session.Players) do
+    -- DAG: Swarm Mode stripped
+    for uuid, _ in pairs(BrawlState.Session.Players) do
         local entity = Ext.Entity.Get(uuid)
         if entity and entity.TurnBased then
             entity.TurnBased.RequestedEndTurn = false
@@ -370,16 +368,16 @@ local function onCombatRoundStarted(combatGuid, round)
     startCombatRoundTimer(combatGuid)
     -- APoCS at round 1: wait for client camera-ready signal (or 5s safety) before firing pause.
     -- APoCSScheduled stays true after firing; cleared only by onCombatEnded so combat-GUID flicker doesn't re-fire.
-    if State.Settings.AutoPauseOnCombatStart and round == 1 and not State.Session.APoCSScheduled then
-        State.Session.APoCSScheduled = true
-        State.Session.APoCSStartMs = Ext.Utils.MonotonicTime()
+    if BrawlState.Settings.AutoPauseOnCombatStart and round == 1 and not BrawlState.Session.APoCSScheduled then
+        BrawlState.Session.APoCSScheduled = true
+        BrawlState.Session.APoCSStartMs = Ext.Utils.MonotonicTime()
         debugPrint("[+0ms] APoCS scheduled at round 1, waiting for client camera-ready signal")
-        State.Session.APoCSDebounceTimer = Ext.Timer.WaitFor(5000, fireAPoCSNow)
+        BrawlState.Session.APoCSDebounceTimer = Ext.Timer.WaitFor(5000, fireAPoCSNow)
         -- 1s cap on pre-paused NPCs: avoids them standing frozen during the 5s safety in pathological NPC-on-NPC late-joins.
         Ext.Timer.WaitFor(1000, function()
-            if Pause.isPartyInFTB() or State.Session.IsInDialog then return end
+            if Pause.isPartyInFTB() or BrawlState.Session.IsInDialog then return end
             for uuid, brawler in pairs(M.Roster.getBrawlers()) do
-                if brawler.isPaused and not State.Session.Players[uuid] then
+                if brawler.isPaused and not BrawlState.Session.Players[uuid] then
                     brawler.isPaused = false
                     startPulseAction(brawler, 0)
                 end
@@ -403,44 +401,44 @@ local function onCombatEnded(combatGuid)
     -- Defer stopping pulse actions + endBrawls together: the game may fire CombatEnded spuriously (e.g. during NPC-vs-NPC fights).
     -- If isInCombat is still true after the delay, the fight is ongoing and we leave pulses alone.
     Ext.Timer.WaitFor(1500, function()
-        if not State.isInCombat() then
+        if not BrawlState.isInCombat() then
             stopAllPulseActions()
-            State.endBrawls()
+            BrawlState.endBrawls()
         end
     end)
     -- APoCS flag reset: schedule a 10s timer. If a new CombatStarted fires before it expires (combat-GUID
     -- flicker mid-fight), onCombatStarted cancels the timer. We deliberately do NOT gate the reset on
-    -- State.isInCombat() at expiry - that gate breaks the late-join NPC-on-NPC scenario where the engine
+    -- BrawlState.isInCombat() at expiry - that gate breaks the late-join NPC-on-NPC scenario where the engine
     -- churns combat GUIDs (see-saw) and host's IsInCombat stays true through the transition. cancel-on-
     -- CombatStarted alone is sufficient protection against mid-fight flicker (the new GUID's CombatStarted
     -- fires sub-second after the old one's CombatEnded, well within the 10s window).
-    if State.Session.APoCSResetTimer then
-        Ext.Timer.Cancel(State.Session.APoCSResetTimer)
+    if BrawlState.Session.APoCSResetTimer then
+        Ext.Timer.Cancel(BrawlState.Session.APoCSResetTimer)
     end
-    State.Session.APoCSResetTimer = Ext.Timer.WaitFor(10000, function()
-        State.Session.APoCSResetTimer = nil
-        State.Session.APoCSScheduled = false
-        if State.Session.APoCSDebounceTimer then
-            Ext.Timer.Cancel(State.Session.APoCSDebounceTimer)
-            State.Session.APoCSDebounceTimer = nil
+    BrawlState.Session.APoCSResetTimer = Ext.Timer.WaitFor(10000, function()
+        BrawlState.Session.APoCSResetTimer = nil
+        BrawlState.Session.APoCSScheduled = false
+        if BrawlState.Session.APoCSDebounceTimer then
+            Ext.Timer.Cancel(BrawlState.Session.APoCSDebounceTimer)
+            BrawlState.Session.APoCSDebounceTimer = nil
         end
-        State.Session.APoCSStartMs = nil
+        BrawlState.Session.APoCSStartMs = nil
     end)
 end
 
 local function onEnteredCombat(uuid)
     local entity = Ext.Entity.Get(uuid)
     if entity and entity.TurnBased then
-        if State.Session.Players[uuid] then
+        if BrawlState.Session.Players[uuid] then
             entity.TurnBased.IsActiveCombatTurn = true
         else
             entity.TurnBased.RequestedEndTurn = true
         end
         entity:Replicate("TurnBased")
     end
-    State.uncapMovementDistance(uuid)
+    BrawlState.uncapMovementDistance(uuid)
     -- Deferred combat helper spawn: if this is the first enemy entering combat and we haven't initialized yet, do it now
-    if not State.Session.CombatHelper and M.Osi.IsPlayer(uuid) == 0 and M.Utils.isPugnacious(uuid) then
+    if not BrawlState.Session.CombatHelper and M.Osi.IsPlayer(uuid) == 0 and M.Utils.isPugnacious(uuid) then
         local combatGuid = M.Osi.CombatGetGuidFor(uuid)
         if combatGuid then
             initializeCombat(combatGuid)
@@ -448,8 +446,8 @@ local function onEnteredCombat(uuid)
     end
     -- Keep party init above enemies as new combatants join. For a new player, invalidate the cached mean so it's recomputed from the new lineup. For
     -- non-player non-helper entrants, just re-bump using current max enemy init (which now includes the joiner if their roll is higher).
-    if State.Session.Players[uuid] then
-        State.Session.MeanInitiativeRoll = nil
+    if BrawlState.Session.Players[uuid] then
+        BrawlState.Session.MeanInitiativeRoll = nil
         TurnOrder.setPartyInitiativeRollToMean()
         TurnOrder.bumpDirectlyControlledInitiativeRolls()
     elseif not M.Utils.isCombatHelper(uuid) then
@@ -459,13 +457,13 @@ end
 
 local function onGainedControl(uuid)
     debugPrint("onGainedControl", M.Utils.getDisplayName(uuid))
-    if not State.Settings.FullAuto then
+    if not BrawlState.Settings.FullAuto then
         stopPulseAction(Roster.getBrawlerByUuid(uuid))
     end
     local userId = Osi.GetReservedUserID(uuid)
     -- If we have a pending post-unpause selection for THIS user and the wrong char got control, override it.  Per-user map: {[userId] = uuid}.
-    if State.Session.PendingSelectCharOnLeftFTB and userId then
-        local pendingUuid = State.Session.PendingSelectCharOnLeftFTB[userId]
+    if BrawlState.Session.PendingSelectCharOnLeftFTB and userId then
+        local pendingUuid = BrawlState.Session.PendingSelectCharOnLeftFTB[userId]
         if pendingUuid then
             if uuid ~= pendingUuid then
                 debugPrint("Wrong char gained control, sending SelectCharacter for", M.Utils.getDisplayName(pendingUuid))
@@ -473,13 +471,13 @@ local function onGainedControl(uuid)
             else
                 debugPrint("Correct char gained control", M.Utils.getDisplayName(uuid))
             end
-            State.Session.PendingSelectCharOnLeftFTB[userId] = nil
-            if not next(State.Session.PendingSelectCharOnLeftFTB) then
-                State.Session.PendingSelectCharOnLeftFTB = nil
+            BrawlState.Session.PendingSelectCharOnLeftFTB[userId] = nil
+            if not next(BrawlState.Session.PendingSelectCharOnLeftFTB) then
+                BrawlState.Session.PendingSelectCharOnLeftFTB = nil
             end
         end
     end
-    for playerUuid, player in pairs(State.Session.Players) do
+    for playerUuid, player in pairs(BrawlState.Session.Players) do
         if player.userId == userId and playerUuid ~= uuid then
             local brawler = Roster.getBrawlerByUuid(playerUuid)
             if brawler then
@@ -488,18 +486,15 @@ local function onGainedControl(uuid)
         end
     end
     -- Gate init/turn-order maintenance on actually-in-combat
-    if State.isInCombat() then
-        if not State.Session.MeanInitiativeRoll then
+    if BrawlState.isInCombat() then
+        if not BrawlState.Session.MeanInitiativeRoll then
             TurnOrder.setPartyInitiativeRollToMean()
         end
         TurnOrder.bumpDirectlyControlledInitiativeRolls()
         TurnOrder.reorderByInitiativeRoll(true)
         TurnOrder.setPlayerTurnsActive()
     end
-    -- Refresh the user's loadout HUD with the newly-controlled char's data
-    if userId then
-        Commands.postLoadoutsToUser(userId)
-    end
+    -- DAG: Brawl's loadout HUD stripped
 end
 
 local TARGETING_REACTION_LOCK_BOOST = "ActionResourceBlock(ReactionActionPoint)"
@@ -508,7 +503,7 @@ local TARGETING_REACTION_LOCK_REASON = "BRAWL_TARGETING_REACTION_LOCK"
 local function onSpellSyncTargeting(spellCastState)
     if spellCastState and spellCastState.Caster and spellCastState.Caster.Uuid.EntityUuid then
         local uuid = spellCastState.Caster.Uuid.EntityUuid
-        State.Session.PlayerTargetingSpellCast[uuid] = true
+        BrawlState.Session.PlayerTargetingSpellCast[uuid] = true
         Osi.AddBoosts(uuid, TARGETING_REACTION_LOCK_BOOST, TARGETING_REACTION_LOCK_REASON, uuid)
     end
 end
@@ -516,14 +511,14 @@ end
 local function onDestroySpellSyncTargeting(spellCastState)
     if spellCastState and spellCastState.Caster and spellCastState.Caster.Uuid.EntityUuid then
         local uuid = spellCastState.Caster.Uuid.EntityUuid
-        State.Session.PlayerTargetingSpellCast[uuid] = nil
+        BrawlState.Session.PlayerTargetingSpellCast[uuid] = nil
         Osi.RemoveBoosts(uuid, TARGETING_REACTION_LOCK_BOOST, 0, TARGETING_REACTION_LOCK_REASON, uuid)
-        if State.Session.IsNextCombatRoundQueued then
+        if BrawlState.Session.IsNextCombatRoundQueued then
             -- Defer one tick.  If targeting destroyed because of a click-to-commit, SpellCastState is created
             -- right after; the deferred retry then sees the casting gate and re-queues correctly.  If it was
             -- a cancel (right-click), no SpellCastState appears and the retry proceeds.
             Ext.Timer.WaitFor(0, function ()
-                if State.Session.IsNextCombatRoundQueued then
+                if BrawlState.Session.IsNextCombatRoundQueued then
                     nextCombatRound()
                 end
             end)
@@ -538,8 +533,8 @@ end
 local function onSpellCastStateCreated(spellCastState)
     if spellCastState and spellCastState.Caster and spellCastState.Caster.Uuid.EntityUuid then
         local uuid = spellCastState.Caster.Uuid.EntityUuid
-        if State.isPlayerControllingDirectly(uuid) then
-            State.Session.PlayerCommittedCast[uuid] = true
+        if BrawlState.isPlayerControllingDirectly(uuid) then
+            BrawlState.Session.PlayerCommittedCast[uuid] = true
         end
     end
 end
@@ -547,9 +542,9 @@ end
 local function onSpellCastStateDestroyed(spellCastState)
     if spellCastState and spellCastState.Caster and spellCastState.Caster.Uuid.EntityUuid then
         local uuid = spellCastState.Caster.Uuid.EntityUuid
-        if State.Session.PlayerCommittedCast[uuid] then
-            State.Session.PlayerCommittedCast[uuid] = nil
-            if State.Session.IsNextCombatRoundQueued then
+        if BrawlState.Session.PlayerCommittedCast[uuid] then
+            BrawlState.Session.PlayerCommittedCast[uuid] = nil
+            if BrawlState.Session.IsNextCombatRoundQueued then
                 nextCombatRound()
             end
         end
@@ -558,7 +553,7 @@ end
 
 local function onDialogStarted()
     debugPrint("DialogStarted")
-    State.Session.IsInDialog = true
+    BrawlState.Session.IsInDialog = true
     pauseCombatRoundTimers()
     for uuid, brawler in pairs(M.Roster.getBrawlers()) do
         stopPulseAction(brawler)
@@ -568,10 +563,10 @@ end
 
 local function onDialogEnded()
     debugPrint("DialogEnded")
-    State.Session.IsInDialog = false
+    BrawlState.Session.IsInDialog = false
     resumeCombatRoundTimers()
     for uuid, brawler in pairs(M.Roster.getBrawlers()) do
-        if not State.isPlayerControllingDirectly(uuid) then
+        if not BrawlState.isPlayerControllingDirectly(uuid) then
             startPulseAction(brawler, Constants.INITIAL_PULSE_ACTION_DELAY)
         end
     end
@@ -582,8 +577,8 @@ local function onDied(uuid)
 end
 
 local function onTeleportedToCamp(uuid)
-    if uuid ~= nil and State.Session.Brawlers ~= nil then
-        for level, brawlersInLevel in pairs(State.Session.Brawlers) do
+    if uuid ~= nil and BrawlState.Session.Brawlers ~= nil then
+        for level, brawlersInLevel in pairs(BrawlState.Session.Brawlers) do
             if brawlersInLevel[uuid] ~= nil then
                 Roster.removeBrawler(level, uuid)
                 Roster.checkForEndOfBrawl(level)
@@ -601,9 +596,9 @@ local function onFlagSet(flag)
     elseif flag == "TUT_Helm_JoinedMindflayerFight_ec25d7dc-f9d6-47ff-92c9-8921d6e32f54" then
         Quests.nautiloidTransponderEvent()
     elseif flag == "TUT_Helm_State_TutorialEnded_55073953-23b9-448c-bee8-4c44d3d67b6b" then
-        State.endBrawls()
+        BrawlState.endBrawls()
     elseif flag == "DEN_RaidingParty_Event_GateIsOpened_735e0e81-bd67-eb67-87ac-40da4c3e6c49" then
-        State.endBrawls()
+        BrawlState.endBrawls()
     end
 end
 
@@ -641,7 +636,7 @@ end
 local function onEnteredForceTurnBased(uuid)
     debugPrint(string.format("onEnteredForceTurnBased: entity=%s pendingSet=%s",
         M.Utils.getDisplayName(uuid) or tostring(uuid),
-        tostring(State.Session.PendingSelectCharOnFTB and next(State.Session.PendingSelectCharOnFTB) ~= nil)))
+        tostring(BrawlState.Session.PendingSelectCharOnFTB and next(BrawlState.Session.PendingSelectCharOnFTB) ~= nil)))
     -- Fix partial mid-round TurnBased state per party member; without this the engine can stall on env-turn transition.
     if M.Osi.IsPartyMember(uuid, 1) == 1 then
         local entity = Ext.Entity.Get(uuid)
@@ -652,9 +647,9 @@ local function onEnteredForceTurnBased(uuid)
             entity:Replicate("TurnBased")
         end
     end
-    if State.Session.PendingSelectCharOnFTB and next(State.Session.PendingSelectCharOnFTB) then
-        local selectedByUser = State.Session.PendingSelectCharOnFTB
-        State.Session.PendingSelectCharOnFTB = nil
+    if BrawlState.Session.PendingSelectCharOnFTB and next(BrawlState.Session.PendingSelectCharOnFTB) then
+        local selectedByUser = BrawlState.Session.PendingSelectCharOnFTB
+        BrawlState.Session.PendingSelectCharOnFTB = nil
         -- Build the set of intended controlled chars across all users (one per user)
         -- and bump their init pre-emptively.  The set form lets bumpInitiativeRollsFor
         -- mark every per-user intended char as "controlled" in one pass.
@@ -673,8 +668,8 @@ local function onEnteredForceTurnBased(uuid)
             sendSelectCharacter(intendedUuid, "RT.FTBReady")
             expectedByUser[userId] = intendedUuid
         end
-        State.Session.ExpectedControlled = expectedByUser
-        State.Session.ExpectedControlledExpiresAt = expiresAt
+        BrawlState.Session.ExpectedControlled = expectedByUser
+        BrawlState.Session.ExpectedControlledExpiresAt = expiresAt
     end
 end
 

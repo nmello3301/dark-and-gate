@@ -103,14 +103,14 @@ local function findTarget(brawler, bonusActionOnly, onSubmitted, onCompleted, on
         local wasHealRequested = false
         if M.Osi.IsPlayer(brawler.uuid) == 1 then
             userId = Osi.GetReservedUserID(brawler.uuid)
-            wasHealRequested = State.Session.HealRequested[userId]
+            wasHealRequested = BrawlState.Session.HealRequested[userId]
         end
         if wasHealRequested then
             local friendlyTargetUuid = M.Pick.whoNeedsHealing(brawler.uuid)
             if friendlyTargetUuid and brawlers[friendlyTargetUuid] then
                 debugPrint(brawler.displayName, "actOnFriendlyTarget", brawler.uuid, friendlyTargetUuid, M.Utils.getDisplayName(friendlyTargetUuid), bonusActionOnly)
                 return actOnFriendlyTarget(brawler, brawlers[friendlyTargetUuid], bonusActionOnly, nil, function (request)
-                    State.Session.HealRequested[userId] = false
+                    BrawlState.Session.HealRequested[userId] = false
                     onSubmitted(request)
                 end, onCompleted, onFailed)
             end
@@ -143,13 +143,13 @@ local function act(brawler, bonusActionOnly, onSubmitted, onCompleted, onFailed)
     if not brawler or not brawler.uuid or not Utils.canAct(brawler.uuid) or Roster.isExcludedFromAI(brawler.uuid) then
         return onFailed("can't act or brawler not found")
     end
-    if State.Settings.DisableEnemyAI and M.Osi.IsPlayer(brawler.uuid) == 0 then
+    if BrawlState.Settings.DisableEnemyAI and M.Osi.IsPlayer(brawler.uuid) == 0 then
         return onFailed("enemy AI disabled")
     end
     -- NB: should this change depending on offensive/defensive tactics? should this be a setting to enable disable?
     --     should this generally be handled by the healing logic, instead of special-casing it here?
     if M.Utils.isPlayerOrAlly(brawler.uuid) and not bonusActionOnly then
-        local players = State.Session.Players
+        local players = BrawlState.Session.Players
         for playerUuid, player in pairs(players) do
             if not player.isBeingHelped and brawler.uuid ~= playerUuid and M.Utils.isDowned(playerUuid) and M.Osi.GetDistanceTo(playerUuid, brawler.uuid) < Constants.HELP_DOWNED_MAX_RANGE then
                 player.isBeingHelped = true
@@ -162,7 +162,7 @@ local function act(brawler, bonusActionOnly, onSubmitted, onCompleted, onFailed)
         end
     end
     -- Rage check for barbarians: if rage is available and we're not already raging, then we should use it
-    if State.Settings.TurnBasedSwarmMode and Pick.shouldRage(brawler.uuid, brawler.rage) then
+    if BrawlState.Settings.TurnBasedSwarmMode and Pick.shouldRage(brawler.uuid, brawler.rage) then
         return Actions.startRage(brawler.uuid, brawler.rage, onSubmitted, onCompleted, onFailed)
     end
     -- Aura check for Paladins: auras should always be on, if available
@@ -178,12 +178,12 @@ local function act(brawler, bonusActionOnly, onSubmitted, onCompleted, onFailed)
     local brawlers = M.Roster.getBrawlers()
     if brawlers[brawler.targetUuid] and M.Utils.isAliveAndCanFight(brawler.targetUuid) and M.Utils.isVisible(brawler.uuid, brawler.targetUuid) then
         local target = brawlers[brawler.targetUuid]
-        if not State.Settings.TurnBasedSwarmMode or M.Movement.findPathToTargetUuid(brawler.uuid, brawler.targetUuid) then
+        if not BrawlState.Settings.TurnBasedSwarmMode or M.Movement.findPathToTargetUuid(brawler.uuid, brawler.targetUuid) then
             if brawler.lockedOnTarget and M.Utils.isValidHostileTarget(brawler.uuid, brawler.targetUuid) then
                 debugPrint(brawler.displayName, "Locked-on target, attacking", M.Utils.getDisplayName(brawler.targetUuid), bonusActionOnly)
                 return actOnHostileTarget(brawler, target, bonusActionOnly, nil, onSubmitted, onCompleted, onFailed)
             end
-            if M.Utils.isPlayerOrAlly(brawler.uuid) and State.Settings.CompanionTactics == "Defense" then
+            if M.Utils.isPlayerOrAlly(brawler.uuid) and BrawlState.Settings.CompanionTactics == "Defense" then
                 debugPrint(brawler.displayName, "Find target (defense tactics)", brawler.uuid, bonusActionOnly)
                 return findTarget(brawler, bonusActionOnly, onSubmitted, onCompleted, onFailed)
             end

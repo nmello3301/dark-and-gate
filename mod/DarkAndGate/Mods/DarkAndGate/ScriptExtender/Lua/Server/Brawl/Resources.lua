@@ -121,7 +121,7 @@ local function refillTimerComplete(brawler, resourceType, timerHandle)
 end
 
 local function actionResourcesCallback(entity, _, _)
-    if not State.Settings.TurnBasedSwarmMode and entity and entity.Uuid and entity.Uuid.EntityUuid then
+    if not BrawlState.Settings.TurnBasedSwarmMode and entity and entity.Uuid and entity.Uuid.EntityUuid then
         if Pause.isInFTB(entity) then
             return restoreActionResource(entity, "Movement")
         end
@@ -225,7 +225,7 @@ local function hasEnoughToCastSpell(casterUuid, spellName, variant, upcastLevel)
         debugPrint("Error: spell not found")
         return false
     end
-    local isExtraAttack = State.Session.ExtraAttackInProgress and State.Session.ExtraAttackInProgress[casterUuid]
+    local isExtraAttack = BrawlState.Session.ExtraAttackInProgress and BrawlState.Session.ExtraAttackInProgress[casterUuid]
     if isExtraAttack and not spell.triggersExtraAttack then
         return false
     end

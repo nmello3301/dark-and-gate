@@ -16,11 +16,11 @@ local function playerMovementDistanceToSpeed(movementDistance)
 end
 
 local function enemyMovementDistanceToSpeed(movementDistance)
-    if movementDistance > State.Session.MovementSpeedThresholds.Sprint then
+    if movementDistance > BrawlState.Session.MovementSpeedThresholds.Sprint then
         return "Sprint"
-    elseif movementDistance > State.Session.MovementSpeedThresholds.Run then
+    elseif movementDistance > BrawlState.Session.MovementSpeedThresholds.Run then
         return "Run"
-    elseif movementDistance > State.Session.MovementSpeedThresholds.Walk then
+    elseif movementDistance > BrawlState.Session.MovementSpeedThresholds.Walk then
         return "Walk"
     else
         return "Stroll"
@@ -130,7 +130,7 @@ local function finishMovement(uuid, eventUuid, activeMovement, override)
             Ext.Timer.Cancel(activeMovement.timer.handle)
             activeMovement.timer.paused = false
         end
-        State.Session.ActiveMovements[eventUuid] = nil
+        BrawlState.Session.ActiveMovements[eventUuid] = nil
         if not override then
             activeMovement.onCompleted()
         end
@@ -138,8 +138,8 @@ local function finishMovement(uuid, eventUuid, activeMovement, override)
 end
 
 local function getActiveMovement(moverUuid)
-    if State.Session.ActiveMovements and next(State.Session.ActiveMovements) then
-        for _, activeMovement in pairs(State.Session.ActiveMovements) do
+    if BrawlState.Session.ActiveMovements and next(BrawlState.Session.ActiveMovements) then
+        for _, activeMovement in pairs(BrawlState.Session.ActiveMovements) do
             if activeMovement.moverUuid == moverUuid then
                 return activeMovement
             end
@@ -149,8 +149,8 @@ end
 
 local function getActiveMovements(moverUuid)
     local activeMovements = {}
-    if State.Session.ActiveMovements and next(State.Session.ActiveMovements) then
-        for eventUuid, activeMovement in pairs(State.Session.ActiveMovements) do
+    if BrawlState.Session.ActiveMovements and next(BrawlState.Session.ActiveMovements) then
+        for eventUuid, activeMovement in pairs(BrawlState.Session.ActiveMovements) do
             if activeMovement.moverUuid == moverUuid then
                 activeMovements[eventUuid] = activeMovement
             end
@@ -160,8 +160,8 @@ local function getActiveMovements(moverUuid)
 end
 
 local function clearActiveMovements(moverUuid)
-    if State.Session.ActiveMovements and next(State.Session.ActiveMovements) then
-        for eventUuid, activeMovement in pairs(State.Session.ActiveMovements) do
+    if BrawlState.Session.ActiveMovements and next(BrawlState.Session.ActiveMovements) then
+        for eventUuid, activeMovement in pairs(BrawlState.Session.ActiveMovements) do
             if activeMovement.moverUuid == moverUuid then
                 finishMovement(moverUuid, eventUuid, activeMovement, true)
             end
@@ -170,8 +170,8 @@ local function clearActiveMovements(moverUuid)
 end
 
 local function pauseTimers()
-    if State.Settings.TurnBasedSwarmMode and State.Session.ActiveMovements and next(State.Session.ActiveMovements) then
-        for _, activeMovement in pairs(State.Session.ActiveMovements) do
+    if BrawlState.Settings.TurnBasedSwarmMode and BrawlState.Session.ActiveMovements and next(BrawlState.Session.ActiveMovements) then
+        for _, activeMovement in pairs(BrawlState.Session.ActiveMovements) do
             if activeMovement and activeMovement.timer and activeMovement.timer.handle and not activeMovement.timer.paused then
                 Ext.Timer.Pause(activeMovement.timer.handle)
             end
@@ -180,8 +180,8 @@ local function pauseTimers()
 end
 
 local function resumeTimers()
-    if State.Settings.TurnBasedSwarmMode and State.Session.ActiveMovements and next(State.Session.ActiveMovements) then
-        for _, activeMovement in pairs(State.Session.ActiveMovements) do
+    if BrawlState.Settings.TurnBasedSwarmMode and BrawlState.Session.ActiveMovements and next(BrawlState.Session.ActiveMovements) then
+        for _, activeMovement in pairs(BrawlState.Session.ActiveMovements) do
             if activeMovement and activeMovement.timer and activeMovement.timer.handle and activeMovement.timer.paused then
                 Ext.Timer.Resume(activeMovement.timer.handle)
             end
@@ -191,16 +191,16 @@ end
 
 local function registerActiveMovement(moverUuid, goalPosition, goalTarget, onCompleted, onFailed)
     local eventUuid = Utils.createUuid()
-    State.Session.ActiveMovements[eventUuid] = {
+    BrawlState.Session.ActiveMovements[eventUuid] = {
         moverUuid = moverUuid,
         goalPosition = goalPosition,
         goalTarget = goalTarget,
         onCompleted = onCompleted or _P,
     }
-    State.Session.ActiveMovements[eventUuid].timer = {
+    BrawlState.Session.ActiveMovements[eventUuid].timer = {
         handle = Ext.Timer.WaitFor(Constants.MOVEMENT_MAX_TIME, function ()
             debugPrint(M.Utils.getDisplayName(moverUuid), "movement timed out")
-            State.Session.ActiveMovements[eventUuid] = nil
+            BrawlState.Session.ActiveMovements[eventUuid] = nil
             if onFailed then
                 onFailed("movement timed out")
             end
@@ -239,9 +239,9 @@ local function moveToPosition(uuid, position, override, onCompleted, onFailed)
 end
 
 local function moveCompanionsToTargetUuid(targetUuid)
-    local players = State.Session.Players
+    local players = BrawlState.Session.Players
     for uuid, _ in pairs(players) do
-        if not State.isPlayerControllingDirectly(uuid) or State.Settings.FullAuto then
+        if not BrawlState.isPlayerControllingDirectly(uuid) or BrawlState.Settings.FullAuto then
             moveToTargetUuid(uuid, targetUuid, true)
         end
     end
@@ -284,8 +284,8 @@ end
 -- closest reachable point, so we don't bother validating each offset.
 local function moveCompanionsToPosition(position, leaderUuid)
     local companions = {}
-    for uuid, _ in pairs(State.Session.Players) do
-        if not State.isPlayerControllingDirectly(uuid) or State.Settings.FullAuto then
+    for uuid, _ in pairs(BrawlState.Session.Players) do
+        if not BrawlState.isPlayerControllingDirectly(uuid) or BrawlState.Settings.FullAuto then
             companions[#companions + 1] = uuid
         end
     end
@@ -310,7 +310,7 @@ end
 local function moveToDistanceFromTarget(moverUuid, targetUuid, goalDistance, onCompleted, onFailed)
     local x, y, z = calculateEnRouteCoords(moverUuid, targetUuid, goalDistance)
     if x ~= nil and y ~= nil and z ~= nil then
-        return moveToPosition(moverUuid, {x, y, z}, not State.Settings.TurnBasedSwarmMode, onCompleted, onFailed)
+        return moveToPosition(moverUuid, {x, y, z}, not BrawlState.Settings.TurnBasedSwarmMode, onCompleted, onFailed)
     end
     debugPrint(M.Utils.getDisplayName(moverUuid), "Failed to get en route coordinates", M.Utils.getDisplayName(targetUuid), x, y, z, goalDistance)
     if onFailed then
@@ -431,7 +431,7 @@ local function moveIntoPositionForSpell(uuid, targetUuid, spellName, bonusAction
     onSuccess = onSuccess or noop
     onFailed = onFailed or noop
     debugPrint(M.Utils.getDisplayName(uuid), "moveIntoPositionForSpell", M.Utils.getDisplayName(targetUuid), spellName, bonusActionOnly)
-    local swarmTurnActiveInitial = State.Session.SwarmTurnActive
+    local swarmTurnActiveInitial = BrawlState.Session.SwarmTurnActive
     local spellRange = getEffectiveSpellRange(uuid, spellName)
     debugPrint(M.Utils.getDisplayName(uuid), "got effective spell range", spellName, spellRange)
     -- if unit can’t move at all (sentinel foe etc)
@@ -443,7 +443,7 @@ local function moveIntoPositionForSpell(uuid, targetUuid, spellName, bonusAction
     local baseMove = getRemainingMovementByUuid(uuid)
     local numActions = Resources.getActionPointsRemaining(uuid)
     local numBonusActions = Resources.getBonusActionPointsRemaining(uuid)
-    local override = not State.Settings.TurnBasedSwarmMode
+    local override = not BrawlState.Settings.TurnBasedSwarmMode
     local movementRetries = 0
     debugPrint(M.Utils.getDisplayName(uuid), "starting movement and points", baseMove, numActions, numBonusActions)
     local function tryMove(allowedDistance, isDashAvailable, isBonusDashOnly)
@@ -484,14 +484,14 @@ local function moveIntoPositionForSpell(uuid, targetUuid, spellName, bonusAction
                 debugPrint(M.Utils.getDisplayName(uuid), "dash request submitted", dashSpellName)
                 local swarmActors
                 if swarmTurnActiveInitial then
-                    swarmActors = State.Session.SwarmActors
+                    swarmActors = BrawlState.Session.SwarmActors
                 end
-                Swarm.startActionSequenceFailsafeTimer(M.Roster.getBrawlerByUuid(uuid), request, swarmTurnActiveInitial, swarmActors, onFailed)
+                -- DAG: Swarm Mode stripped (action-sequence failsafe timer)
             end, function (spellName)
                 debugPrint(M.Utils.getDisplayName(uuid), "dash ok", spellName)
                 Ext.Timer.WaitFor(Constants.TIME_BETWEEN_ACTIONS, function ()
                     -- if this is an NPC acting during Swarm Turn, make sure the swarm turn is still active now
-                    if State.Session.TurnBasedSwarmMode and swarmTurnActiveInitial and not State.Session.SwarmTurnActive then
+                    if BrawlState.Session.TurnBasedSwarmMode and swarmTurnActiveInitial and not BrawlState.Session.SwarmTurnActive then
                         return onFailed("swarm turn expired (dash)")
                     end
                     tryMove(getRemainingMovementByUuid(uuid), Resources.getBonusActionPointsRemaining(uuid) > 0, true)
@@ -524,17 +524,17 @@ local function moveIntoPositionForSpell(uuid, targetUuid, spellName, bonusAction
                 return Actions.useSpellOnTarget(uuid, targetUuid, teleportSpellName, false, function (request)
                     debugPrint(M.Utils.getDisplayName(uuid), "teleport request submitted", teleportSpellName)
                     -- NB: need to do this for RT also for RIC?
-                    if State.Session.TurnBasedSwarmMode then
+                    if BrawlState.Session.TurnBasedSwarmMode then
                         local swarmActors
                         if swarmTurnActiveInitial then
-                            swarmActors = State.Session.SwarmActors
+                            swarmActors = BrawlState.Session.SwarmActors
                         end
-                        Swarm.startActionSequenceFailsafeTimer(M.Roster.getBrawlerByUuid(uuid), request, swarmTurnActiveInitial, swarmActors, onFailed)
+                        -- DAG: Swarm Mode stripped (action-sequence failsafe timer)
                     end
                 end, function (spellName)
                     debugPrint(M.Utils.getDisplayName(uuid), "teleport ok", spellName)
                     Ext.Timer.WaitFor(Constants.TIME_BETWEEN_ACTIONS, function ()
-                        if State.Session.TurnBasedSwarmMode and swarmTurnActiveInitial and not State.Session.SwarmTurnActive then
+                        if BrawlState.Session.TurnBasedSwarmMode and swarmTurnActiveInitial and not BrawlState.Session.SwarmTurnActive then
                             return onFailed("swarm turn expired (teleport)")
                         end
                         tryMove(getRemainingMovementByUuid(uuid), isDashAvailable, isBonusDashOnly)
@@ -608,7 +608,7 @@ local function moveIntoPositionForSpell(uuid, targetUuid, spellName, bonusAction
             path.CanUseLadders = true
         end
     end
-    tryMove(baseMove, State.Settings.TurnBasedSwarmMode, bonusActionOnly)
+    tryMove(baseMove, BrawlState.Settings.TurnBasedSwarmMode, bonusActionOnly)
 end
 
 -- Additive speed boost multipliers per status. Base is 1.0x (no boost).
@@ -647,19 +647,19 @@ local function updateSpeedBoost(uuid)
     local entity = Ext.Entity.Get(uuid)
     if not entity or not entity.ServerCharacter or not entity.ServerCharacter.Template then return end
     local template = entity.ServerCharacter.Template
-    local boost = State.Session.DashSpeedBoosts[uuid]
+    local boost = BrawlState.Session.DashSpeedBoosts[uuid]
     if not boost then
         boost = {
             Sprint = template.MovementSpeedSprint,
             Run = template.MovementSpeedRun,
         }
-        State.Session.DashSpeedBoosts[uuid] = boost
+        BrawlState.Session.DashSpeedBoosts[uuid] = boost
     end
     local multiplier = computeSpeedMultiplier(uuid)
     if multiplier <= 1.0 then
         template.MovementSpeedSprint = boost.Sprint
         template.MovementSpeedRun = boost.Run
-        State.Session.DashSpeedBoosts[uuid] = nil
+        BrawlState.Session.DashSpeedBoosts[uuid] = nil
         debugPrint("Speed boost removed from", M.Utils.getDisplayName(uuid))
     else
         template.MovementSpeedSprint = boost.Sprint * multiplier
@@ -670,22 +670,22 @@ end
 
 local function removeAllDashSpeedBoosts()
     local uuids = {}
-    for uuid, _ in pairs(State.Session.DashSpeedBoosts) do
+    for uuid, _ in pairs(BrawlState.Session.DashSpeedBoosts) do
         table.insert(uuids, uuid)
     end
     for _, uuid in ipairs(uuids) do
         local entity = Ext.Entity.Get(uuid)
-        local boost = State.Session.DashSpeedBoosts[uuid]
+        local boost = BrawlState.Session.DashSpeedBoosts[uuid]
         if entity and entity.ServerCharacter and entity.ServerCharacter.Template and boost then
             entity.ServerCharacter.Template.MovementSpeedSprint = boost.Sprint
             entity.ServerCharacter.Template.MovementSpeedRun = boost.Run
         end
-        State.Session.DashSpeedBoosts[uuid] = nil
+        BrawlState.Session.DashSpeedBoosts[uuid] = nil
     end
 end
 
 local function setMovementSpeedThresholds()
-    State.Session.MovementSpeedThresholds = Constants.MOVEMENT_SPEED_THRESHOLDS[M.Utils.getDifficulty()]
+    BrawlState.Session.MovementSpeedThresholds = Constants.MOVEMENT_SPEED_THRESHOLDS[M.Utils.getDifficulty()]
 end
 
 return {

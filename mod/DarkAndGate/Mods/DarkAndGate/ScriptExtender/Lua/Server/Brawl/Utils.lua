@@ -8,6 +8,8 @@ local function debugDisplay(fn, src, ...)
     if not Constants.DEBUG_LOGGING then
         return
     elseif Constants.DEBUG_LOGGING == true or (src and Constants.DEBUG_LOGGING[getBasename(src)]) then
+        -- DAG: debug lines go to our session log when Server/BrawlAdapter.lua sets the hook (!dag_rt debug on)
+        if DAG_BrawlLog then return DAG_BrawlLog(src and getBasename(src) or "?", fn == _D, ...) end
         fn(...)
     end
 end
@@ -339,9 +341,9 @@ local function getEnemyTier(uuid)
 end
 
 local function isExcludedEnemyTier(uuid)
-    if State.Session.ExcludeEnemyTierIndex ~= nil then
+    if BrawlState.Session.ExcludeEnemyTierIndex ~= nil then
         local enemyTier = getEnemyTier(uuid)
-        if enemyTier and enemyTier >= State.Session.ExcludeEnemyTierIndex then
+        if enemyTier and enemyTier >= BrawlState.Session.ExcludeEnemyTierIndex then
             return true
         end
     end
@@ -377,10 +379,7 @@ end
 
 local function clearOsirisQueue(uuid)
     debugPrint("clearOsirisQueue", uuid, getDisplayName(uuid))
-    if State.Settings.TurnBasedSwarmMode then
-        Movement.clearActiveMovements(uuid)
-        Swarm.cancelActionSequenceFailsafeTimer(uuid)
-    end
+    -- DAG: Swarm Mode stripped
     Osi.PurgeOsirisQueue(uuid, 1)
     Osi.FlushOsirisQueue(uuid)
 end
@@ -491,7 +490,7 @@ local function createDummyObject(position)
 end
 
 local function showNotification(uuid, text, duration)
-    if State.isPlayerControllingDirectly(uuid) then
+    if BrawlState.isPlayerControllingDirectly(uuid) then
         duration = duration or math.ceil(Constants.MOD_STATUS_MESSAGE_DURATION / 1000)
         Ext.ServerNet.PostMessageToClient(uuid, "Notification", Ext.Json.Stringify({text = text, duration = duration}))
     end
@@ -520,7 +519,7 @@ local function isPlayerTurnEnded(uuid)
 end
 
 local function getTrackingDistance()
-    return State.Settings.TurnBasedSwarmMode and Constants.TRACKING_DISTANCE_TBSM or Constants.TRACKING_DISTANCE_RT
+    return BrawlState.Settings.TurnBasedSwarmMode and Constants.TRACKING_DISTANCE_TBSM or Constants.TRACKING_DISTANCE_RT
 end
 
 local function canAct(uuid)
@@ -601,8 +600,8 @@ local function getEnemyFactions()
 end
 
 local function getFTBEntity()
-    if State.Session.Players then
-        for uuid, _ in pairs(State.Session.Players) do
+    if BrawlState.Session.Players then
+        for uuid, _ in pairs(BrawlState.Session.Players) do
             local entity = Ext.Entity.Get(uuid)
             if entity and entity.FTBParticipant then
                 return entity.FTBParticipant.field_18
@@ -716,10 +715,10 @@ local function isValidHostileTarget(uuid, targetUuid)
 end
 
 local function isCombatHelper(uuid)
-    if uuid == State.Session.CombatHelper then
+    if uuid == BrawlState.Session.CombatHelper then
         return true
     end
-    for _, refreshers in pairs(State.Session.RefresherCombatHelper) do
+    for _, refreshers in pairs(BrawlState.Session.RefresherCombatHelper) do
         for _, refresherUuid in ipairs(refreshers) do
             if uuid == refresherUuid then
                 return true
@@ -741,7 +740,7 @@ end
 local function checkDivineIntervention(spellName, casterUuid)
     if spellName == "Shout_DivineIntervention_Healing" or spellName == "Shout_DivineIntervention_Healing_Improvement" then
         local areaRadius = Ext.Stats.Get(spellName).AreaRadius
-        for uuid, _ in pairs(State.Session.Players) do
+        for uuid, _ in pairs(BrawlState.Session.Players) do
             if M.Osi.GetDistanceTo(uuid, casterUuid) <= areaRadius then
                 removeNegativeStatuses(uuid)
             end

@@ -13,23 +13,23 @@ local function unlock(entity)
         entity.TurnBased.IsActiveCombatTurn = true
         entity:Replicate("TurnBased")
         local uuid = entity.Uuid.EntityUuid
-        State.Session.FTBLockedIn[uuid] = false
-        if State.Session.MovementQueue[uuid] then
+        BrawlState.Session.FTBLockedIn[uuid] = false
+        if BrawlState.Session.MovementQueue[uuid] then
             debugPrint("unloading movement queue for", uuid)
-            if State.Session.TranslateChangedEventListeners[uuid] ~= nil then
-                Ext.Entity.Unsubscribe(State.Session.TranslateChangedEventListeners[uuid])
-                State.Session.TranslateChangedEventListeners[uuid] = nil
+            if BrawlState.Session.TranslateChangedEventListeners[uuid] ~= nil then
+                Ext.Entity.Unsubscribe(BrawlState.Session.TranslateChangedEventListeners[uuid])
+                BrawlState.Session.TranslateChangedEventListeners[uuid] = nil
             end
-            local moveTo = State.Session.MovementQueue[uuid]
+            local moveTo = BrawlState.Session.MovementQueue[uuid]
             debugDump(moveTo)
             Movement.moveToPosition(uuid, moveTo, false, function ()
                 debugPrint(M.Utils.getDisplayName(uuid), "queued movement completed, starting pulse action")
                 local brawler = M.Roster.getBrawlerByUuid(uuid)
-                if brawler and not State.isPlayerControllingDirectly(uuid) then
+                if brawler and not BrawlState.isPlayerControllingDirectly(uuid) then
                     RT.Timers.startPulseAction(brawler)
                 end
             end)
-            State.Session.MovementQueue[uuid] = nil
+            BrawlState.Session.MovementQueue[uuid] = nil
         end
     end
 end
@@ -40,27 +40,27 @@ local function lock(entity)
         debugPrint("locking", uuid)
         Roster.disableLockedOnTarget(uuid)
         entity.TurnBased.IsActiveCombatTurn = false
-        State.Session.FTBLockedIn[uuid] = true
+        BrawlState.Session.FTBLockedIn[uuid] = true
     end
 end
 
 local function stopTruePause(entityUuid)
-    if State.Session.TranslateChangedEventListeners[entityUuid] ~= nil then
-        Ext.Entity.Unsubscribe(State.Session.TranslateChangedEventListeners[entityUuid])
-        State.Session.TranslateChangedEventListeners[entityUuid] = nil
+    if BrawlState.Session.TranslateChangedEventListeners[entityUuid] ~= nil then
+        Ext.Entity.Unsubscribe(BrawlState.Session.TranslateChangedEventListeners[entityUuid])
+        BrawlState.Session.TranslateChangedEventListeners[entityUuid] = nil
     end
-    if State.Session.TurnBasedListeners[entityUuid] ~= nil then
-        Ext.Entity.Unsubscribe(State.Session.TurnBasedListeners[entityUuid])
-        State.Session.TurnBasedListeners[entityUuid] = nil
+    if BrawlState.Session.TurnBasedListeners[entityUuid] ~= nil then
+        Ext.Entity.Unsubscribe(BrawlState.Session.TurnBasedListeners[entityUuid])
+        BrawlState.Session.TurnBasedListeners[entityUuid] = nil
     end
-    if State.Session.SpellCastPrepareEndEventListeners[entityUuid] ~= nil then
-        Ext.Entity.Unsubscribe(State.Session.SpellCastPrepareEndEventListeners[entityUuid])
-        State.Session.SpellCastPrepareEndEventListeners[entityUuid] = nil
+    if BrawlState.Session.SpellCastPrepareEndEventListeners[entityUuid] ~= nil then
+        Ext.Entity.Unsubscribe(BrawlState.Session.SpellCastPrepareEndEventListeners[entityUuid])
+        BrawlState.Session.SpellCastPrepareEndEventListeners[entityUuid] = nil
     end
 end
 
 local function allEnterFTB()
-    if State.Settings.TurnBasedSwarmMode then
+    if BrawlState.Settings.TurnBasedSwarmMode then
         return
     end
     debugPrint("allEnterFTB called")
@@ -68,7 +68,7 @@ local function allEnterFTB()
     -- Out of combat: minimal FTB on party members, no pause machinery. Players
     -- can move around freely and the game's native FTB handles everything.
     if next(M.Roster.getBrawlers()) == nil then
-        for uuid, _ in pairs(State.Session.Players) do
+        for uuid, _ in pairs(BrawlState.Session.Players) do
             if M.Osi.IsDead(uuid) == 0 and not M.Utils.isDowned(uuid) then
                 Osi.ForceTurnBasedMode(uuid, 1)
             end
@@ -79,14 +79,14 @@ local function allEnterFTB()
     -- (leaving combat triggers GainedControl which resets the selection).  In MP each user has
     -- their own isControllingDirectly char; we want to restore each one independently.
     local selectedBeforePause = {}  -- {[userId] = uuid}
-    for uuid, player in pairs(State.Session.Players) do
+    for uuid, player in pairs(BrawlState.Session.Players) do
         if player.isControllingDirectly and player.userId then
             selectedBeforePause[player.userId] = uuid
         end
     end
     local narrativeCombatLabel
-    if State.Session.CombatHelper then
-        local combatGuid = M.Osi.CombatGetGuidFor(State.Session.CombatHelper)
+    if BrawlState.Session.CombatHelper then
+        local combatGuid = M.Osi.CombatGetGuidFor(BrawlState.Session.CombatHelper)
         if combatGuid then
             narrativeCombatLabel = Utils.getNarrativeCombatLabel(combatGuid)
             Osi.PauseCombat(combatGuid)
@@ -99,19 +99,17 @@ local function allEnterFTB()
         brawler.isPaused = true
         Utils.clearOsirisQueue(uuid)
         Resources.pauseActionResourcesRefillTimers(brawler)
-        if State.Session.Players[uuid] and State.Session.AwaitingTarget[uuid] then
-            Commands.setAwaitingTarget(uuid, false)
-        end
+        -- DAG: Brawl's click-to-target keybind state (Commands.lua) stripped
         if M.Osi.IsPlayer(uuid) == 0 then
             Osi.ForceTurnBasedMode(uuid, 1)
-            if State.Settings.TruePause then
+            if BrawlState.Settings.TruePause then
                 Pause.startTruePause(uuid)
             end
         end
     end
     -- Put all party members into FTB; skip dead/downed.
     local pauseEntryExpiry = Ext.Utils.MonotonicTime() + 2000
-    for uuid, _ in pairs(State.Session.Players) do
+    for uuid, _ in pairs(BrawlState.Session.Players) do
         if M.Osi.IsDead(uuid) == 0 and not M.Utils.isDowned(uuid) then
             if narrativeCombatLabel then
                 Osi.PROC_GLO_NarrativeCombat_LeaveCombat(narrativeCombatLabel, uuid)
@@ -134,8 +132,8 @@ local function allEnterFTB()
             -- Flag every party member for the 2s skip window, not just those where SpellCastIsCasting.Cast is already present: some casts
             -- haven't materialized into Cast yet at pause entry (pre-prepare phase), but still fire SpellCastPrepareEndEvent during FTB and
             -- lock the character. Also covers reactions (e.g. Divine Allegiance) that the engine auto-fires post-pause.
-            State.Session.PreExistingCastAtPause[uuid] = pauseEntryExpiry
-            if State.Settings.TruePause then
+            BrawlState.Session.PreExistingCastAtPause[uuid] = pauseEntryExpiry
+            if BrawlState.Settings.TruePause then
                 Pause.startTruePause(uuid)
             end
         end
@@ -143,7 +141,7 @@ local function allEnterFTB()
     -- Restore each user's pre-pause selection once FTB is ready (consumed in
     -- RT.onEnteredForceTurnBased).  Stored as {[userId] = uuid}.
     if next(selectedBeforePause) then
-        State.Session.PendingSelectCharOnFTB = selectedBeforePause
+        BrawlState.Session.PendingSelectCharOnFTB = selectedBeforePause
         local entries = {}
         for uid, u in pairs(selectedBeforePause) do
             table.insert(entries, string.format("%s→%s", tostring(uid), M.Utils.getDisplayName(u) or u))
@@ -151,10 +149,10 @@ local function allEnterFTB()
         debugPrint(string.format("PendingSelectCharOnFTB SET in allEnterFTB: %s", table.concat(entries, ", ")))
     end
     -- During-pause selection tracking; allExitFTB filters unpause-cycle GainedControls via 200ms recency.
-    State.Session.FTBSelectionTrack = {}
+    BrawlState.Session.FTBSelectionTrack = {}
     local trackInitAt = Ext.Utils.MonotonicTime()
     for uid, u in pairs(selectedBeforePause) do
-        State.Session.FTBSelectionTrack[uid] = {
+        BrawlState.Session.FTBSelectionTrack[uid] = {
             current = u,
             currentAt = trackInitAt,
             previous = nil,
@@ -163,15 +161,15 @@ local function allEnterFTB()
 end
 
 local function allExitFTB()
-    if State.Settings.TurnBasedSwarmMode then
+    if BrawlState.Settings.TurnBasedSwarmMode then
         return
     end
     debugPrint("allExitFTB")
-    State.Session.PreExistingCastAtPause = {}
+    BrawlState.Session.PreExistingCastAtPause = {}
     -- APoCSScheduled cleared by RT.onCombatEnded only -- manual unpause shouldn't re-arm on mid-fight combat-GUID flicker.
     -- Out of combat: minimal FTB exit on party members, mirroring allEnterFTB.
     if next(M.Roster.getBrawlers()) == nil then
-        for uuid, _ in pairs(State.Session.Players) do
+        for uuid, _ in pairs(BrawlState.Session.Players) do
             if M.Osi.IsDead(uuid) == 0 and not M.Utils.isDowned(uuid) then
                 Osi.ForceTurnBasedMode(uuid, 0)
             end
@@ -183,8 +181,8 @@ local function allExitFTB()
     local selectedDuringPause = {}
     local LATE_SELECTION_WINDOW_MS = 200
     local nowMs = Ext.Utils.MonotonicTime()
-    if State.Session.FTBSelectionTrack and next(State.Session.FTBSelectionTrack) then
-        for userId, track in pairs(State.Session.FTBSelectionTrack) do
+    if BrawlState.Session.FTBSelectionTrack and next(BrawlState.Session.FTBSelectionTrack) then
+        for userId, track in pairs(BrawlState.Session.FTBSelectionTrack) do
             local age = nowMs - (track.currentAt or 0)
             if age < LATE_SELECTION_WINDOW_MS and track.previous then
                 selectedDuringPause[userId] = track.previous
@@ -198,16 +196,16 @@ local function allExitFTB()
             end
         end
     else
-        for uuid, player in pairs(State.Session.Players) do
+        for uuid, player in pairs(BrawlState.Session.Players) do
             if player.isControllingDirectly and player.userId then
                 selectedDuringPause[player.userId] = uuid
             end
         end
     end
-    State.Session.FTBSelectionTrack = nil
+    BrawlState.Session.FTBSelectionTrack = nil
     -- Track which characters have queued movements before we start unpausing
     local hasQueuedMovement = {}
-    for uuid, _ in pairs(State.Session.MovementQueue) do
+    for uuid, _ in pairs(BrawlState.Session.MovementQueue) do
         hasQueuedMovement[uuid] = true
     end
     local combatGuid, narrativeCombatLabel
@@ -238,7 +236,7 @@ local function allExitFTB()
         end
     end
     -- Unpause all party members (skip dead/downed - they never entered FTB via allEnterFTB)
-    for uuid, _ in pairs(State.Session.Players) do
+    for uuid, _ in pairs(BrawlState.Session.Players) do
         if M.Osi.IsDead(uuid) == 0 and not M.Utils.isDowned(uuid) then
             unlock(Ext.Entity.Get(uuid))
             Osi.ForceTurnBasedMode(uuid, 0)
@@ -259,7 +257,7 @@ local function allExitFTB()
             if brawler then
                 brawler.isPaused = false
                 Resources.resumeActionResourcesRefillTimers(brawler)
-                if not State.isPlayerControllingDirectly(uuid) or State.Settings.FullAuto then
+                if not BrawlState.isPlayerControllingDirectly(uuid) or BrawlState.Settings.FullAuto then
                     if not hasQueuedMovement[uuid] then
                         RT.Timers.startPulseAction(brawler, 0)
                     else
@@ -271,45 +269,44 @@ local function allExitFTB()
     end
     -- Resume underlying combat. Helper may have lost its combat (e.g. during APoCS-induced combat churn);
     -- skip in that case rather than crashing on Osi.ResumeCombat(nil).
-    if State.Session.CombatHelper then
-        local helperCombat = M.Osi.CombatGetGuidFor(State.Session.CombatHelper)
+    if BrawlState.Session.CombatHelper then
+        local helperCombat = M.Osi.CombatGetGuidFor(BrawlState.Session.CombatHelper)
         if helperCombat then
             Osi.ResumeCombat(helperCombat)
         end
     end
     TurnOrder.setPlayersSwarmGroup()
     if next(selectedDuringPause) then
-        State.Session.PendingSelectCharOnLeftFTB = selectedDuringPause
+        BrawlState.Session.PendingSelectCharOnLeftFTB = selectedDuringPause
     end
-    if not combatGuid and State.Session.CombatHelper then
-        combatGuid = M.Osi.CombatGetGuidFor(State.Session.CombatHelper)
+    if not combatGuid and BrawlState.Session.CombatHelper then
+        combatGuid = M.Osi.CombatGetGuidFor(BrawlState.Session.CombatHelper)
     end
     if combatGuid then
         RT.Timers.resumeCombatRoundTimer(combatGuid)
     end
     Movement.resumeTimers()
     -- Process any deferred left-combat removals from during FTB
-    if State.Session.PendingLeftCombat and next(State.Session.PendingLeftCombat) then
+    if BrawlState.Session.PendingLeftCombat and next(BrawlState.Session.PendingLeftCombat) then
         local level = M.Osi.GetRegion(M.Osi.GetHostCharacter())
-        for uuid, _ in pairs(State.Session.PendingLeftCombat) do
+        for uuid, _ in pairs(BrawlState.Session.PendingLeftCombat) do
             if M.Roster.getBrawlerByUuid(uuid) then
                 Roster.removeBrawler(level, uuid)
             end
         end
-        State.Session.PendingLeftCombat = {}
+        BrawlState.Session.PendingLeftCombat = {}
         Roster.checkForEndOfBrawl(level)
     end
 end
 
 local function cancelQueuedMovement(uuid)
-    if State.Session.MovementQueue[uuid] ~= nil and Osi.IsInForceTurnBasedMode(uuid) == 1 then
+    if BrawlState.Session.MovementQueue[uuid] ~= nil and Osi.IsInForceTurnBasedMode(uuid) == 1 then
         local entity = Ext.Entity.Get(uuid)
         if entity and entity.TurnBased then
-            State.Session.FTBLockedIn[uuid] = entity.TurnBased.RequestedEndTurn
+            BrawlState.Session.FTBLockedIn[uuid] = entity.TurnBased.RequestedEndTurn
         end
-        State.Session.MovementQueue[uuid] = nil
-        Movement.resumeTimers()
-        Swarm.resumeTimers()
+        BrawlState.Session.MovementQueue[uuid] = nil
+        Movement.resumeTimers() -- DAG: Swarm Mode stripped
     end
 end
 
@@ -323,9 +320,8 @@ local function midActionLock(entity)
                 local target = spellCastState.Targets[1]
                 if target and (target.Position or target.Target) then
                     lock(entity)
-                    State.Session.MovementQueue[entity.Uuid.EntityUuid] = nil
-                    Movement.pauseTimers()
-                    Swarm.pauseTimers()
+                    BrawlState.Session.MovementQueue[entity.Uuid.EntityUuid] = nil
+                    Movement.pauseTimers() -- DAG: Swarm Mode stripped
                 end
             end
         end
@@ -337,8 +333,8 @@ local function isInFTB(entity)
 end
 
 local function isFTBAllLockedIn()
-    for uuid, _ in pairs(State.Session.Players) do
-        if not State.Session.FTBLockedIn[uuid] and M.Osi.IsDead(uuid) == 0 and not M.Utils.isDowned(uuid) then
+    for uuid, _ in pairs(BrawlState.Session.Players) do
+        if not BrawlState.Session.FTBLockedIn[uuid] and M.Osi.IsDead(uuid) == 0 and not M.Utils.isDowned(uuid) then
             return false
         end
     end
@@ -350,14 +346,14 @@ local function isActionFinalized(entity)
 end
 
 local function startTurnBasedListener(entityUuid)
-    if State.Session.TurnBasedListeners[entityUuid] ~= nil then
-        Ext.Entity.Unsubscribe(State.Session.TurnBasedListeners[entityUuid])
-        State.Session.TurnBasedListeners[entityUuid] = nil
+    if BrawlState.Session.TurnBasedListeners[entityUuid] ~= nil then
+        Ext.Entity.Unsubscribe(BrawlState.Session.TurnBasedListeners[entityUuid])
+        BrawlState.Session.TurnBasedListeners[entityUuid] = nil
     end
-    State.Session.TurnBasedListeners[entityUuid] = Ext.Entity.Subscribe("TurnBased", function (caster, _, _)
+    BrawlState.Session.TurnBasedListeners[entityUuid] = Ext.Entity.Subscribe("TurnBased", function (caster, _, _)
         -- NB: requested end turn isn't the only thing that can change here...
         if caster and caster.TurnBased then
-            State.Session.FTBLockedIn[entityUuid] = caster.TurnBased.RequestedEndTurn
+            BrawlState.Session.FTBLockedIn[entityUuid] = caster.TurnBased.RequestedEndTurn
             if isFTBAllLockedIn() then
                 allExitFTB()
             end
@@ -366,12 +362,12 @@ local function startTurnBasedListener(entityUuid)
 end
 
 local function startTranslateChangedEventListener(entityUuid)
-    if State.Session.TranslateChangedEventListeners[entityUuid] ~= nil then
-        Ext.Entity.Unsubscribe(State.Session.TranslateChangedEventListeners[entityUuid])
-        State.Session.TranslateChangedEventListeners[entityUuid] = nil
+    if BrawlState.Session.TranslateChangedEventListeners[entityUuid] ~= nil then
+        Ext.Entity.Unsubscribe(BrawlState.Session.TranslateChangedEventListeners[entityUuid])
+        BrawlState.Session.TranslateChangedEventListeners[entityUuid] = nil
     end
     -- NB: need to account for already-in-motion NPCs also
-    State.Session.TranslateChangedEventListeners[entityUuid] = Ext.Entity.OnCreateDeferred("TranslateChangedEvent", function (movingEntity, _, _)
+    BrawlState.Session.TranslateChangedEventListeners[entityUuid] = Ext.Entity.OnCreateDeferred("TranslateChangedEvent", function (movingEntity, _, _)
         if movingEntity.Uuid and movingEntity.Uuid.EntityUuid and isInFTB(movingEntity) then
             local uuid = movingEntity.Uuid.EntityUuid
             debugPrint(M.Utils.getDisplayName(uuid), "movement while paused")
@@ -379,12 +375,12 @@ local function startTranslateChangedEventListener(entityUuid)
             debugPrint(M.Utils.getDisplayName(uuid), "ActiveMovement")
             debugDump(activeMovement)
             debugPrint(M.Utils.getDisplayName(uuid), "LastClickPosition")
-            debugDump(State.Session.LastClickPosition[uuid])
+            debugDump(BrawlState.Session.LastClickPosition[uuid])
             local goalPosition
             if activeMovement and activeMovement.goalPosition then
                 goalPosition = activeMovement.goalPosition
-            elseif State.Session.LastClickPosition[uuid] and State.Session.LastClickPosition[uuid].position then
-                goalPosition = State.Session.LastClickPosition[uuid].position
+            elseif BrawlState.Session.LastClickPosition[uuid] and BrawlState.Session.LastClickPosition[uuid].position then
+                goalPosition = BrawlState.Session.LastClickPosition[uuid].position
             end
             if goalPosition then
                 lock(movingEntity)
@@ -393,7 +389,7 @@ local function startTranslateChangedEventListener(entityUuid)
                         return Utils.showNotification(uuid, err)
                     end
                     debugPrint("found path (valid)", validPosition[1], validPosition[2], validPosition[3])
-                    State.Session.MovementQueue[uuid] = {validPosition[1], validPosition[2], validPosition[3]}
+                    BrawlState.Session.MovementQueue[uuid] = {validPosition[1], validPosition[2], validPosition[3]}
                 end)
             end
         end
@@ -401,11 +397,11 @@ local function startTranslateChangedEventListener(entityUuid)
 end
 
 local function startSpellCastPrepareEndEventListener(entityUuid)
-    if State.Session.SpellCastPrepareEndEventListeners[entityUuid] ~= nil then
-        Ext.Entity.Unsubscribe(State.Session.SpellCastPrepareEndEventListeners[entityUuid])
-        State.Session.SpellCastPrepareEndEventListeners[entityUuid] = nil
+    if BrawlState.Session.SpellCastPrepareEndEventListeners[entityUuid] ~= nil then
+        Ext.Entity.Unsubscribe(BrawlState.Session.SpellCastPrepareEndEventListeners[entityUuid])
+        BrawlState.Session.SpellCastPrepareEndEventListeners[entityUuid] = nil
     end
-    State.Session.SpellCastPrepareEndEventListeners[entityUuid] = Ext.Entity.OnCreateDeferred("SpellCastPrepareEndEvent", function (cast, _, _)
+    BrawlState.Session.SpellCastPrepareEndEventListeners[entityUuid] = Ext.Entity.OnCreateDeferred("SpellCastPrepareEndEvent", function (cast, _, _)
         if cast.SpellCastState and cast.SpellCastState.Caster then
             local caster = cast.SpellCastState.Caster
             if caster.Uuid.EntityUuid == entityUuid then
@@ -439,14 +435,14 @@ local function startSpellCastPrepareEndEventListener(entityUuid)
                         debugPrint("[ReactionCheck]   -> skipping midActionLock")
                         return
                     end
-                    if State.Settings.NoFreezeOnBonusActionsDuringPause and spell and spell.isBonusAction and M.Osi.IsPartyMember(entityUuid, 1) == 1 then
+                    if BrawlState.Settings.NoFreezeOnBonusActionsDuringPause and spell and spell.isBonusAction and M.Osi.IsPartyMember(entityUuid, 1) == 1 then
                         return
                     end
                     -- If this is the tail-end of a cast that was already in flight when pause hit (flagged in allEnterFTB), let it
                     -- complete without locking. 2s expiry handles the case where the event never fires for this cast.
-                    local expiry = State.Session.PreExistingCastAtPause[entityUuid]
+                    local expiry = BrawlState.Session.PreExistingCastAtPause[entityUuid]
                     if expiry and Ext.Utils.MonotonicTime() < expiry then
-                        State.Session.PreExistingCastAtPause[entityUuid] = nil
+                        BrawlState.Session.PreExistingCastAtPause[entityUuid] = nil
                         return
                     end
                     midActionLock(caster)
@@ -477,40 +473,32 @@ local function startTruePause(entityUuid)
 end
 
 local function queueSingleCompanionAIActions(uuid)
-    if State.Settings.CompanionAIEnabled and State.Session.Players and State.Session.Players[uuid] then
+    if BrawlState.Settings.CompanionAIEnabled and BrawlState.Session.Players and BrawlState.Session.Players[uuid] then
         debugPrint(M.Utils.getDisplayName(uuid), "queueSingleCompanionAIActions")
-        local player = State.Session.Players[uuid]
+        local player = BrawlState.Session.Players[uuid]
         local brawler = M.Roster.getBrawlerByUuid(uuid)
-        if brawler and M.Utils.isAliveAndCanFight(uuid) and (not player.isControllingDirectly or State.Settings.FullAuto) and M.Utils.canAct(uuid) then
+        if brawler and M.Utils.isAliveAndCanFight(uuid) and (not player.isControllingDirectly or BrawlState.Settings.FullAuto) and M.Utils.canAct(uuid) then
             local entity = Ext.Entity.Get(uuid)
-            if State.Settings.TurnBasedSwarmMode then
-                if entity and entity.TurnBased and entity.TurnBased.IsActiveCombatTurn and not entity.TurnBased.RequestedEndTurn then
-                    State.Session.QueuedCompanionAIAction[uuid] = true
-                    debugPrint(player.displayName, "queue action (swarm)")
-                    Swarm.swarmAction(brawler)
-                end
-            else
-                debugPrint(player.displayName, "queue action (ftb)", isInFTB(entity), not isLocked(entity))
-                if isInFTB(entity) and not isLocked(entity) then
-                    AI.act(brawler, false, _D, _D, _D)
-                end
+            debugPrint(player.displayName, "queue action (ftb)", isInFTB(entity), not isLocked(entity)) -- DAG: Swarm Mode stripped
+            if isInFTB(entity) and not isLocked(entity) then
+                AI.act(brawler, false, _D, _D, _D)
             end
         end
     end
 end
 
 local function queueCompanionAIActions()
-    if State.Settings.CompanionAIEnabled and State.Session.Players then
+    if BrawlState.Settings.CompanionAIEnabled and BrawlState.Session.Players then
         debugPrint("queueCompanionAIActions")
-        for uuid, _ in pairs(State.Session.Players) do
+        for uuid, _ in pairs(BrawlState.Session.Players) do
             queueSingleCompanionAIActions(uuid)
         end
     end
 end
 
 local function isPartyInFTB()
-    if State.Session.Players then
-        for uuid, _ in pairs(State.Session.Players) do
+    if BrawlState.Session.Players then
+        for uuid, _ in pairs(BrawlState.Session.Players) do
             if M.Osi.IsInForceTurnBasedMode(uuid) == 1 then
                 return true
             end
@@ -521,9 +509,9 @@ end
 
 local function checkTruePauseParty()
     debugPrint("checkTruePauseParty")
-    local players = State.Session.Players
+    local players = BrawlState.Session.Players
     if players then
-        if State.Settings.TruePause then
+        if BrawlState.Settings.TruePause then
             for uuid, _ in pairs(players) do
                 if Osi.IsInForceTurnBasedMode(uuid) == 1 then
                     startTruePause(uuid)

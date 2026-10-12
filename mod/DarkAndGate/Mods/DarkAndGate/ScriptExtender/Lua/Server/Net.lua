@@ -5,6 +5,7 @@
 
 local Log = Ext.Require("Shared/Log.lua")
 local Net = Ext.Require("Shared/Net.lua")
+local Brawl = Ext.Require("Server/BrawlAdapter.lua")   -- IsTurnBased (real-time fights)
 
 local M = {}
 
@@ -155,9 +156,10 @@ handlers[Net.Channels.PlayAnimRequest] = function(payload, userId)
         end
         -- fix5: in BG3 turn-based combat a scripted PlayAnimation on the
         -- player queues an action that never finishes outside your turn,
-        -- which left Gale unable to walk. Skip swing anims while in combat.
-        local okC, inC = pcall(function() return Osi.IsInCombat(uuid) end)
-        if okC and tonumber(inC) == 1 and not payload.force then
+        -- which left Gale unable to walk. Real-time fights (Brawl) keep the
+        -- party's turn active, so only a really turn-based fight (!dag_rt
+        -- off, or the party paused into force-turn-based) skips the clip.
+        if Brawl.IsTurnBased(uuid) and not payload.force then
             Log.Write("Net: PlayAnim skipped (in turn-based combat) anim=" .. tostring(payload.animId))
             return
         end

@@ -11,7 +11,7 @@ end
 local function calculateMeanInitiativeRoll()
     local totalInitiativeRoll = 0
     local numInitiativeRolls = 0
-    for uuid, _ in pairs(State.Session.Players) do
+    for uuid, _ in pairs(BrawlState.Session.Players) do
         if Utils.isAliveAndCanFight(uuid) then
             local entity = Ext.Entity.Get(uuid)
             if entity and entity.CombatParticipant and entity.CombatParticipant.InitiativeRoll and entity.CombatParticipant.InitiativeRoll > 0 then
@@ -31,7 +31,7 @@ end
 local function calculateMaxEnemyInitiativeRoll()
     local maxRoll
     for uuid, _ in pairs(M.Roster.getBrawlers()) do
-        if not State.Session.Players[uuid] and not M.Utils.isCombatHelper(uuid) then
+        if not BrawlState.Session.Players[uuid] and not M.Utils.isCombatHelper(uuid) then
             local roll = getInitiativeRoll(uuid)
             if roll and (not maxRoll or roll > maxRoll) then
                 maxRoll = roll
@@ -43,11 +43,11 @@ end
 
 local function calculateActionInterval(initiative)
     if not initiative then
-        return math.floor(1000*State.Settings.ActionInterval + 0.5)
+        return math.floor(1000*BrawlState.Settings.ActionInterval + 0.5)
     end
     local r = Constants.ACTION_INTERVAL_RESCALING
     local scale = 1 + r - 4*r*initiative/(2*math.abs(initiative) + M.Utils.getInitiativeDie() + 1)
-    return math.max(Constants.MINIMUM_ACTION_INTERVAL, math.floor(1000*State.Settings.ActionInterval*scale + 0.5))
+    return math.max(Constants.MINIMUM_ACTION_INTERVAL, math.floor(1000*BrawlState.Settings.ActionInterval*scale + 0.5))
 end
 
 local function setInitiativeRoll(uuid, roll)
@@ -69,13 +69,13 @@ local function setInitiativeRoll(uuid, roll)
 end
 
 local function setPartyInitiativeRollToMean()
-    if State.Session.MeanInitiativeRoll then
+    if BrawlState.Session.MeanInitiativeRoll then
         return
     end
     debugPrint("setting party init roll to mean...")
     local mean = calculateMeanInitiativeRoll()
     if mean then
-        State.Session.MeanInitiativeRoll = mean
+        BrawlState.Session.MeanInitiativeRoll = mean
     end
 end
 
@@ -119,13 +119,13 @@ end
 
 -- Captures pre-mutate values into the natural-init cache before forcing the mean
 local function equalizePartyInitiative()
-    if not State.Session.MeanInitiativeRoll then
+    if not BrawlState.Session.MeanInitiativeRoll then
         return
     end
-    for uuid, _ in pairs(State.Session.Players) do
+    for uuid, _ in pairs(BrawlState.Session.Players) do
         if Utils.isAliveAndCanFight(uuid) then
             cacheNaturalInitiativeIfMissing(uuid)
-            setInitiativeRoll(uuid, State.Session.MeanInitiativeRoll)
+            setInitiativeRoll(uuid, BrawlState.Session.MeanInitiativeRoll)
         end
     end
 end
@@ -141,9 +141,9 @@ local function bumpNpcInitiativeRoll(uuid)
 end
 
 local function bumpNpcInitiativeRolls()
-    if State.Session.MeanInitiativeRoll then
+    if BrawlState.Session.MeanInitiativeRoll then
         for uuid, _ in pairs(M.Roster.getBrawlers()) do
-            if not State.Session.Players[uuid] and not M.Utils.isCombatHelper(uuid) and getInitiativeRoll(uuid) == State.Session.MeanInitiativeRoll then
+            if not BrawlState.Session.Players[uuid] and not M.Utils.isCombatHelper(uuid) and getInitiativeRoll(uuid) == BrawlState.Session.MeanInitiativeRoll then
                 bumpNpcInitiativeRoll(uuid)
             end
         end
@@ -152,8 +152,8 @@ end
 
 local function setPlayersSwarmGroup(swarmGroupLabel)
     debugPrint("setPlayersSwarmGroup", swarmGroupLabel)
-    if State.Session.Players then
-        for uuid, _ in pairs(State.Session.Players) do
+    if BrawlState.Session.Players then
+        for uuid, _ in pairs(BrawlState.Session.Players) do
             Osi.RequestSetSwarmGroup(uuid, swarmGroupLabel or "PLAYER_SWARM_GROUP")
         end
     end
@@ -214,7 +214,7 @@ end
 
 -- thank u hippo
 local function spawnCombatHelper(combatGuid, isRefreshOnly)
-    if not State.Session.CombatHelper or isRefreshOnly then
+    if not BrawlState.Session.CombatHelper or isRefreshOnly then
         debugPrint("Spawn combat helper", combatGuid, isRefreshOnly)
         local playerUuid = Osi.CombatGetInvolvedPlayer(combatGuid, 1) or M.Osi.GetHostCharacter()
         local x, y, z = Osi.GetPosition(playerUuid)
@@ -226,7 +226,7 @@ local function spawnCombatHelper(combatGuid, isRefreshOnly)
         Osi.SetTag(combatHelper, "9787450d-f34d-43bd-be88-d2bac00bb8ee") -- AI_UNPREFERRED_TARGET
         Osi.SetFaction(combatHelper, Constants.COMBAT_HELPER.faction)
         if not isRefreshOnly then
-            State.Session.CombatHelper = combatHelper
+            BrawlState.Session.CombatHelper = combatHelper
         end
         Ext.Loca.UpdateTranslatedString(Constants.COMBAT_HELPER.handle, "Combat Helper")
         Osi.SetHostileAndEnterCombat(Constants.COMBAT_HELPER.faction, Osi.GetFaction(playerUuid), combatHelper, playerUuid)
@@ -303,7 +303,7 @@ local function bumpInitiativeRolls(intendedSet)
     local target = maxEnemy + 1
     -- Diagnostic: each setInitiativeRoll below replicates CombatState -- engine may reassign ClientControl
     local controllingNames = {}
-    for uuid, player in pairs(State.Session.Players) do
+    for uuid, player in pairs(BrawlState.Session.Players) do
         if player.isControllingDirectly then
             table.insert(controllingNames, M.Utils.getDisplayName(uuid) or uuid)
         end
@@ -312,7 +312,7 @@ local function bumpInitiativeRolls(intendedSet)
         maxEnemy, target,
         #controllingNames > 0 and table.concat(controllingNames, ",") or "<none>",
         intendedSet and "explicit" or "nil"))
-    for uuid, player in pairs(State.Session.Players) do
+    for uuid, player in pairs(BrawlState.Session.Players) do
         local controlled = player.isControllingDirectly or (intendedSet and intendedSet[uuid])
         if controlled then
             setInitiativeRoll(uuid, target + 1)
@@ -345,7 +345,7 @@ local function reorderPlayersByControl(reorderedGroups, group, isDirectlyControl
     for _, member in ipairs(group.Members) do
         if member.Entity and member.Entity and member.Entity.Uuid then
             local uuid = member.Entity.Uuid.EntityUuid
-            if uuid and State.isPlayerControllingDirectly(uuid) == isDirectlyControlled then
+            if uuid and BrawlState.isPlayerControllingDirectly(uuid) == isDirectlyControlled then
                 local initiative = getInitiativeRoll(uuid)
                 table.insert(reorderedGroups, {
                     Initiative = initiative,
@@ -360,19 +360,19 @@ local function reorderPlayersByControl(reorderedGroups, group, isDirectlyControl
 end
 
 local function stopListeners(combatGuid)
-    if State.Session.TurnOrderListener[combatGuid] then
-        Ext.Entity.Unsubscribe(State.Session.TurnOrderListener[combatGuid])
-        State.Session.TurnOrderListener[combatGuid] = nil
+    if BrawlState.Session.TurnOrderListener[combatGuid] then
+        Ext.Entity.Unsubscribe(BrawlState.Session.TurnOrderListener[combatGuid])
+        BrawlState.Session.TurnOrderListener[combatGuid] = nil
     end
-    if State.Session.BoostChangedEventListener[combatGuid] then
-        Ext.Entity.Unsubscribe(State.Session.BoostChangedEventListener[combatGuid])
-        State.Session.BoostChangedEventListener[combatGuid] = nil
+    if BrawlState.Session.BoostChangedEventListener[combatGuid] then
+        Ext.Entity.Unsubscribe(BrawlState.Session.BoostChangedEventListener[combatGuid])
+        BrawlState.Session.BoostChangedEventListener[combatGuid] = nil
     end
-    if State.Session.RefresherCombatHelper[combatGuid] then
-        for _, refresherUuid in ipairs(State.Session.RefresherCombatHelper[combatGuid]) do
+    if BrawlState.Session.RefresherCombatHelper[combatGuid] then
+        for _, refresherUuid in ipairs(BrawlState.Session.RefresherCombatHelper[combatGuid]) do
             Utils.remove(refresherUuid)
         end
-        State.Session.RefresherCombatHelper[combatGuid] = nil
+        BrawlState.Session.RefresherCombatHelper[combatGuid] = nil
     end
 end
 
@@ -437,7 +437,7 @@ local function setPlayerTurnsActive()
     -- Collect all directly-controlled chars (in MP each user has their own).
     local controlledSet = {}
     local controlledList = {}
-    for uuid, player in pairs(State.Session.Players) do
+    for uuid, player in pairs(BrawlState.Session.Players) do
         if player.isControllingDirectly then
             controlledSet[uuid] = true
             table.insert(controlledList, uuid)
@@ -446,16 +446,16 @@ local function setPlayerTurnsActive()
     -- Fallback: at round turnover the engine transiently deselects the controlled character (ClientControl component removed), so no player
     -- has isControllingDirectly=true when we run.  Use the cached last-known controlled uuids (per-user) so the player ordering still puts
     -- the right chars first.
-    if #controlledList == 0 and State.Session.LastControlledUuid then
-        for _, cachedUuid in pairs(State.Session.LastControlledUuid) do
-            if State.Session.Players[cachedUuid] and not controlledSet[cachedUuid] then
+    if #controlledList == 0 and BrawlState.Session.LastControlledUuid then
+        for _, cachedUuid in pairs(BrawlState.Session.LastControlledUuid) do
+            if BrawlState.Session.Players[cachedUuid] and not controlledSet[cachedUuid] then
                 controlledSet[cachedUuid] = true
                 table.insert(controlledList, cachedUuid)
             end
         end
     end
     local otherUuids = {}
-    for uuid, _ in pairs(State.Session.Players) do
+    for uuid, _ in pairs(BrawlState.Session.Players) do
         if not controlledSet[uuid] then
             table.insert(otherUuids, uuid)
         end
@@ -484,19 +484,19 @@ local function setPlayerTurnsActive()
     -- (Per-index writes leave behind duplicate-player ghosts in the slots originally held by enemies - see prior memory.)
     combatEntity.TurnOrder.Groups = groupsPlayers
     local uuid = combatEntity.CombatState.MyGuid
-    if State.Session.TurnOrderListener[uuid] then
-        Ext.Entity.Unsubscribe(State.Session.TurnOrderListener[uuid])
-        State.Session.TurnOrderListener[uuid] = nil
+    if BrawlState.Session.TurnOrderListener[uuid] then
+        Ext.Entity.Unsubscribe(BrawlState.Session.TurnOrderListener[uuid])
+        BrawlState.Session.TurnOrderListener[uuid] = nil
     end
-    State.Session.TurnOrderListener[uuid] = Ext.Entity.Subscribe("TurnOrder", function (entity, _, _)
+    BrawlState.Session.TurnOrderListener[uuid] = Ext.Entity.Subscribe("TurnOrder", function (entity, _, _)
         if entity and entity.CombatState and entity.CombatState.MyGuid then
-            Ext.Entity.Unsubscribe(State.Session.TurnOrderListener[uuid])
+            Ext.Entity.Unsubscribe(BrawlState.Session.TurnOrderListener[uuid])
             local refresher = spawnCombatHelper(uuid, true)
             if refresher then
-                if not State.Session.RefresherCombatHelper[uuid] then
-                    State.Session.RefresherCombatHelper[uuid] = {}
+                if not BrawlState.Session.RefresherCombatHelper[uuid] then
+                    BrawlState.Session.RefresherCombatHelper[uuid] = {}
                 end
-                table.insert(State.Session.RefresherCombatHelper[uuid], refresher)
+                table.insert(BrawlState.Session.RefresherCombatHelper[uuid], refresher)
             end
         end
     end, combatEntity)
