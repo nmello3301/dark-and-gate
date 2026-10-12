@@ -92,6 +92,8 @@ Ext.Require("Client/BrawlClient.lua").Register()
 Ext.Require("Shared/TickBudget.lua").Register()
 Ext.Require("Client/LookAt.lua").Register()
 Ext.Require("Client/HUD/Overlay.lua").Register()
+-- F: tap = interact with what the crosshair is on, hold = revive.
+Ext.Require("Client/Interact.lua").Register()
 Ext.Require("Shared/ConsoleForward.lua").Forward({
     "dag_ai", "dag_ai_aim", "dag_ai_react", "dag_ai_debug", "dag_shield_pct", "dag_shield_debug",
 })

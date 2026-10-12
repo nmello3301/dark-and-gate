@@ -74,7 +74,20 @@ local ANIM_WATCHDOG_MS = 300
 local animState = {}   -- uuid -> { endsAt = ms }
 local queueFnsLogged = false
 
+-- F interaction (Server/Combat/Interact.lua): Osi.Use / Osi.Pickup are queued
+-- Osiris tasks (walk up, use animation). Purging the queue for a swing or a
+-- jump clip would cancel them, so it is skipped while one runs.
+local interacting = {}   -- bare uuid -> until ms
+local function bare(u) u = tostring(u or ""); return u:match("(%x+%-%x+%-%x+%-%x+%-%x+)$") or u end
+function M.SetInteracting(uuid, untilMs) interacting[bare(uuid)] = untilMs end
+
 local function clearOsirisQueue(uuid, why)
+    local until_ = interacting[bare(uuid)]
+    if until_ and (tonumber(Ext.Timer.MonotonicTime()) or 0) < until_ then
+        Log.Write(string.format("Net: Osiris queue NOT cleared on %s (%s): an interaction is running", uuid, why))
+        return
+    end
+    interacting[bare(uuid)] = nil
     local results = {}
     for _, fn in ipairs({ "PurgeOsirisQueue", "FlushOsirisQueue" }) do
         local ok, err = pcall(function() return Osi[fn](uuid) end)

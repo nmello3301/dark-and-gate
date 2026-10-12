@@ -43,8 +43,13 @@ local ClientNet = Ext.Require("Client/Net.lua")
 local Hud       = Ext.Require("Client/HUD/Hud.lua")
 local HotbarMenu = Ext.Require("Client/HUD/HotbarMenu.lua")
 local hudCfg    = Ext.Require("data/hud.lua")
+local Interact  = Ext.Require("Client/Interact.lua")
 
 local M = {}
+
+-- key name -> fn() on key down (Client/Crouch.lua "C", Client/Companions.lua "V").
+M.extraKeys = {}
+function M.AddKey(key, fn) M.extraKeys[key] = fn end
 
 local rawLog = false
 
@@ -84,6 +89,19 @@ local function onMouse(event)
     local lmb, rmb = isLMB(button), isRMB(button)
     if not lmb and not rmb then return end
 
+    -- A BG3 panel is open (inventory, loot, trade, map...; Hud sets
+    -- uiPaused): the click is the UI's, no swing / cast (DECISIONS 2026-10-12).
+    if State.uiPaused then
+        if not pressed and State.blocking then State.blocking = false end
+        return
+    end
+    -- Downed: the mouse orbits / the buttons spin the camera (Client/Downed.lua).
+    if State.downed then
+        if State.downedMouse then State.downedMouse(lmb, pressed) end
+        prevent(event)
+        return
+    end
+
     -- UI mode: cursor visible -> leave mouse buttons to the vanilla game.
     if not State.MouseLookOn() then
         if pressed then
@@ -109,9 +127,11 @@ local function onMouse(event)
                     State.armedSpell = nil
                     State.armedAt = nil
                     Log.Write("Combat: LMB releases " .. tostring(armed))
+                    Interact.CancelRevive("cast")
                     if not Spells.Cast(armed) then Prepare.Stop("cast aborted") end
                 end
             else
+                Interact.CancelRevive("swing")
                 Swing.OnLMB()
             end
         end
@@ -174,17 +194,42 @@ local function onKey(event)
     end
 
     -- H pins the Prepare Hotbar menu (Client/HUD/HotbarMenu.lua) in first
-    -- person; BG3's own H (alchemy) is kept outside first person.
-    if key == HOTBAR_TOGGLE_KEY and State.IsCombatActive() then
+    -- person; BG3's own H (alchemy) is kept outside first person and while a
+    -- BG3 panel is open.
+    if key == HOTBAR_TOGGLE_KEY and State.IsCombatActive() and not State.uiPaused then
         if evt == "KeyDown" and not event.Repeat then HotbarMenu.TogglePinned() end
         prevent(event)
         return
     end
 
     if not State.IsCombatActive() then return end
+    -- A BG3 panel is open: every key is the UI's (Space takes all in a loot
+    -- window, 1-0 / R / T don't fire ours...). DECISIONS 2026-10-12.
+    if State.uiPaused then return end
+
+    -- Downed: keys orbit / cycle the spectated ally (Client/Downed.lua).
+    if State.downed then
+        if State.downedKey and State.downedKey(key, evt == "KeyDown", event.Repeat) then prevent(event) end
+        return
+    end
+
+    -- F: tap = interact, hold = revive a downed ally (Client/Interact.lua).
+    if key == Interact.KEY then
+        Interact.OnKey(event, evt)
+        prevent(event)
+        return
+    end
+
+    -- Extra keys owned by other modules (C crouch, V companion mode).
+    local extra = M.extraKeys[key]
+    if extra then
+        if evt == "KeyDown" and not event.Repeat then extra() end
+        prevent(event)
+        return
+    end
 
     if isJumpKey(key) then
-        if evt == "KeyDown" and not event.Repeat then Jump.OnSpace() end
+        if evt == "KeyDown" and not event.Repeat then Interact.CancelRevive("jump"); Jump.OnSpace() end
         -- Block vanilla Space on both down and up.
         prevent(event)
         return
@@ -193,7 +238,7 @@ local function onKey(event)
     -- Potions (data/hud.lua potion_keys, default R = health, T = mana).
     local potion = (key == hudCfg.potion_keys.health and "health") or (key == hudCfg.potion_keys.mana and "mana") or nil
     if potion then
-        if evt == "KeyDown" and not event.Repeat then Hud.UsePotion(potion) end
+        if evt == "KeyDown" and not event.Repeat then Interact.CancelRevive("potion"); Hud.UsePotion(potion) end
         prevent(event)
         return
     end
@@ -202,6 +247,7 @@ local function onKey(event)
     if slot then
         if evt == "KeyDown" and not event.Repeat then
             Log.Write(string.format("Combat Input: hotbar key %s -> slot %d", key, slot))
+            Interact.CancelRevive("cast")
             Hotbar.PressSlot(slot)
         end
         -- Block the vanilla hotbar on both down and up.

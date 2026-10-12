@@ -8,10 +8,21 @@
 --   loot    a corpse the story doesn't block (DB_CustomLootCorpseResponse)
 --   door / close / locked / open / pickup / use / climb   items
 --   none    anything else
+--
+-- Request (InteractRequest -> InteractResult): F on it starts it at once,
+-- the way a click would (docs/spikes/lookat.md):
+--   talk    Osi.DialogStartRequested(npc, player): the engine's own event, so
+--           every story handler runs exactly as for a click
+--   loot    Osi.OpenCharacterLootUI(player, corpse)
+--   pickup  Osi.Pickup(player, item, "DAG_Pickup", 1)
+--   others  Osi.Use(player, item, 1, 1, "DAG_Interact"): vanilla's pattern for
+--           a player opening a door or climbing a ladder (walks up, animates)
+-- Refused when farther than data/interact.lua server_reach_m.
 
 local Log   = Ext.Require("Shared/Log.lua")
 local Net   = Ext.Require("Shared/Net.lua")
 local Party = Ext.Require("Server/Party.lua")
+local ServerNet = Ext.Require("Server/Net.lua")
 local cfg   = Ext.Require("data/interact.lua")
 
 local M = {}
@@ -77,8 +88,68 @@ function M.Classify(player, target)
     return "none", name
 end
 
+local function distance(a, b)
+    local ok, d = pcall(function() return Osi.GetDistanceTo(a, b) end)
+    return ok and tonumber(d) or nil
+end
+
+local function start(player, target, kind)
+    local name = displayName(target)
+    if kind == "talk" then
+        local ok, err = pcall(function() Osi.DialogStartRequested(target, player) end)
+        return ok, ok and "DialogStartRequested (the engine's click-to-talk event)" or ("DialogStartRequested ERROR " .. tostring(err))
+    elseif kind == "loot" then
+        local ok, r = pcall(function() return Osi.OpenCharacterLootUI(player, target) end)
+        return ok, ok and ("OpenCharacterLootUI -> " .. tostring(r)) or ("OpenCharacterLootUI ERROR " .. tostring(r))
+    elseif kind == "pickup" then
+        ServerNet.SetInteracting(player, (tonumber(Ext.Timer.MonotonicTime()) or 0) + 5000)
+        local ok, err = pcall(function() Osi.Pickup(player, target, "DAG_Pickup", 1) end)
+        return ok, ok and "Osi.Pickup" or ("Osi.Pickup ERROR " .. tostring(err))
+    end
+    ServerNet.SetInteracting(player, (tonumber(Ext.Timer.MonotonicTime()) or 0) + 6000)
+    local ok, err = pcall(function() Osi.Use(player, target, 1, 1, "DAG_Interact") end)
+    return ok, ok and string.format("Osi.Use(%s, 1, 1)", tostring(name)) or ("Osi.Use ERROR " .. tostring(err))
+end
+
 local logged = {}
 function M.Register()
+    Ext.RegisterNetListener(Net.Channels.InteractRequest, function(_, payload, peer)
+        local ok, p = pcall(Ext.Json.Parse, payload)
+        if not ok or type(p) ~= "table" or not p.target then return end
+        Ext.OnNextTick(function()
+            local player = Party.CharacterOfPeer(peer)
+            local target = Party.Norm(p.target)
+            local kind, name = M.Classify(player, target)
+            local d = distance(player, target)
+            local okS, how
+            if kind == "none" then
+                okS, how = false, "not interactive"
+            elseif d and d > (cfg.server_reach_m or 6) then
+                okS, how = false, string.format("too far (%.1f m)", d)
+            else
+                okS, how = start(player, target, kind)
+            end
+            Log.Write(string.format("Interact: %s -> [F] %s %s (%s, %s m): %s", displayName(player) or tostring(player), cfg.verbs[kind] or kind,
+                tostring(name), tostring(target), d and string.format("%.1f", d) or "?", how))
+            pcall(function()
+                Ext.Net.PostMessageToUser(peer, Net.Channels.InteractResult, Ext.Json.Stringify({ target = target, ok = okS, how = how }))
+            end)
+        end)
+    end)
+    -- The interaction's Osiris task is over: our queue purges may run again.
+    local function done(char) ServerNet.SetInteracting(Party.Norm(char), nil) end
+    Ext.Osiris.RegisterListener("UseFinished", 3, "after", function(char, item, okUse)
+        done(char)
+        Log.Write(string.format("Interact: %s finished using %s (%s)", tostring(displayName(char)), tostring(displayName(item) or item),
+            tonumber(okUse) == 1 and "ok" or "failed"))
+    end)
+    Ext.Osiris.RegisterListener("PickupFailed", 2, "after", function(char, item)
+        done(char)
+        Log.Write(string.format("Interact: %s could not pick up %s", tostring(displayName(char)), tostring(displayName(item) or item)))
+    end)
+    Ext.Osiris.RegisterListener("EntityEvent", 2, "after", function(obj, ev)
+        if ev == "DAG_Interact" or ev == "DAG_Pickup" then done(obj) end
+    end)
     Ext.RegisterNetListener(Net.Channels.InteractClassify, function(_, payload, peer)
         local ok, p = pcall(Ext.Json.Parse, payload)
         if not ok or type(p) ~= "table" or not p.target then return end
@@ -101,7 +172,7 @@ function M.Register()
             end)
         end)
     end)
-    Log.Write("Interact: registered (classify)")
+    Log.Write("Interact: registered (classify + F requests)")
 end
 
 return M

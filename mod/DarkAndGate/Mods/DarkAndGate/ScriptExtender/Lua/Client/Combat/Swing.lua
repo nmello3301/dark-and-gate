@@ -173,6 +173,8 @@ end
 local function tick()
     local s = State.currentSwing
     if not s then buffered = false; return end
+    -- A BG3 panel opened: a click buffered before it must not fire later.
+    if State.uiPaused and buffered then buffered = false; Log.Write("Swing: buffered LMB dropped (a BG3 panel opened)") end
     local now = nowMs()
     if buffered and now >= s.recoveryUntil then
         buffered = false

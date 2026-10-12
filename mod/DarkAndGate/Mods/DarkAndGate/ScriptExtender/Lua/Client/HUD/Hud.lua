@@ -548,6 +548,15 @@ local function tick()
     -- give it to ImGui and the camera would stay stuck until MMB twice).
     local free = active and (menu or HotbarMenu.Pinned())
     local t0 = now()
+    -- Our input capture pauses while a BG3 panel is open and for the same
+    -- release tail as mouse-look (Client/Combat/Input.lua; our own pinned
+    -- Prepare Hotbar menu keeps the keys).
+    if active and menu then M.vanillaAt = t0 end
+    local paused = active and (menu or (M.vanillaAt ~= nil and t0 - M.vanillaAt < (cfg.menu_release_ms or 200)))
+    if paused ~= (State.uiPaused == true) then
+        State.uiPaused = paused
+        Log.Write("Hud: our input capture " .. (paused and ("PAUSED (" .. tostring(menuName) .. " open)") or "back on"))
+    end
     if free then
         M.releaseAt = nil
         if not M.menuOpen then
