@@ -15,7 +15,10 @@ All reactions are **disabled** in fights for now (Server/Combat/NoReactions.lua)
 | Shield (spell) | disabled | First to return: a short timed window after a hit lands (key press, mana cost), like an active block. |
 | Counterspell | disabled | First to return: needs enemy cast bars (M4) so a player can see what to counter, then a key during the enemy's cast time. |
 | Hellish Rebuke | disabled | Automatic retaliation on being hit, with a cooldown? |
-| Other interrupts (Divine Smite prompts, Uncanny Dodge, Deflect Missiles, Cutting Words…) | disabled | One by one. Most become an "on hit" choice that real time can't pause for: either automatic with a cooldown, or a key in a short window. |
+| Other reaction interrupts (Uncanny Dodge, Deflect Missiles, Cutting Words, Sentinel, Mage Slayer, Warding Flare…) | disabled | One by one. Most become an "on hit" choice that real time can't pause for: either automatic with a cooldown, or a key in a short window. |
+| Interrupts that cost no reaction (Divine Smite prompts, Lucky, Portent, Bardic / Combat Inspiration, Tides of Chaos…) | as is | Not blocked by `DAG_NO_REACTIONS` (148 of the 253 interrupts cost no reaction). Our hits (`Osi.ApplyDamage`, impact clones) never trigger on-hit interrupts, so these should stay silent; revisit if a prompt shows up in a fight. |
+
+How it's done: every fighter in a real-time fight gets the hidden status `DAG_NO_REACTIONS` (`Public/DarkAndGate/Stats/Generated/Data/DAG_Combat.txt`): `ActionResourceBlock(ReactionActionPoint)`, BG3's own "can't take reactions" lever (Shocking Grasp), plus `ActionResourceBlock(SneakAttack_Charge)`.
 
 ## Damage features
 

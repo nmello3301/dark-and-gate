@@ -39,9 +39,14 @@ function M.Register()
         Log.Write("Swing debug: " .. (State.swingDebug and "ON" or "OFF"))
     end)
 
-    Ext.RegisterConsoleCommand("dag_rt", function(_, arg)
-        State.realTime = not (arg == "off" or arg == "0")
-        Log.Write("Real-time combat: " .. (State.realTime and "ON" or "OFF"))
+    -- !dag_rt on|off|status|debug: Brawl's loop runs on the server
+    -- (Server/BrawlAdapter.lua); typed here it is forwarded there.
+    Ext.RegisterConsoleCommand("dag_rt", function(_, arg, arg2)
+        if arg == "on" or arg == "off" or arg == "1" or arg == "0" then
+            State.realTime = not (arg == "off" or arg == "0")
+        end
+        ClientNet.Send(Net.Channels.ServerCommand, { cmd = "dag_rt", args = { arg, arg2 } })
+        Log.Write("Real-time combat: !dag_rt " .. tostring(arg or "status") .. " -> server (client flag " .. (State.realTime and "ON" or "OFF") .. ")")
     end)
 
     -- !dag_spawn_dummy [hostile] [name-filter]

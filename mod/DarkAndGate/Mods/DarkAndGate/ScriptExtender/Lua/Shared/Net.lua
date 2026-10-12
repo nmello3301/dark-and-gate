@@ -100,6 +100,39 @@ Net.Channels = {
     ProjectileLaunch  = "DAG_ProjectileLaunch",
     ProjectileHit     = "DAG_ProjectileHit",
     JumpLift          = "DAG_JumpLift",
+
+    -- Real-time combat pass (2026-10-12, docs/playtest/realtime-combat.md).
+    -- Client -> server: a server console command typed in the client
+    -- console (Shared/ConsoleForward.lua). { cmd, args = { ... } }
+    ServerCommand     = "DAG_ServerCommand",
+    -- Server -> client(s): a short on-screen message (Client/HUD/Overlay.lua).
+    -- { text, secs?, kind? }
+    Toast             = "DAG_Toast",
+    -- Downed / bleed-out / revive (Server/Combat/Downed.lua, Client/Downed.lua).
+    -- Server -> clients: DownedState { uuid, name, state = "downed"|"up"|"dead",
+    --   left = s, total = s, paused, reviver?, reviverName?, progress = 0..1 }
+    -- Client -> server: ReviveHold { target, hold = true|false } (F held near a
+    --   downed ally; false = F let go or another action cancels it).
+    DownedState       = "DAG_DownedState",
+    ReviveHold        = "DAG_ReviveHold",
+    -- F interaction (Client/LookAt.lua + Client/Interact.lua, Server/Combat/Interact.lua).
+    -- Client -> server: InteractClassify { target }  (what is this?)
+    --                   InteractRequest  { target }  (F tapped on it)
+    -- Server -> client: InteractInfo { target, kind, verb, name } (kind "none" = not interactive)
+    --                   InteractResult { target, ok, how }
+    InteractClassify  = "DAG_InteractClassify",
+    InteractInfo      = "DAG_InteractInfo",
+    InteractRequest   = "DAG_InteractRequest",
+    InteractResult    = "DAG_InteractResult",
+    -- Crouch = BG3 sneaking (Client/Crouch.lua, Server/Combat/Stealth.lua).
+    -- Client -> server: CrouchToggle {}; server -> clients: CrouchState { uuid, on }.
+    CrouchToggle      = "DAG_CrouchToggle",
+    CrouchState       = "DAG_CrouchState",
+    -- V companion mode (Server/Companions.lua). Client -> server: CompanionMode {}.
+    CompanionMode     = "DAG_CompanionMode",
+    -- Teleport / fast travel: server -> the owning client, re-settle first
+    -- person (FullPov). { why }
+    PovSettle         = "DAG_PovSettle",
 }
 
 -- Every channel both sides care about. Both server and client must register
@@ -131,6 +164,18 @@ Net.AllChannels = {
     Net.Channels.ProjectileLaunch,
     Net.Channels.ProjectileHit,
     Net.Channels.JumpLift,
+    Net.Channels.ServerCommand,
+    Net.Channels.Toast,
+    Net.Channels.DownedState,
+    Net.Channels.ReviveHold,
+    Net.Channels.InteractClassify,
+    Net.Channels.InteractInfo,
+    Net.Channels.InteractRequest,
+    Net.Channels.InteractResult,
+    Net.Channels.CrouchToggle,
+    Net.Channels.CrouchState,
+    Net.Channels.CompanionMode,
+    Net.Channels.PovSettle,
 }
 
 return Net

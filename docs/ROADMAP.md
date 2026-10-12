@@ -212,6 +212,21 @@ Checklist folded in from the old step 0. These items were written on 2026-10-09 
 - [ ] Our swings, spells, mana and jump keep working while the loop runs. Remove the "skip swing animations in turn-based" workaround.
 - [ ] Dialogue and cutscenes pause the fight and resume it, and the fight ends cleanly. Companions take part through Brawl; their M3 behaviour comes later.
 
+**Real-time rules (task of 2026-10-12, Part 1).** Built 2026-10-12, not yet verified in-game:
+- [ ] Brawl's loop drives every fight: hostile groups never drop into turn-based, vanilla combat groups join together, `!dag_rt off` gives BG3's turn-based back (debugging only; also typed in the client console).
+- [ ] 1 turn = 6 s, logged the first time each timed status lands in a fight (`RT: status BLESS on Gale: 10 turns -> 60 s`).
+- [ ] Reactions and Sneak Attack are off in real-time fights: the hidden status `DAG_NO_REACTIONS` (`ActionResourceBlock(ReactionActionPoint)` + `ActionResourceBlock(SneakAttack_Charge)`) on every fighter, removed when it leaves combat or on `!dag_rt off` (`Server/Combat/NoReactions.lua`).
+
+Rework notes, one per disabled rule (full table in [rework-list.md](rework-list.md)):
+- [ ] Opportunity attacks: real-time melee has no "leaving reach" moment. Could return as a free swing when an enemy turns its back inside your reach.
+- [ ] Riposte: fits the M2 parry window.
+- [ ] Shield (spell): first to return, as a short timed window after a hit lands (key + mana), like an active block.
+- [ ] Counterspell: first to return, once enemy cast bars exist (M4): a key during the enemy's cast time.
+- [ ] Hellish Rebuke: automatic retaliation on being hit, with a cooldown?
+- [ ] Other reaction interrupts (Uncanny Dodge, Deflect Missiles, Cutting Words, Sentinel, Mage Slayer, Warding Flare…): one by one, automatic with a cooldown or a key in a short window.
+- [ ] Sneak Attack: hits from behind or on targets that don't see you (stealth detection), once per 6 s.
+- [ ] Interrupts that cost no reaction (Divine Smite prompts, Lucky, Portent, Bardic Inspiration…) are not blocked by the status. Our hits never trigger on-hit interrupts; revisit if a prompt shows up in a real-time fight.
+
 **Pass C: enemies use our combat rules.**
 - [ ] AI melee goes through our swing scheduler and hit check, validated by the same server code as the player's swings (DECISIONS 2026-10-08). Goblin archers' shots go on the projectile system.
 - [ ] Getting hit: reaction and damage. A hit does **not** interrupt the player's channel (DECISIONS 2026-10-12).

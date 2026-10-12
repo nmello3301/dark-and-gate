@@ -22,6 +22,7 @@
 
 local Log = Ext.Require("Shared/Log.lua")
 local cfg = Ext.Require("data/realtime.lua")
+local ConsoleForward = Ext.Require("Shared/ConsoleForward.lua")
 
 local Adapter = { listening = false }
 
@@ -144,7 +145,23 @@ local function registerStateLog()
         end
         fire("CombatRoundStarted", combatGuid, round)
     end)
+    -- 1 turn = 6 s: the first time each timed status lands during a
+    -- real-time fight, log its turns and the seconds it got ("BLESS 10 turns
+    -- -> 60 s"). Brawl ticks enemy statuses 6 s per round (Spells.lua).
+    local seenStatus = {}
+    Ext.Osiris.RegisterListener("StatusApplied", 4, "after", function(obj, status)
+        if not fight.active or not Adapter.Enabled() or seenStatus[status] then return end
+        seenStatus[status] = true
+        local okT, turns = pcall(function() return Osi.GetStatusTurns(obj, status) end)
+        local okL, left = pcall(function() return Osi.GetStatusCurrentLifetime(obj, status) end)
+        turns, left = okT and tonumber(turns) or nil, okL and tonumber(left) or nil
+        if not turns or turns <= 0 or not left or left <= 0 then return end
+        Log.Write(string.format("RT: status %s on %s: %d turns -> %.0f s (1 turn = %.0f s)", tostring(status), name(obj), turns, left,
+            tonumber(BrawlState.Settings.CombatRoundDuration) or 6))
+    end)
 end
+
+function Adapter.InFight() return fight.active end
 
 -- ---------------------------------------------------------------------
 -- On / off
@@ -236,7 +253,8 @@ function Adapter.Register()
             or ("RT: Brawl session start FAILED: " .. tostring(err)))
     end)
 
-    Ext.RegisterConsoleCommand("dag_rt", function(_, a, b)
+    -- Also typed in the client console (Shared/ConsoleForward.lua).
+    ConsoleForward.Server("dag_rt", function(_, a, b)
         if a == "on" then enable("!dag_rt on")
         elseif a == "off" then disable("!dag_rt off")
         elseif a == "debug" then

@@ -43,7 +43,11 @@ Ext.Require("Server/Combat/HudStats.lua").Register()
 
 -- Real-time fights: the Brawl import (Server/Brawl/, tinybike, GPL-3) wired
 -- through Server/BrawlAdapter.lua; !dag_rt on|off|status|debug.
+Ext.Require("Server/Party.lua").Register()
+Ext.Require("Shared/ConsoleForward.lua").RegisterServer()
 Ext.Require("Server/BrawlAdapter.lua").Register()
+-- Real-time rules: no reactions / Sneak Attack in real-time fights.
+Ext.Require("Server/Combat/NoReactions.lua").Register()
 
 -- Animation browser + gallery (server side: preview copies).
 local AnimLib = Ext.Require("Server/AnimLib.lua")
