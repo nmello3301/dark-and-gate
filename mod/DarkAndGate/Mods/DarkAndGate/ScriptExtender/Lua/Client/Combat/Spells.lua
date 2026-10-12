@@ -23,6 +23,7 @@ local Actions   = Ext.Require("Client/Combat/Actions.lua")
 local Prepare   = Ext.Require("Client/Combat/Prepare.lua")
 local airAction = Ext.Require("data/movement.lua").air_action
 local Movement  = Ext.Require("Client/Movement/Movement.lua")
+local Targeting = Ext.Require("Client/Combat/Targeting.lua")
 
 local M = {}
 
@@ -105,6 +106,21 @@ function M.Cast(spellId)
     return true
 end
 
+-- Targeted spells (Client/Combat/Targeting.lua): the picked characters, all
+-- at once. The server casts with IgnoreTargetChecks, so a picked target
+-- that took cover since is still hit.
+function M.CastTargets(spellId, targets)
+    local def = SpellDefs.Get(spellId)
+    if not def or not targets or #targets == 0 then return false end
+    State.cooldownUntil[spellId] = nowMs() + (def.cooldown_ms or 400)
+    State.lastCastAt = nowMs()
+    Actions.Begin("cast", airAction.cast_s)
+    Prepare.Stop("cast")
+    ClientNet.Send(Net.Channels.CastSpellRequest, { withMana = true, spell = spellId, targets = targets, targetUuid = targets[1] })
+    Log.Write(string.format("Spells: request %s on %d picked target(s): %s", spellId, #targets, table.concat(targets, ", ")))
+    return true
+end
+
 -- Channelled casting. Cast time = base (data/spells.lua base_cast_s, per
 -- spell override, or !dag_cast_time) x the product of the modifiers.
 local castMods = {}
@@ -146,6 +162,8 @@ local function tick()
 end
 
 function M.Register()
+    Targeting.SetCaster(M.CastTargets, M.ReadyIn)
+    Targeting.Register()
     Ext.Events.Tick:Subscribe(function() pcall(tick) end)
     Ext.RegisterConsoleCommand("dag_cast_time", function(_, s)
         local v = tonumber(s)

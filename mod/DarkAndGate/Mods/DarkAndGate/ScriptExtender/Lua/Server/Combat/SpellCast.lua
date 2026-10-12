@@ -16,6 +16,7 @@ local ServerNet = Ext.Require("Server/Net.lua")
 local Mana = Ext.Require("Server/Combat/Mana.lua")
 local Projectiles = Ext.Require("Server/Combat/Projectiles.lua")
 local SpellDefs = Ext.Require("Shared/SpellDefs.lua")
+local CastRequest = Ext.Require("Server/Combat/CastRequest.lua")
 local spells = Ext.Require("data/spells.lua")
 
 local M = {}
@@ -193,14 +194,44 @@ function M.Register()
             -- hits; BG3 shows its projectile and applies the impact clone.
             local target = resolveTarget(caster, parsed)
             local okCast, how
-            local launched, why = Projectiles.Launch(caster, spellId, parsed, function(c, id, p) return castAtPosition(c, id, p) end)
-            if launched then
+            -- Targeted spells (client Targeting.lua): every picked character
+            -- at once through the cast request queue; IgnoreTargetChecks so a
+            -- target that took cover after being picked is still hit.
+            if type(parsed.targets) == "table" and #parsed.targets > 0 then
+                local list, names = {}, {}
+                local okS, st = pcall(Ext.Stats.Get, spellId)
+                local range = (okS and st and tonumber(tostring(st.TargetRadius))) or 18
+                for _, u in ipairs(parsed.targets) do
+                    local okD, d = pcall(function() return Osi.GetDistanceTo(caster, u) end)
+                    if okD and tonumber(d) and tonumber(d) <= range + 3 then list[#list + 1] = { uuid = u }; names[#names + 1] = u
+                    else Log.Write(string.format("SpellCast: picked target %s dropped (%s m, range %.0f)", tostring(u), tostring(d), range)) end
+                end
+                if #list > 0 then
+                    local r, err = CastRequest.Submit(caster, spellId, list, { options = { "IgnoreHasSpell", "NoMovement", "IgnoreTargetChecks" } })
+                    okCast, how = r ~= nil, string.format("cast request on %d picked target(s) %s%s", #list, table.concat(names, ","),
+                        r and "" or (" FAILED " .. tostring(err)))
+                else
+                    okCast, how = false, "no picked target in range"
+                end
+                target = nil
+            end
+            local launched, why = false, "not a projectile spell"
+            if not okCast and how == nil then
+                launched, why = Projectiles.Launch(caster, spellId, parsed, function(c, id, p) return castAtPosition(c, id, p) end)
+            end
+            if okCast then
+                -- picked targets cast above
+            elseif how then
+                -- picked targets failed (logged below)
+            elseif launched then
                 okCast, how = true, "projectile flight"
             elseif why ~= "not a projectile spell" then
                 Log.Write("SpellCast: projectile launch failed (" .. tostring(why) .. "), casting the spell the old way")
             end
             if okCast then
                 -- launched
+            elseif how then
+                -- picked targets failed: keep the reason
             elseif target then
                 okCast, how = castAtTarget(caster, spellId, target), "UseSpell target=" .. tostring(target)
             elseif parsed.hitPoint then

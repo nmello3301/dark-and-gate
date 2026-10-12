@@ -14,6 +14,7 @@ local State  = Ext.Require("Client/Combat/State.lua")
 local Spells = Ext.Require("Client/Combat/Spells.lua")
 local spells = Ext.Require("data/spells.lua")
 local Prepare = Ext.Require("Client/Combat/Prepare.lua")
+local Targeting = Ext.Require("Client/Combat/Targeting.lua")
 local Net       = Ext.Require("Shared/Net.lua")
 local ClientNet = Ext.Require("Client/Net.lua")
 
@@ -86,6 +87,8 @@ function M.PressSlot(slot)
         return
     end
     if State.armedSpell == id then
+        -- A targeted spell with targets picked: the key again fires early.
+        if Targeting.OnSameSlot() then return end
         State.armedSpell = nil
         State.armedAt = nil
         State.armedCastTime = nil

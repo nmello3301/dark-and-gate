@@ -44,6 +44,7 @@ local Hud       = Ext.Require("Client/HUD/Hud.lua")
 local HotbarMenu = Ext.Require("Client/HUD/HotbarMenu.lua")
 local hudCfg    = Ext.Require("data/hud.lua")
 local Interact  = Ext.Require("Client/Interact.lua")
+local Targeting = Ext.Require("Client/Combat/Targeting.lua")
 
 local M = {}
 
@@ -117,7 +118,11 @@ local function onMouse(event)
 
     if lmb then
         if pressed then
-            if State.armedSpell then
+            if State.armedSpell and Targeting.Active() then
+                -- Targeted spell: LMB picks the hovered character; it fires
+                -- by itself at the max count (Client/Combat/Targeting.lua).
+                Targeting.OnLMB()
+            elseif State.armedSpell then
                 local armed = State.armedSpell
                 local left = Spells.ReadyIn(armed)
                 if left > 0 then
