@@ -53,6 +53,17 @@ local function update()
     local t = now()
     if t - lastAt < 66 then return end
     lastAt = t
+    -- A spell is armed: the crosshair belongs to targeting (Targeting.lua
+    -- draws its own markers); F still works, nothing is highlighted here.
+    if State.armedSpell then
+        if shownUuid or not M.armedQuiet then
+            M.armedQuiet = true
+            if shownUuid then WorldFx.Clear("interact"); shownUuid = nil end
+            Overlay.Prompt(nil)
+        end
+        return
+    end
+    M.armedQuiet = false
     if not State.IsCombatActive() or State.uiPaused or State.downed then
         clearHighlight()
         if not State.downed then Overlay.Prompt(nil) end
