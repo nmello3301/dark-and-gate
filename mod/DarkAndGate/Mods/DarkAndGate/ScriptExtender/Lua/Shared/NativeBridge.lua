@@ -79,12 +79,9 @@ local function getControlledEntity()
     if ok and entities and #entities > 0 then
         return entities[1]
     end
-    -- Fallback: picking helper (the entity under the player's cursor focus).
-    local ok2, pick = pcall(Ext.UI.GetPickingHelper, 1)
-    if ok2 and pick and pick.HoverCharacter then
-        local e = Ext.Entity.Get(pick.HoverCharacter)
-        if e then return e end
-    end
+    -- (The old picking-helper fallback read pick.HoverCharacter, a field the
+    -- helper doesn't have, and the hovered character isn't the controlled
+    -- one anyway: removed 2026-10-12.)
     return nil
 end
 M.GetControlledEntity = getControlledEntity
@@ -458,7 +455,8 @@ function M.Register(side)
         -- include=0xFFFFFFFF matches every PhysicsGroupFlags bit (terrain,
         -- scenery, character, etc.). exclude=0 means filter nothing out.
         local ok, hit = pcall(function()
-            return Ext.Level.RaycastClosest(src, dst, "Static,Dynamic", 0xFFFFFFFF, 0, 0)
+            -- PhysicsType is a bitmask: a table of labels ("Static,Dynamic" as one string raised).
+            return Ext.Level.RaycastClosest(src, dst, { "Static", "Dynamic" }, 0xFFFFFFFF, 0, 0)
         end)
         if not ok then Log.Write("raycast: call errored: " .. tostring(hit)); return end
         if not hit then Log.Write("raycast: no hit"); return end

@@ -53,6 +53,8 @@ Ext.Require("Server/Combat/NoReactions.lua").Register()
 Ext.Require("Shared/TickBudget.lua").Register()
 Ext.Require("Server/Combat/Shields.lua").Register()
 Ext.Require("Server/Combat/NpcCombat.lua").Register()
+-- F interaction: what an entity under a player's crosshair is.
+Ext.Require("Server/Combat/Interact.lua").Register()
 
 -- Animation browser + gallery (server side: preview copies).
 local AnimLib = Ext.Require("Server/AnimLib.lua")

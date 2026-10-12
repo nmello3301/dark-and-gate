@@ -22,7 +22,12 @@ local Hitbox = Ext.Require("Shared/Hitbox.lua")
 
 local M = {}
 
-local WORLD = { "Terrain", "Scenery", "Item", "Door" }
+-- 2026-10-12 (LookAt research): there is no "Door" physics group. SE raised
+-- "not a valid 'PhysicsGroupFlags' bitfield value: Door" inside WorldRay's
+-- pcall, so every world ray returned nil since fix3: client.log never shows
+-- "via ray", only plane / ahead / far, and LineOfSight always said yes.
+-- Same groups as the server's ray (Server/Combat/Projectiles.lua).
+local WORLD = { "Terrain", "Scenery", "Item" }
 local IGNORED = {}
 
 local function now() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
@@ -185,9 +190,14 @@ local lastRawDistance = nil
 -- Distance in metres from `from` along unit `dir` to the first world hit
 -- within `len`, or nil. hit.Distance is a 0..1 fraction (spike 2); a value
 -- above 1 is taken as metres in case a future SE build changes it.
+local rayErrLogged = false
 function M.WorldRay(from, dir, len)
     local to = { from[1] + dir[1] * len, from[2] + dir[2] * len, from[3] + dir[3] * len }
     local okR, hit = pcall(Ext.Level.RaycastClosest, from, to, "Static", WORLD, IGNORED, 1)
+    if not okR and not rayErrLogged then
+        rayErrLogged = true
+        Log.Write("Aim: world ray error: " .. tostring(hit))
+    end
     if not okR or not hit then return nil end
     local okD, raw = pcall(function() return hit.Distance end)
     raw = okD and tonumber(raw) or nil

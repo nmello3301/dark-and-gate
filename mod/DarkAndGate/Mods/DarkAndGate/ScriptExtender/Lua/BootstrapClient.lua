@@ -86,6 +86,15 @@ Ext.Require("Client/Combat/ProjectileView.lua").Register()
 -- Real-time fights, client side: keep control on our character at Brawl's
 -- round turnovers, BG3's dynamic combat camera off.
 Ext.Require("Client/BrawlClient.lua").Register()
+-- Real-time combat pass (2026-10-12): what the crosshair is on (F, targeted
+-- spells, area indicators), on-screen prompts, the per-tick watchdog, and
+-- the server's knobs typed in this console (Shared/ConsoleForward.lua).
+Ext.Require("Shared/TickBudget.lua").Register()
+Ext.Require("Client/LookAt.lua").Register()
+Ext.Require("Client/HUD/Overlay.lua").Register()
+Ext.Require("Shared/ConsoleForward.lua").Forward({
+    "dag_ai", "dag_ai_aim", "dag_ai_react", "dag_ai_debug", "dag_shield_pct", "dag_shield_debug",
+})
 
 -- First-person movement: floaty Space jump (visual lift in the DLL,
 -- BG3's jump clips played in phases). See Client/Movement/Jump.lua.
