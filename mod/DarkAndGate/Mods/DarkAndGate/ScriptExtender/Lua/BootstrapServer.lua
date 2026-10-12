@@ -48,6 +48,11 @@ Ext.Require("Shared/ConsoleForward.lua").RegisterServer()
 Ext.Require("Server/BrawlAdapter.lua").Register()
 -- Real-time rules: no reactions / Sneak Attack in real-time fights.
 Ext.Require("Server/Combat/NoReactions.lua").Register()
+-- Enemy / companion AI on our rules (swings, projectiles, cast time) and
+-- passive shields. !dag_watchdog: per-tick handler timings.
+Ext.Require("Shared/TickBudget.lua").Register()
+Ext.Require("Server/Combat/Shields.lua").Register()
+Ext.Require("Server/Combat/NpcCombat.lua").Register()
 
 -- Animation browser + gallery (server side: preview copies).
 local AnimLib = Ext.Require("Server/AnimLib.lua")

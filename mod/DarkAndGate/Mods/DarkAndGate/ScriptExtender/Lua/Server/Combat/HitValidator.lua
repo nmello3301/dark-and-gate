@@ -14,6 +14,7 @@ local Log = Ext.Require("Shared/Log.lua")
 local Net = Ext.Require("Shared/Net.lua")
 local ServerNet = Ext.Require("Server/Net.lua")
 local Hitbox = Ext.Require("Shared/Hitbox.lua")
+local Shields = Ext.Require("Server/Combat/Shields.lua")
 
 local M = {}
 
@@ -82,6 +83,15 @@ function M.Register()
             if zone ~= "head" and zone ~= "torso" and zone ~= "limbs" then zone = "torso" end
             local zoneMult = Hitbox.ZoneMult(zone)
             local dmg = math.max(1, math.floor((claim.damage or 1) * zoneMult))
+            -- Passive shield (DECISIONS 2026-10-12): the swing's line from the
+            -- eye to the hit point crosses the target's shield disc first.
+            local shieldNote = ""
+            local hp = vec(claim.hitPoint)
+            if hp and Shields.Has(target) and Shields.Blocks(target, eye, hp, 0.05) then
+                local kept, r = Shields.Reduce(dmg)
+                shieldNote = string.format(" SHIELD -%.0f%% (%d -> %d)", r * 100, dmg, kept)
+                dmg = math.max(0, kept)
+            end
 
             local okD, err = pcall(function()
                 Osi.ApplyDamage(target, dmg, "Slashing", attacker)
@@ -94,7 +104,7 @@ function M.Register()
             if not okD then
                 Log.Write("HitValidator: ApplyDamage err: " .. tostring(err))
             end
-            Log.Write(string.format("HitValidator: HIT %s zone=%s dmg=%d dist=%.2f lift=%.2f", target, zone, dmg, d, cyl.lift))
+            Log.Write(string.format("HitValidator: HIT %s zone=%s dmg=%d dist=%.2f lift=%.2f%s", target, zone, dmg, d, cyl.lift, shieldNote))
 
             Ext.Net.PostMessageToUser(userId, Net.Channels.HitResult, Ext.Json.Stringify({
                 target = target, zone = zone, damage = dmg, swingNonce = claim.swingNonce,

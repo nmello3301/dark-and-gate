@@ -20,6 +20,9 @@ local M = {}
 
 function M.VisualId(spell) return "DAG_V_" .. spell end
 function M.ImpactId(spell) return "DAG_I_" .. spell end
+-- The impact clone for a player-controlled target: HitAnimationType None
+-- (no hit reaction on the player, DECISIONS 2026-10-12).
+function M.NoReactionId(spell) return "DAG_IP_" .. spell end
 
 local function get(name)
     local st = nil
@@ -45,7 +48,13 @@ local function check(why)
     if data.enabled == false then return end
     okCount = 0
     for spell in pairs(data.spells) do
-        if get(spell) then
+        if get(spell) and data.spells[spell].impact_mode == "weapon" then
+            -- Arrows: our own weapon damage at the hit, no impact clone.
+            local v = get(M.VisualId(spell))
+            if v then okCount = okCount + 1 end
+            Log.Write(string.format("ProjectileSpells: %s -> %s %s (weapon damage at our hit, no impact clone) [%s]", spell,
+                M.VisualId(spell), v and "loaded" or "MISSING", why))
+        elseif get(spell) then
             local v, i = get(M.VisualId(spell)), get(M.ImpactId(spell))
             if v and i then okCount = okCount + 1 end
             Log.Write(string.format("ProjectileSpells: %s -> %s %s (SpellRoll=%s SpellSuccess=%s SpellProperties=%s), %s %s (SpellRoll=%s SpellProperties=%s ExplodeRadius=%s) [%s]",
@@ -61,6 +70,8 @@ end
 function M.Ready(spell)
     return get(M.VisualId(spell)) ~= nil and get(M.ImpactId(spell)) ~= nil
 end
+function M.VisualReady(spell) return get(M.VisualId(spell)) ~= nil end
+function M.NoReactionReady(spell) return get(M.NoReactionId(spell)) ~= nil end
 
 function M.Register(context)
     Ext.Events.StatsLoaded:Subscribe(function() check("StatsLoaded") end)

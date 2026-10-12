@@ -19,6 +19,19 @@
 --   CreateExplosionAtPosition at the point), clients get ProjectileHit.
 --
 --   !dag_proj_debug on|off   log every step's candidates (noisy)
+--
+-- Real-time combat pass (2026-10-12):
+--   * NPC and companion shots come through here too (Server/Combat/
+--     NpcCombat.lua: arrows and projectile spells with imperfect aim). Their
+--     visual clone is cast through the cast request queue (castAt).
+--   * impact_mode "weapon" (arrows): no impact clone, the hit calls the weapon
+--     handler (NpcCombat: weapon dice on our damage path).
+--   * Shields: each candidate's shield disc (Server/Combat/Shields.lua) is
+--     tested before its cylinder; a hit on it loses data/combat.lua
+--     shield.reduction (weapon damage scaled, a spell impact healed back).
+--   * A player-controlled target gets the DAG_IP_ impact clone (same spell,
+--     HitAnimationType None: no hit reaction), also when one stands inside a
+--     point impact's area.
 
 local Log       = Ext.Require("Shared/Log.lua")
 local Net       = Ext.Require("Shared/Net.lua")
@@ -26,6 +39,9 @@ local ServerNet = Ext.Require("Server/Net.lua")
 local Hitbox    = Ext.Require("Shared/Hitbox.lua")
 local PSpells   = Ext.Require("Shared/ProjectileSpells.lua")
 local data      = Ext.Require("data/projectiles.lua")
+local Shields   = Ext.Require("Server/Combat/Shields.lua")
+local Party     = Ext.Require("Server/Party.lua")
+local Damage    = Ext.Require("Server/Combat/Damage.lua")
 
 local M = {}
 
@@ -134,10 +150,27 @@ local function casterLevel(caster)
 end
 
 -- castAt(caster, spellId, point) = SpellCast's UseSpellAtPosition wrapper.
+-- impact_mode "weapon": the hit is resolved by this handler (NpcCombat sets it):
+-- fn(p, targetUuid, pos, zone, shielded) -- p.caster, p.spell, p.npc.
+local weaponHandler = nil
+function M.SetWeaponHandler(fn) weaponHandler = fn end
+
+function M.Def(spell) return data.enabled ~= false and data.spells[spell] or nil end
+function M.Speed(spell)
+    local def = data.spells[spell]
+    if not def then return nil end
+    local tsp = templateSpeed(spell)
+    local speed = (def.speed_mps == "template" and tsp.speed) or tonumber(def.speed_mps) or def.fallback_speed_mps or 25
+    return (speed and speed > 0) and speed or (def.fallback_speed_mps or 25)
+end
+
 function M.Launch(caster, spell, claim, castAt)
     local def = data.spells[spell]
     if data.enabled == false or not def then return false, "not a projectile spell" end
-    if not PSpells.Ready(spell) then return false, "clones " .. PSpells.VisualId(spell) .. " / " .. PSpells.ImpactId(spell) .. " not loaded" end
+    local weapon = def.impact_mode == "weapon"
+    if weapon then
+        if not PSpells.VisualReady(spell) then return false, "visual clone " .. PSpells.VisualId(spell) .. " not loaded" end
+    elseif not PSpells.Ready(spell) then return false, "clones " .. PSpells.VisualId(spell) .. " / " .. PSpells.ImpactId(spell) .. " not loaded" end
     local eye = claim.eye and v3(claim.eye) or nil
     local dir = claim.dir and norm(v3(claim.dir)) or nil
     if not eye or not dir then
@@ -161,7 +194,7 @@ function M.Launch(caster, spell, claim, castAt)
     local id = nextId; nextId = nextId + 1
     pending[caster] = {
         id = id, caster = caster, spell = spell, def = def, origin = origin, dir = dir, speed = speed,
-        accel = tsp.accel or 0, at = now(), target = claim.targetUuid, visualCast = okV,
+        accel = tsp.accel or 0, at = now(), target = claim.targetUuid, visualCast = okV, npc = claim.npc,
     }
     Log.Write(string.format("PROJ #%d launch %s: origin %s dir (%.3f,%.3f,%.3f) speed %.1f m/s accel %.1f r %.2f m, visual clone %s %s",
         id, spell, fmt(origin), dir[1], dir[2], dir[3], speed, tsp.accel or 0, def.radius_m or 0.15,
@@ -286,6 +319,13 @@ local function worldHit(a, b)
     return nil
 end
 
+-- For other server systems (NpcCombat's swing line of sight / wall stop).
+function M.WorldHit(a, b) return worldHit(a, b) end
+-- Characters near the host: uuid -> { uuid, ent } (refreshed a slice per tick).
+function M.Near() return near end
+function M.FeetOf(e) return feetOf(e) end
+function M.AliveOf(e) return aliveOf(e) end
+
 -- Distance from point p to segment a-b (for candidate filtering).
 local function segDist(p, a, b)
     local ab = sub(b, a)
@@ -301,7 +341,7 @@ local function charHit(p, a, b)
     if L < 1e-4 then return nil end
     local dir = { seg[1] / L, seg[2] / L, seg[3] / L }
     local r = p.def.radius_m or 0.15
-    local best, bestU, bestCyl = nil, nil, nil
+    local best, bestU, bestCyl, bestShield = nil, nil, nil, false
     local t = now()
     local pad = (data.candidate_pad_m or 3.0) + L
     local grace = (t - p.t0) / 1000 < (data.self_grace_s or 10)
@@ -316,7 +356,11 @@ local function charHit(p, a, b)
                     -- Swept sphere vs cylinder = the segment vs the cylinder grown by r.
                     local big = { x = cyl.x, z = cyl.z, y0 = cyl.y0 - r, y1 = cyl.y1 + r, r = cyl.r + r }
                     local d = Hitbox.RayHit(big, a, dir, L)
-                    if d and (not best or d < best) then best, bestU, bestCyl = d, u, cyl end
+                    -- The shield disc is tested before the body.
+                    local ds = Shields.Has(u) and Shields.Blocks(u, a, b, r) or nil
+                    local shielded = false
+                    if ds and (not d or ds <= d + 0.05) then d, shielded = ds, true end
+                    if d and (not best or d < best) then best, bestU, bestCyl, bestShield = d, u, cyl, shielded end
                     -- Closest approach (logged when the projectile misses).
                     local mid = { f[1], math.max(cyl.y0, math.min(cyl.y1, (a[2] + b[2]) / 2)), f[3] }
                     local gap = segDist(mid, a, b) - cyl.r - r
@@ -326,8 +370,8 @@ local function charHit(p, a, b)
         end
     end
     if debugSteps then Log.Write(string.format("PROJ #%d step %s->%s: %d candidate(s)%s", p.id, fmt(a), fmt(b), n,
-        bestU and (" hit " .. bestU) or "")) end
-    return best, bestU, bestCyl
+        bestU and (" hit " .. bestU .. (bestShield and " (shield)" or "")) or "")) end
+    return best, bestU, bestCyl, bestShield
 end
 
 -- Osi.GetHitpoints returned -1 for spawned goblins (playtest 2026-10-12):
@@ -339,7 +383,19 @@ local function hpOf(uuid)
     return okO and tonumber(h2) or nil
 end
 
-local function impact(p, pos, targetUuid, what, cyl)
+-- A player-controlled character inside radius r of pos?
+local function controlledNear(pos, r)
+    for _, u in ipairs(Party.Members()) do
+        if Party.IsControlled(u) then
+            local c = near[u]
+            local f = c and feetOf(c.ent)
+            if f and len(sub({ f[1], f[2] + 0.9, f[3] }, pos)) <= r + 0.9 then return u end
+        end
+    end
+    return nil
+end
+
+local function impact(p, pos, targetUuid, what, cyl, shielded)
     active[p.id] = nil
     -- BG3's projectile: gone at our hit.
     local removed = "no BG3 projectile matched"
@@ -357,10 +413,31 @@ local function impact(p, pos, targetUuid, what, cyl)
         Log.Write(string.format("PROJ #%d expired after %.1f m (no hit)%s; BG3 projectile: %s", p.id, p.traveled, p.missNote, removed))
         return
     end
-    local spellId = PSpells.ImpactId(p.spell)
-    local level = casterLevel(p.caster)
     local mode = p.def.impact_mode or "target"
     local zone = (cyl and targetUuid) and Hitbox.Zone(cyl, pos[2]) or nil
+    if mode == "weapon" then
+        local how = "no weapon handler"
+        if targetUuid and weaponHandler then
+            local ok, r = pcall(weaponHandler, p, targetUuid, pos, zone or "torso", shielded)
+            how = ok and tostring(r) or ("handler ERROR " .. tostring(r))
+        elseif not targetUuid then
+            how = "no character hit"
+        end
+        Log.Write(string.format("PROJ #%d HIT %s%s at %s after %.1f m / %.2f s%s%s: %s; BG3 projectile: %s%s", p.id, what,
+            targetUuid and (" " .. targetUuid) or "", fmt(pos), p.traveled, (now() - p.t0) / 1000, zone and (" zone " .. zone) or "",
+            shielded and " ON THE SHIELD" or "", how, removed, p.missNote or ""))
+        return
+    end
+    local spellId = PSpells.ImpactId(p.spell)
+    -- No hit reaction on a player-controlled target (DECISIONS 2026-10-12).
+    local playerHit = nil
+    if mode == "target" and targetUuid and Party.IsControlled(targetUuid) then playerHit = targetUuid end
+    if not playerHit and (mode ~= "target" or not targetUuid) then
+        local area = tonumber(p.def.area_m) or 0
+        if area > 0 then playerHit = controlledNear(pos, area) end
+    end
+    if playerHit and PSpells.NoReactionReady(p.spell) then spellId = PSpells.NoReactionId(p.spell) end
+    local level = casterLevel(p.caster)
     local hp0 = targetUuid and hpOf(targetUuid) or nil
     local how
     if mode == "target" and targetUuid then
@@ -370,9 +447,10 @@ local function impact(p, pos, targetUuid, what, cyl)
         local ok, err = pcall(function() Osi.CreateExplosionAtPosition(pos[1], pos[2], pos[3], spellId, level, p.caster) end)
         how = "CreateExplosionAtPosition " .. fmt(pos) .. " " .. (ok and "ok" or ("ERROR " .. tostring(err)))
     end
-    Log.Write(string.format("PROJ #%d HIT %s%s at %s after %.1f m / %.2f s%s: impact %s lvl %d via %s; BG3 projectile: %s%s",
+    Log.Write(string.format("PROJ #%d HIT %s%s at %s after %.1f m / %.2f s%s%s: impact %s lvl %d via %s%s; BG3 projectile: %s%s",
         p.id, what, targetUuid and (" " .. targetUuid) or "", fmt(pos), p.traveled, (now() - p.t0) / 1000,
-        zone and (" zone " .. zone) or "", spellId, level, how, removed, p.missNote or ""))
+        zone and (" zone " .. zone) or "", shielded and " ON THE SHIELD" or "", spellId, level, how,
+        playerHit and (" (no hit reaction: " .. tostring(playerHit) .. ")") or "", removed, p.missNote or ""))
     if targetUuid and hp0 then
         local t1 = now() + 600
         local function check()
@@ -380,6 +458,12 @@ local function impact(p, pos, targetUuid, what, cyl)
             local hp1 = hpOf(targetUuid)
             Log.Write(string.format("PROJ #%d target HP %s -> %s%s", p.id, tostring(hp0), tostring(hp1),
                 (hp1 and hp1 < hp0) and " (damage applied)" or " (NO damage seen)"))
+            -- The shield's share of a spell impact: the clone can't be scaled
+            -- before it lands, so that share is healed back (never revives).
+            if shielded and hp1 and hp1 < hp0 and hp1 > 0 then
+                local _, r = Shields.Reduce(hp0 - hp1)
+                Damage.HealBack(targetUuid, (hp0 - hp1) * r, string.format("PROJ #%d hit the shield, %.0f %% of %d", p.id, r * 100, hp0 - hp1))
+            end
         end
         Ext.OnNextTick(check)
     end
@@ -398,10 +482,10 @@ local function stepOne(p, dt)
     local b = add(a, nv, dt)
     local L = len(sub(b, a))
     local dw = worldHit(a, b)
-    local dc, u, cyl = charHit(p, a, b)
+    local dc, u, cyl, shielded = charHit(p, a, b)
     local dirN = norm(sub(b, a))
     if dc and (not dw or dc <= dw) then
-        impact(p, add(a, dirN, dc), u, "character", cyl)
+        impact(p, add(a, dirN, dc), u, "character", cyl, shielded)
         return true
     elseif dw then
         impact(p, add(a, dirN, math.max(0, dw - (p.def.radius_m or 0.15))), nil, "world")
@@ -419,8 +503,9 @@ local function tick()
     if not okP and not M.pollErrLogged then M.pollErrLogged = true; Log.Write("Projectiles: poll error " .. tostring(errP)) end
     local t = now()
     for caster, p in pairs(pending) do
-        if t - p.at > (data.launch_wait_s or 1.2) * 1000 then
-            start(p, nil, string.format("no BG3 projectile seen within %.1f s", data.launch_wait_s or 1.2))
+        local wait = p.def.launch_wait_s or data.launch_wait_s or 1.2
+        if t - p.at > wait * 1000 then
+            start(p, nil, string.format("no BG3 projectile seen within %.1f s", wait))
         end
     end
     for _, p in pairs(active) do

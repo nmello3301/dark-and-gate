@@ -1,0 +1,639 @@
+-- SPDX-License-Identifier: GPL-3.0-or-later
+-- Enemy (and companion) AI on our combat rules (DECISIONS 2026-10-12,
+-- docs/design/combat-rules.md, data/ai.lua).
+--
+-- Brawl still decides who acts, on whom, with which spell, and walks them
+-- into range (Server/Brawl/AI.lua, Pick.lua, Movement.lua). This wraps the
+-- one call where that decision becomes a BG3 cast, Actions.useSpellOnTarget:
+--   melee weapon attack   -> our swing, run on the server with the player's
+--                            own weapon data (timings, reach, arcs): the
+--                            direction is committed at windup start, the arc
+--                            is tested against cylinders every tick of the
+--                            active window, with line of sight / wall stop and
+--                            the shield disc first; weapon dice on our damage
+--                            path (Server/Combat/Damage.lua: no hit reaction on
+--                            the player). BG3's attack animation comes from a
+--                            no-effect visual clone (DAG_V_Target_MainHandAttack).
+--   ranged weapon attack  -> our projectile system: a reaction delay, an aim
+--   / projectile spell       error cone and a misjudged lead on moving targets
+--                            (arrows: weapon dice at our hit; spells: their
+--                            impact clone)
+--   area / cone spell     -> the target point (with the same aim error) is
+--                            committed when the cast starts; BG3 casts there
+--                            after our cast time, so you can step out of it
+--   Target_Help on a      -> our hold-to-revive (Server/Combat/Downed.lua)
+--   downed ally
+--   any other spell       -> BG3's own cast, after our cast time
+-- Self casts (dash, rage, auras, shouts) pass straight through, and so does
+-- everything with !dag_ai off. While a swing / shot / cast runs the
+-- character is busy: Brawl's pulse skips it (AI.act wrapper).
+--
+--   !dag_ai on|off   !dag_ai_aim <deg>   !dag_ai_react <ms>   !dag_ai_debug on|off
+--   (server console, or the client console: Shared/ConsoleForward.lua)
+
+local Log         = Ext.Require("Shared/Log.lua")
+local Hitbox      = Ext.Require("Shared/Hitbox.lua")
+local Shield      = Ext.Require("Shared/Shield.lua")
+local TickBudget  = Ext.Require("Shared/TickBudget.lua")
+local ConsoleForward = Ext.Require("Shared/ConsoleForward.lua")
+local Party       = Ext.Require("Server/Party.lua")
+local Damage      = Ext.Require("Server/Combat/Damage.lua")
+local Shields     = Ext.Require("Server/Combat/Shields.lua")
+local Projectiles = Ext.Require("Server/Combat/Projectiles.lua")
+local CastRequest = Ext.Require("Server/Combat/CastRequest.lua")
+local Brawl       = Ext.Require("Server/BrawlAdapter.lua")
+local hitboxData  = Ext.Require("data/hitbox.lua")
+local cfg         = Ext.Require("data/ai.lua")
+local WEAPONS     = { longsword = Ext.Require("data/weapons/longsword.lua") }
+
+local M = {}
+
+local VISUAL_MELEE = "DAG_V_Target_MainHandAttack"
+local ARROW_SPELL = "Projectile_MainHandAttack"
+local CLONE_OPTIONS = { "IgnoreHasSpell", "NoMovement", "IgnoreTargetChecks" }
+
+local debugOn = false
+local busy = {}         -- uuid -> ms until which Brawl's pulse skips it
+local actions = {}      -- running swings / shots / casts
+local chainIdx = {}     -- uuid -> last swing index of the weapon chain
+local vel = {}          -- uuid -> { p, at, v }
+local enemyCache = {}   -- "a|b" -> { v, at }
+local weaponCache = {}  -- "uuid|melee" -> { info, at }
+local kinds = {}        -- spell -> kind
+local reviveHandler = nil
+
+local function now() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
+local function noop() end
+local function add(a, b, s) s = s or 1; return { a[1] + b[1] * s, a[2] + b[2] * s, a[3] + b[3] * s } end
+local function sub(a, b) return { a[1] - b[1], a[2] - b[2], a[3] - b[3] } end
+local function len(a) return math.sqrt(a[1] * a[1] + a[2] * a[2] + a[3] * a[3]) end
+local function norm(a) local l = len(a); return l > 1e-6 and { a[1] / l, a[2] / l, a[3] / l } or { 0, 0, 1 } end
+local function cross(a, b) return { a[2] * b[3] - a[3] * b[2], a[3] * b[1] - a[1] * b[3], a[1] * b[2] - a[2] * b[1] } end
+local function clamp(v, a, b) if v < a then return a elseif v > b then return b end return v end
+local function fmt(p) return p and string.format("(%.2f,%.2f,%.2f)", p[1], p[2], p[3]) or "?" end
+local function rand(a, b) return a + (b - a) * math.random() end
+local name = Brawl.Name
+
+local function log(s) if cfg.log ~= false then Log.Write(s) end end
+local function dbg(s) if debugOn then Log.Write(s) end end
+
+local function feet(uuid)
+    local ok, t = pcall(function() return Ext.Entity.Get(uuid).Transform.Transform.Translate end)
+    if ok and t then return { t[1], t[2], t[3] } end
+    local okP, x, y, z = pcall(function() return Osi.GetPosition(uuid) end)
+    if okP and tonumber(x) then return { tonumber(x), tonumber(y), tonumber(z) } end
+    return nil
+end
+
+local function eyeOf(uuid)
+    local f = feet(uuid)
+    if not f then return nil end
+    return { f[1], f[2] + hitboxData.height_m * (cfg.melee.eye_frac or 0.85) + Hitbox.Lift(uuid), f[3] }
+end
+
+local function canAct(uuid)
+    local ok, v = pcall(function() return Utils.canAct(uuid) end)
+    if ok then return v == true end
+    local okD, dead = pcall(function() return Osi.IsDead(uuid) end)
+    return not (okD and tonumber(dead) == 1)
+end
+
+local function alive(uuid)
+    local okD, dead = pcall(function() return Osi.IsDead(uuid) end)
+    if okD and tonumber(dead) == 1 then return false end
+    return not Damage.IsDowned(uuid)
+end
+
+local function isEnemy(a, b)
+    local k = a .. "|" .. b
+    local c = enemyCache[k]
+    local t = now()
+    if c and t - c.at < 5000 then return c.v end
+    local ok, v = pcall(function() return Osi.IsEnemy(a, b) end)
+    local r = ok and tonumber(v) == 1
+    enemyCache[k] = { v = r, at = t }
+    return r
+end
+
+-- ---------------------------------------------------------------------
+-- Spell kinds
+-- ---------------------------------------------------------------------
+local function rollOf(st)
+    local r = ""
+    pcall(function() r = tostring(st.SpellRoll.Default or "") end)
+    if r == "" or r == "nil" then pcall(function() r = tostring(st.SpellRoll) end) end
+    return r
+end
+
+local function classify(spell)
+    if kinds[spell] then return kinds[spell] end
+    local k = "cast"
+    local ok, st = pcall(Ext.Stats.Get, spell)
+    if ok and st then
+        local stype = tostring(st.SpellType or "")
+        local roll = rollOf(st)
+        local area = tonumber(st.AreaRadius) or 0
+        if spell == "Target_Help" then k = "help"
+        elseif stype == "Target" and (roll:find("MeleeWeaponAttack", 1, true) or roll:find("MeleeUnarmedAttack", 1, true)
+            or roll:find("MeleeOffHandWeaponAttack", 1, true)) then k = "melee"
+        elseif stype == "Projectile" and roll:find("RangedWeaponAttack", 1, true) and Projectiles.Def(ARROW_SPELL) then k = "ranged"
+        elseif stype == "Projectile" and Projectiles.Def(spell) then k = "projectile"
+        elseif area > 0 or stype == "Zone" or stype == "Cone" or stype == "Wall" then k = "area"
+        end
+    end
+    kinds[spell] = k
+    log(string.format("AI: %s -> %s", spell, ({ melee = "our swing", ranged = "our arrow (projectile system)",
+        projectile = "our projectile system", area = "area: point committed at cast start", help = "our revive",
+        cast = "BG3 cast after our cast time" })[k]))
+    return k
+end
+
+-- ---------------------------------------------------------------------
+-- Weapons
+-- ---------------------------------------------------------------------
+local function weaponInfo(uuid, ranged)
+    local key = uuid .. (ranged and "|ranged" or "|melee")
+    local c = weaponCache[key]
+    if c and now() - c.at < 10000 then return c.info end
+    local info = { dice = ranged and "1d6" or cfg.melee.unarmed_damage, type = ranged and "Piercing" or "Bludgeoning", mod = 0, name = "unarmed" }
+    local item = nil
+    pcall(function()
+        if ranged then item = Osi.GetEquippedItem(uuid, "Ranged Main Weapon") else item = Osi.GetEquippedWeapon(uuid) end
+    end)
+    local finesse = false
+    if item and item ~= "" then
+        pcall(function()
+            local statsId = Ext.Entity.Get(item).Data.StatsId
+            local st = Ext.Stats.Get(statsId)
+            info.name = tostring(statsId)
+            info.dice = tostring(st.Damage or info.dice)
+            info.type = tostring(st["Damage Type"] or info.type)
+            local props = st["Weapon Properties"]
+            if type(props) == "table" or type(props) == "userdata" then
+                for _, p in ipairs(props) do if tostring(p) == "Finesse" then finesse = true end end
+            else
+                finesse = tostring(props or ""):find("Finesse", 1, true) ~= nil
+            end
+        end)
+    end
+    pcall(function()
+        local mods = Ext.Entity.Get(uuid).Stats.AbilityModifiers
+        local str, dex = tonumber(mods[2]) or 0, tonumber(mods[3]) or 0
+        if ranged then info.mod = dex elseif finesse and dex > str then info.mod = dex else info.mod = str end
+    end)
+    weaponCache[key] = { info = info, at = now() }
+    return info
+end
+
+local function weaponDamage(uuid, ranged)
+    local w = weaponInfo(uuid, ranged)
+    local fixed = tonumber(cfg.melee.damage)
+    if fixed then return fixed, w end
+    local ok, d = pcall(Damage.Roll, w.dice, w.mod)
+    return ok and d or (cfg.melee.fallback_damage or 4), w
+end
+
+-- ---------------------------------------------------------------------
+-- Velocity (for leads) + the shield facing check
+-- ---------------------------------------------------------------------
+local velAt = -1e9
+local facingLogged = false
+local function trackVelocities()
+    local t = now()
+    if t - velAt < 100 then return end
+    velAt = t
+    local want = {}
+    for _, u in ipairs(Party.Members()) do want[u] = true end
+    pcall(function()
+        for _, b in pairs(Roster.getBrawlers() or {}) do
+            if b.targetUuid then want[Party.Norm(b.targetUuid)] = true end
+        end
+    end)
+    for u in pairs(want) do
+        local p = feet(u)
+        if p then
+            local s = vel[u]
+            if s then
+                local dt = (t - s.at) / 1000
+                if dt > 0.02 then
+                    local v = { (p[1] - s.p[1]) / dt, 0, (p[3] - s.p[3]) / dt }
+                    if len(v) > 20 then v = { 0, 0, 0 } end   -- a teleport, not a walk
+                    s.v = { s.v[1] * 0.5 + v[1] * 0.5, 0, s.v[3] * 0.5 + v[3] * 0.5 }
+                    s.p, s.at = p, t
+                end
+            else
+                vel[u] = { p = p, at = t, v = { 0, 0, 0 } }
+            end
+            local sv = vel[u].v
+            if Party.IsMember(u) and len(sv) > 1.2 then
+                local okE, e = pcall(Ext.Entity.Get, u)
+                if okE and e then
+                    local dot, flipped = Shield.CheckFacing(e, sv)
+                    if flipped then
+                        Log.Write(string.format("Shields: walking characters face the Transform's %sZ, shield discs follow (dot %.2f)",
+                            Shield.FwdSign() > 0 and "+" or "-", dot))
+                    elseif dot and dot > 0.8 and not facingLogged then
+                        facingLogged = true
+                        Log.Write(string.format("Shields: facing check OK (%s walks along its forward, dot %.2f)", name(u), dot))
+                    end
+                end
+            end
+        end
+    end
+    for u in pairs(vel) do if not want[u] then vel[u] = nil end end
+end
+
+local function velocityOf(uuid)
+    local s = vel[Party.Norm(uuid)]
+    return s and s.v or { 0, 0, 0 }
+end
+
+-- ---------------------------------------------------------------------
+-- Aim (ranged / area)
+-- ---------------------------------------------------------------------
+local function perturb(d, maxDeg)
+    if not maxDeg or maxDeg <= 0 then return d, 0 end
+    local r = math.sqrt(math.random()) * math.tan(math.rad(maxDeg))
+    local th = 2 * math.pi * math.random()
+    local up = math.abs(d[2]) < 0.95 and { 0, 1, 0 } or { 1, 0, 0 }
+    local a = norm(cross(d, up))
+    local b = cross(a, d)
+    return norm(add(add(d, a, r * math.cos(th)), b, r * math.sin(th))), math.deg(math.atan(r))
+end
+
+-- The aim point on `target` when the shot lands: its cylinder at aim_height,
+-- led by its velocity x (reaction + flight time) x lead_skill x jitter.
+local function aimAt(attacker, target, speed, reactMs)
+    local eye, tf = eyeOf(attacker), feet(target)
+    if not eye or not tf then return nil end
+    local R = cfg.ranged
+    local cyl = Hitbox.Cylinder(target, tf)
+    local p = { cyl.x, cyl.y0 + (cyl.y1 - cyl.y0) * (R.aim_height or 0.6), cyl.z }
+    local dist = len(sub(p, eye))
+    local v = velocityOf(target)
+    local lj = R.lead_jitter or { 0.6, 1.2 }
+    local skill = (R.lead_skill or 0.6) * rand(lj[1], lj[2])
+    local tLead = reactMs / 1000 + dist / math.max(1, speed or 30)
+    p = add(p, v, tLead * skill)
+    local dir, err = perturb(norm(sub(p, eye)), R.aim_error_deg)
+    return { eye = eye, dir = dir, dist = dist, speed = len(v), skill = skill, lead = len(v) * tLead * skill, err = err, point = p }
+end
+
+-- ---------------------------------------------------------------------
+-- Melee swing
+-- ---------------------------------------------------------------------
+local function meleeTest(s, cand, t)
+    local f = feet(cand)
+    if not f then return nil, "no position" end
+    local def = s.def
+    local cyl = Hitbox.Cylinder(cand, f, t)
+    local surf = Hitbox.Distance(cyl, s.eye)
+    if surf > def.reach_m then return nil, string.format("out of reach (%.2f m > %.2f m)", surf, def.reach_m) end
+    local dx, dz = cyl.x - s.eye[1], cyl.z - s.eye[3]
+    local hd = math.sqrt(dx * dx + dz * dz)
+    if hd > 1e-3 then
+        local ang = math.deg(math.acos(clamp((dx * s.dir[1] + dz * s.dir[3]) / hd, -1, 1)))
+        local angR = math.deg(math.atan(cyl.r / math.max(hd, 0.05)))
+        if ang - angR > def.arc_deg_h / 2 then
+            return nil, string.format("outside the arc (%.0f deg off the swing, arc +-%.0f)", ang, def.arc_deg_h / 2)
+        end
+        local hv = math.max(hd, 0.05)
+        local upDeg = math.deg(math.atan((cyl.y1 - s.eye[2]) / hv))
+        local dnDeg = math.deg(math.atan((cyl.y0 - s.eye[2]) / hv))
+        if dnDeg > def.arc_deg_v / 2 or upDeg < -def.arc_deg_v / 2 then
+            return nil, string.format("outside the vertical arc (%.0f..%.0f deg, arc +-%.0f)", dnDeg, upDeg, def.arc_deg_v / 2)
+        end
+        local hy = clamp(s.eye[2] - 0.25, cyl.y0 + 0.2, cyl.y1 - 0.1)
+        return { cyl.x - dx / hd * cyl.r, hy, cyl.z - dz / hd * cyl.r }, nil, cyl, surf
+    end
+    return { cyl.x, clamp(s.eye[2] - 0.25, cyl.y0, cyl.y1), cyl.z }, nil, cyl, surf
+end
+
+local function nextSwingDef(attacker)
+    local w = WEAPONS[cfg.melee.weapon or "longsword"] or WEAPONS.longsword
+    local i = ((chainIdx[attacker] or 0) % #w.chain) + 1
+    chainIdx[attacker] = i
+    return w.chain[i], i
+end
+
+local function melee(attacker, target, spell, onSubmitted, onCompleted, onFailed)
+    local def, idx = nextSwingDef(attacker)
+    local react = (cfg.melee.reaction_ms or 200) + math.random(0, cfg.melee.reaction_jitter_ms or 0)
+    local t = now()
+    local lead = cfg.melee.anim_lead_ms or 0
+    busy[attacker] = t + react + lead + def.windup_ms + def.active_ms + def.recovery_ms + (cfg.busy_pad_ms or 300)
+    pcall(onSubmitted, { RequestGuid = "dag-swing" })
+    pcall(function() Osi.SteerTo(attacker, target, 0) end)
+    actions[#actions + 1] = { kind = "melee", attacker = attacker, target = target, spell = spell, def = def, idx = idx,
+        startAt = t + react, lead = lead, state = "react", hits = {}, results = {}, onCompleted = onCompleted, onFailed = onFailed }
+    log(string.format("AI: %s -> swing #%d (%s) at %s in %d ms (Brawl picked %s)", name(attacker), idx, def.name, name(target), react, spell))
+end
+
+local function meleeStart(a, t)
+    local af, tf = feet(a.attacker), feet(a.target)
+    if not af or not tf then a.state, a.why = "done", "no positions"; return end
+    a.eye = eyeOf(a.attacker)
+    local d = { tf[1] - af[1], 0, tf[3] - af[3] }
+    a.dir = norm(d)
+    a.activeStart = t + a.def.windup_ms + a.lead
+    a.activeEnd = a.activeStart + a.def.active_ms
+    a.endAt = a.activeEnd + a.def.recovery_ms
+    a.state = "windup"
+    local okV = CastRequest.Submit(a.attacker, VISUAL_MELEE, { { uuid = a.target } }, { options = CLONE_OPTIONS })
+    dbg(string.format("AI: %s swing #%d committed: eye %s dir (%.2f,%.2f) target %.2f m away, animation %s", name(a.attacker), a.idx,
+        fmt(a.eye), a.dir[1], a.dir[3], len(d), okV and VISUAL_MELEE or "clone cast FAILED"))
+end
+
+local function meleeCandidates(a)
+    local list, seen = { a.target }, { [a.target] = true }
+    local af = feet(a.attacker)
+    if not af then return list end
+    local reach = a.def.reach_m + 1.5
+    for u, c in pairs(Projectiles.Near()) do
+        if not seen[u] and u ~= a.attacker then
+            local f = Projectiles.FeetOf(c.ent)
+            if f and math.abs(f[1] - af[1]) < reach and math.abs(f[3] - af[3]) < reach and isEnemy(a.attacker, u) then
+                seen[u] = true
+                list[#list + 1] = u
+            end
+        end
+    end
+    return list
+end
+
+local function meleeActive(a, t)
+    if a.blocked then return end
+    for _, cand in ipairs(meleeCandidates(a)) do
+        if not a.hits[cand] and alive(cand) then
+            local hp, why, cyl, dist = meleeTest(a, cand, t)
+            if not hp then
+                a.results[cand] = why
+            else
+                -- Wall stop: the swing's line to the body hits the world first.
+                local L = len(sub(hp, a.eye))
+                local dw = Projectiles.WorldHit(a.eye, hp)
+                if dw and dw < L - 0.25 then
+                    a.blocked = string.format("obstructed by the world at %.2f m of %.2f m (wall stop)", dw, L)
+                    return
+                end
+                a.hits[cand] = true
+                local dmg, w = weaponDamage(a.attacker, false)
+                local shield = Shields.Has(cand) and Shields.Blocks(cand, a.eye, hp, 0.05)
+                local base = dmg
+                if shield then dmg = Shields.Reduce(dmg) end
+                local dealt = Damage.Apply(cand, dmg, w.type, a.attacker, "AI swing")
+                a.results[cand] = string.format("HIT for %d %s (%s %s%+d = %d%s) at %.2f m", dealt, w.type, w.name, w.dice, w.mod, base,
+                    shield and string.format(", SHIELD -%.0f %% -> %d", Shield.Reduction() * 100, dmg) or "", dist or 0)
+            end
+        end
+    end
+end
+
+local function meleeSummary(a)
+    local parts = {}
+    for _, cand in ipairs({ a.target }) do
+        parts[#parts + 1] = name(cand) .. ": " .. (a.results[cand] or (a.hits[cand] and "HIT" or "not in reach during the swing"))
+    end
+    for cand, r in pairs(a.results) do
+        if cand ~= a.target and a.hits[cand] then parts[#parts + 1] = name(cand) .. ": " .. r end
+    end
+    log(string.format("AI: %s swing #%d %s%s", name(a.attacker), a.idx, a.blocked and ("BLOCKED, " .. a.blocked .. "; ") or "",
+        table.concat(parts, "; ")))
+end
+
+-- ---------------------------------------------------------------------
+-- Ranged shots
+-- ---------------------------------------------------------------------
+local function fireShot(a)
+    if not canAct(a.attacker) then a.state, a.why = "done", "can't act any more"; return end
+    local eye = eyeOf(a.attacker) or a.aim.eye
+    local ok, why = Projectiles.Launch(a.attacker, a.proj, { eye = eye, dir = a.aim.dir, targetUuid = a.target, npc = true },
+        function(c, id, p) return CastRequest.AtPosition(c, id, p) end)
+    if ok then
+        if a.kind == "projectile" and Party.IsMember(a.attacker) == false then
+            pcall(function() Resources.deductCastedSpell(a.attacker, a.spell, "dag-shot") end)
+        end
+        log(string.format("AI: %s fires %s at %s (aimed %d ms ago)", name(a.attacker), a.proj, name(a.target), math.floor(now() - a.aimedAt)))
+    else
+        log(string.format("AI: %s can't fire %s through our projectiles (%s): BG3 casts %s instead", name(a.attacker), a.proj, tostring(why), a.spell))
+        a.fallback = true
+    end
+end
+
+local function shotAim(a, t)
+    local speed = Projectiles.Speed(a.proj) or 30
+    local react = (cfg.ranged.reaction_ms or 350) + math.random(0, cfg.ranged.reaction_jitter_ms or 0)
+    a.aim = aimAt(a.attacker, a.target, speed, react)
+    if not a.aim then a.state, a.why = "done", "no positions"; return end
+    a.aimedAt = t
+    a.fireAt = t + react
+    a.state = "aim"
+    busy[a.attacker] = a.fireAt + 1500 + (cfg.busy_pad_ms or 300)
+    pcall(function() Osi.SteerTo(a.attacker, a.target, 0) end)
+    log(string.format("AI: %s aims %s at %s: %.1f m, target moving %.1f m/s, lead %.2f m (skill x%.2f), error %.1f deg, fires in %d ms",
+        name(a.attacker), a.proj, name(a.target), a.aim.dist, a.aim.speed, a.aim.lead, a.aim.skill, a.aim.err, react))
+end
+
+local function ranged(attacker, target, spell, kind, onSubmitted, onCompleted, onFailed)
+    local t = now()
+    local a = { kind = kind, attacker = attacker, target = target, spell = spell, proj = kind == "ranged" and ARROW_SPELL or spell,
+        onCompleted = onCompleted, onFailed = onFailed, state = "wait", hits = {} }
+    -- A projectile spell is channelled first (our cast time), then aimed.
+    a.aimAt = t + (kind == "projectile" and (cfg.cast_time_s or 0) * 1000 or 0)
+    busy[attacker] = a.aimAt + 3000
+    pcall(onSubmitted, { RequestGuid = "dag-shot" })
+    actions[#actions + 1] = a
+    if kind == "projectile" then
+        log(string.format("AI: %s starts casting %s at %s (cast time %.1f s, then aims)", name(attacker), spell, name(target), cfg.cast_time_s or 0))
+    end
+end
+
+-- ---------------------------------------------------------------------
+-- Area spells and plain casts
+-- ---------------------------------------------------------------------
+local function area(attacker, target, spell, onSubmitted, onCompleted, onFailed)
+    local t = now()
+    local af, tf = feet(attacker), feet(target)
+    if not af or not tf then return onFailed("no positions") end
+    local dist = len(sub(tf, af))
+    local r = math.sqrt(math.random()) * dist * math.tan(math.rad(cfg.ranged.aim_error_deg or 0))
+    local th = 2 * math.pi * math.random()
+    local point = { tf[1] + r * math.cos(th), tf[2], tf[3] + r * math.sin(th) }
+    local ct = (cfg.cast_time_s or 0) * 1000
+    busy[attacker] = t + ct + 1500 + (cfg.busy_pad_ms or 300)
+    pcall(onSubmitted, { RequestGuid = "dag-area" })
+    actions[#actions + 1] = { kind = "area", attacker = attacker, target = target, spell = spell, point = point, castAt = t + ct,
+        state = "wait", onCompleted = onCompleted, onFailed = onFailed }
+    pcall(function() Osi.SteerTo(attacker, target, 0) end)
+    log(string.format("AI: %s starts casting %s at %s's spot %s (%.1f m off, committed now; cast time %.1f s)", name(attacker), spell,
+        name(target), fmt(point), r, ct / 1000))
+end
+
+local origUse = nil
+local function castLater(attacker, target, spell, isFriendly, onSubmitted, onCompleted, onFailed)
+    local t = now()
+    local ct = (cfg.cast_time_s or 0) * 1000
+    busy[attacker] = t + ct + 8000
+    actions[#actions + 1] = { kind = "cast", attacker = attacker, target = target, spell = spell, isFriendly = isFriendly, castAt = t + ct,
+        state = "wait", onSubmitted = onSubmitted, onCompleted = onCompleted, onFailed = onFailed }
+    log(string.format("AI: %s starts casting %s on %s (cast time %.1f s, then BG3 casts it)", name(attacker), spell, name(target), ct / 1000))
+end
+
+-- ---------------------------------------------------------------------
+-- Tick
+-- ---------------------------------------------------------------------
+local function finish(a, ok, why)
+    a.state = "done"
+    busy[a.attacker] = now() + (cfg.busy_pad_ms or 300)
+    if ok then pcall(a.onCompleted or noop, a.spell) else pcall(a.onFailed or noop, why or "failed") end
+end
+
+local function step(a, t)
+    if a.kind == "melee" then
+        if a.state == "react" and t >= a.startAt then
+            if not canAct(a.attacker) then finish(a, false, "can't act"); log("AI: " .. name(a.attacker) .. " swing cancelled (can't act)"); return end
+            meleeStart(a, t)
+        end
+        if a.state == "windup" and t >= a.activeStart then a.state = "active" end
+        if a.state == "active" then
+            if t < a.activeEnd then meleeActive(a, t) else a.state = "recovery"; meleeSummary(a) end
+        end
+        if a.state == "recovery" and t >= a.endAt then finish(a, true) end
+    elseif a.kind == "ranged" or a.kind == "projectile" then
+        if a.state == "wait" and t >= a.aimAt then
+            if not canAct(a.attacker) then finish(a, false, "can't act"); return end
+            shotAim(a, t)
+        end
+        if a.state == "aim" and t >= a.fireAt then
+            fireShot(a)
+            if a.fallback then
+                a.state = "done"
+                busy[a.attacker] = t + 8000
+                origUse(a.attacker, a.target, a.spell, false, noop, function(...) busy[a.attacker] = now(); pcall(a.onCompleted or noop, ...) end,
+                    function(...) busy[a.attacker] = now(); pcall(a.onFailed or noop, ...) end)
+            elseif a.state ~= "done" then
+                a.state, a.doneAt = "flying", t + 600
+            end
+        end
+        if a.state == "flying" and t >= a.doneAt then finish(a, true) end
+    elseif a.kind == "area" then
+        if a.state == "wait" and t >= a.castAt then
+            if not canAct(a.attacker) then finish(a, false, "can't act"); log("AI: " .. name(a.attacker) .. " cast of " .. a.spell .. " interrupted"); return end
+            local ok = CastRequest.AtPosition(a.attacker, a.spell, a.point)
+            local tf = feet(a.target)
+            if ok and not Party.IsMember(a.attacker) then pcall(function() Resources.deductCastedSpell(a.attacker, a.spell, "dag-area") end) end
+            log(string.format("AI: %s casts %s at %s %s (%s is now %.1f m from that point)", name(a.attacker), a.spell, fmt(a.point),
+                ok and "" or "FAILED", name(a.target), tf and len(sub(tf, a.point)) or -1))
+            finish(a, ok, "cast failed")
+        end
+    elseif a.kind == "cast" then
+        if a.state == "wait" and t >= a.castAt then
+            a.state = "done"
+            if not canAct(a.attacker) then busy[a.attacker] = t; pcall(a.onFailed or noop, "can't act"); return end
+            log(string.format("AI: %s's cast time is over, BG3 casts %s on %s", name(a.attacker), a.spell, name(a.target)))
+            origUse(a.attacker, a.target, a.spell, a.isFriendly, a.onSubmitted or noop,
+                function(...) busy[a.attacker] = now() + (cfg.busy_pad_ms or 300); pcall(a.onCompleted or noop, ...) end,
+                function(...) busy[a.attacker] = now(); pcall(a.onFailed or noop, ...) end)
+        end
+    end
+end
+
+local function tick()
+    trackVelocities()
+    if #actions == 0 then return end
+    local t = now()
+    local keep = {}
+    for _, a in ipairs(actions) do
+        local ok, err = pcall(step, a, t)
+        if not ok then
+            Log.Write("AI: action error (" .. tostring(a.kind) .. "): " .. tostring(err))
+            a.state = "done"
+            busy[a.attacker] = t
+        end
+        if a.state ~= "done" then keep[#keep + 1] = a end
+    end
+    actions = keep
+end
+
+-- ---------------------------------------------------------------------
+-- Brawl wiring
+-- ---------------------------------------------------------------------
+-- The arrow's hit (Projectiles impact_mode "weapon"): ranged weapon dice.
+local function arrowHit(p, target, pos, zone, shielded)
+    if not alive(target) then return "target already down" end
+    local dmg, w = weaponDamage(p.caster, true)
+    local base = dmg
+    local mult = Hitbox.ZoneMult(zone or "torso")
+    dmg = math.max(1, math.floor(dmg * mult + 0.5))
+    local zoned = dmg
+    if shielded then dmg = Shields.Reduce(dmg) end
+    local dealt = Damage.Apply(target, dmg, w.type, p.caster, "arrow")
+    return string.format("%d %s to %s (%s %s%+d = %d, %s x%.1f%s)", dealt, w.type, name(target), w.name, w.dice, w.mod, base, zone or "torso",
+        mult, shielded and string.format(", SHIELD %d -> %d", zoned, dmg) or "")
+end
+
+function M.SetReviveHandler(h) reviveHandler = h end
+function M.Busy(uuid) local b = busy[uuid]; return b and now() < b end
+
+local function wire()
+    if origUse then return end
+    origUse = Actions.useSpellOnTarget
+    Actions.useSpellOnTarget = function(attacker, target, spell, isFriendly, onSubmitted, onCompleted, onFailed)
+        onSubmitted, onCompleted, onFailed = onSubmitted or noop, onCompleted or noop, onFailed or noop
+        attacker, target = Party.Norm(attacker), Party.Norm(target)
+        if cfg.enabled == false or not attacker or not target or attacker == target then
+            return origUse(attacker, target, spell, isFriendly, onSubmitted, onCompleted, onFailed)
+        end
+        local kind = classify(spell)
+        if kind == "melee" then return melee(attacker, target, spell, onSubmitted, onCompleted, onFailed) end
+        if kind == "ranged" or kind == "projectile" then return ranged(attacker, target, spell, kind, onSubmitted, onCompleted, onFailed) end
+        if kind == "area" then return area(attacker, target, spell, onSubmitted, onCompleted, onFailed) end
+        if kind == "help" and reviveHandler and reviveHandler.Help then
+            local took = reviveHandler.Help(attacker, target, onSubmitted, onCompleted, onFailed)
+            if took then return end
+        end
+        return castLater(attacker, target, spell, isFriendly, onSubmitted, onCompleted, onFailed)
+    end
+    local origAct = AI.act
+    AI.act = function(brawler, bonusActionOnly, onSubmitted, onCompleted, onFailed)
+        if cfg.enabled ~= false and brawler and brawler.uuid then
+            local b = busy[Party.Norm(brawler.uuid)]
+            if b and now() < b then return (onFailed or noop)("busy: our swing / shot / cast is running") end
+            if reviveHandler and reviveHandler.Act and reviveHandler.Act(brawler) then return (onCompleted or noop)("revive") end
+        end
+        return origAct(brawler, bonusActionOnly, onSubmitted, onCompleted, onFailed)
+    end
+    Log.Write("AI: Brawl's Actions.useSpellOnTarget and AI.act wrapped (melee -> our swing, ranged -> our projectiles, casts -> our cast time)")
+end
+
+function M.Register()
+    Projectiles.SetWeaponHandler(arrowHit)
+    wire()
+    Ext.Events.Tick:Subscribe(TickBudget.Wrap("NpcCombat", tick))
+    ConsoleForward.Server("dag_ai", function(_, a)
+        if a == "on" or a == "off" then cfg.enabled = (a == "on") end
+        Log.Write("AI: our combat rules for Brawl's AI " .. (cfg.enabled ~= false and "ON" or "OFF (Brawl casts BG3's attacks as before)"))
+    end)
+    ConsoleForward.Server("dag_ai_aim", function(_, v)
+        if tonumber(v) then cfg.ranged.aim_error_deg = math.max(0, tonumber(v)) end
+        Log.Write(string.format("AI: aim error cone +-%.1f deg (lead skill %.2f, aim height %.2f)", cfg.ranged.aim_error_deg,
+            cfg.ranged.lead_skill, cfg.ranged.aim_height))
+    end)
+    ConsoleForward.Server("dag_ai_react", function(_, v)
+        if tonumber(v) then
+            cfg.ranged.reaction_ms = math.max(0, tonumber(v))
+            cfg.melee.reaction_ms = math.max(0, tonumber(v))
+        end
+        Log.Write(string.format("AI: reaction delay %d ms (+0..%d ranged, +0..%d melee)", cfg.ranged.reaction_ms, cfg.ranged.reaction_jitter_ms,
+            cfg.melee.reaction_jitter_ms))
+    end)
+    ConsoleForward.Server("dag_ai_debug", function(_, a)
+        debugOn = (a ~= "off" and a ~= "0")
+        Log.Write("AI: debug lines " .. (debugOn and "ON" or "OFF"))
+    end)
+    Log.Write(string.format("AI: registered (aim error %.1f deg, reaction %d+%d ms, lead skill %.2f, melee %s, cast time %.1f s)",
+        cfg.ranged.aim_error_deg, cfg.ranged.reaction_ms, cfg.ranged.reaction_jitter_ms, cfg.ranged.lead_skill, cfg.melee.weapon,
+        cfg.cast_time_s))
+end
+
+return M

@@ -56,6 +56,19 @@ return {
             speed_mps = "template", fallback_speed_mps = 22,
             gravity = 0.0, drag = 0.0, radius_m = 0.30,
             impact_mode = "point",
+            area_m = 4.0,   -- a player-controlled character inside gets the no-hit-reaction clone
+        },
+        -- Bows / crossbows (NPC and companion shots, Server/Combat/NpcCombat.lua;
+        -- the player's bows come with Pass A's bow work). impact_mode "weapon":
+        -- the visual clone (DAG_V_Projectile_MainHandAttack, the weapon's own
+        -- arrow) flies, our hit deals the ranged weapon's dice + DEX on our
+        -- damage path. Straight flight for now (gravity 0). launch_wait_s: the
+        -- draw animation comes before BG3's arrow appears.
+        Projectile_MainHandAttack = {
+            speed_mps = "template", fallback_speed_mps = 40,
+            gravity = 0.0, drag = 0.0, radius_m = 0.08,
+            impact_mode = "weapon",
+            launch_wait_s = 2.0,
         },
     },
 
