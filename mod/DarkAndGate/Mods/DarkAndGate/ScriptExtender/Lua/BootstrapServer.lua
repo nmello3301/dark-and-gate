@@ -61,6 +61,11 @@ Downed.Register()
 Ext.Require("Server/Combat/NpcCombat.lua").SetReviveHandler(Downed)
 -- Crouch = sneaking, and our stealth checks.
 Ext.Require("Server/Combat/Stealth.lua").Register()
+-- V companion modes (Downed asks them: no revives from camp), travel / POV.
+local Companions = Ext.Require("Server/Companions.lua")
+Companions.Register()
+Downed.SetModeSource(Companions.Mode)
+Ext.Require("Server/Travel.lua").Register()
 
 -- Animation browser + gallery (server side: preview copies).
 local AnimLib = Ext.Require("Server/AnimLib.lua")

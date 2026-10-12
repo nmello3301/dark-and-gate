@@ -98,6 +98,9 @@ Ext.Require("Client/Interact.lua").Register()
 Ext.Require("Client/Downed.lua").Register()
 -- C = crouch (BG3 sneaking): speed, eye, cones.
 Ext.Require("Client/Crouch.lua").Register()
+-- V companion modes + server toasts; first person after teleports.
+Ext.Require("Client/Companions.lua").Register()
+Ext.Require("Client/Travel.lua").Register()
 Ext.Require("Shared/ConsoleForward.lua").Forward({
     "dag_ai", "dag_ai_aim", "dag_ai_react", "dag_ai_debug", "dag_shield_pct", "dag_shield_debug",
     "dag_bleedout", "dag_revive_time", "dag_downme", "dag_stealth", "dag_stealth_debug",
