@@ -22,6 +22,7 @@ local spells = Ext.Require("data/spells.lua")
 local Spells = Ext.Require("Client/Combat/Spells.lua")
 local ArtHud = Ext.Require("Client/HUD/Hud.lua")
 local SpellDefs = Ext.Require("Shared/SpellDefs.lua")
+local WindowFlags = Ext.Require("Client/HUD/WindowFlags.lua")
 
 local M = {}
 
@@ -52,8 +53,8 @@ local FLAGS = { "NoTitleBar", "NoResize", "NoMove", "NoInputs", "NoScrollbar",
 local function bareWindow(title, bg)
     local w = Ext.IMGUI.NewWindow(title)
     trySet(w, "Closeable", false)
-    pcall(function() w.Flags = FLAGS end)
-    for _, f in ipairs(FLAGS) do trySet(w, f, true) end
+    local bad = WindowFlags.Set(w, FLAGS)
+    if #bad > 0 then Log.Write("HUD: " .. title .. " flags not set: " .. table.concat(bad, ", ")) end
     pcall(function() w:SetColor("WindowBg", bg) end)
     pcall(function() w:SetColor("Border", { 0, 0, 0, 0 }) end)
     pcall(function() w:SetStyle("WindowBorderSize", 0) end)
@@ -124,7 +125,7 @@ local function render()
 
     local want = State.povOn and State.IsCombatActive()
     -- No art HUD (its texture didn't load): the status line stands in.
-    if ArtHud.AtlasOk() == false then hudOn = true end
+    if ArtHud.Available() == false then hudOn = true end
     if not want then
         if ui then setShown("cross", false); setShown("panel", false) end
         return

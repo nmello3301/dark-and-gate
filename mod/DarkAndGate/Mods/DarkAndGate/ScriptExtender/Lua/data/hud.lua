@@ -74,4 +74,9 @@ return {
     },
     -- Our "Prepare Hotbar" menu opens beside these BG3 panels (I, K, H, Tab).
     hotbar_menu_with = { "CharacterPanel", "PartyPanel" },
+    -- After the last menu closes, mouse-look waits this long (our menu window
+    -- is gone by then, so the DLL's synthetic MMB press reaches BG3, not ImGui).
+    menu_release_ms = 200,
+    -- BG3's cursor state is logged this long after a menu opens / closes.
+    cursor_probe_ms = 400,
 }

@@ -266,8 +266,9 @@ handlers[Net.Channels.JumpStart] = function(payload, userId)
         local uuid = userToCharacter(userId)
         if not uuid then return end
         Hitbox.SetJump(uuid, payload.durMs, payload.h, payload.k, t0)
+        -- durMs can arrive as a float: %d on it threw and cut the broadcast below.
         Log.Write(string.format("Net: Jump uuid=%s dur=%dms h=%.2f (hitbox lifted)",
-            uuid, tonumber(payload.durMs) or 0, tonumber(payload.h) or 0))
+            uuid, math.floor((tonumber(payload.durMs) or 0) + 0.5), tonumber(payload.h) or 0))
         local msg = Ext.Json.Stringify({ uuid = uuid, durMs = payload.durMs, h = payload.h, k = payload.k })
         local okB = pcall(function() Ext.Net.BroadcastMessage(Net.Channels.JumpNotify, msg, uuid) end)
         if not okB then pcall(function() Ext.ServerNet.BroadcastMessage(Net.Channels.JumpNotify, msg, uuid) end) end

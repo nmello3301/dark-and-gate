@@ -1,5 +1,27 @@
 # Playtest: HUD + projectiles v1 (Pass A, 2026-10-12)
 
+## Round 3 (2026-10-12): the camera works again
+
+Round 2: our HUD drew ("looks amazing"), but **the camera didn't turn at all** and MMB didn't help. In the Tab / I menus the **cursor was invisible**, so the new Prepare Hotbar menu couldn't be used. Everything after R2.3 was blocked by this.
+
+**Cause:** our full-screen HUD window was set up with `win.Flags = {...}`. The Script Extender has no `Flags` field: each window flag is its own true/false field (`win.NoInputs = true`). The assignment errored, and a `pcall` hid the error. So the HUD went up as a normal, hoverable window over the whole screen. While a hoverable ImGui window is under the cursor, SE drops every mouse event before BG3 gets it (`Extender/Client/SDL.cpp`, `io.WantCaptureMouse`): mouse moves, MMB, and the DLL's own "hold Camera Rotate" press. In round 1 this window was never built, because its texture didn't load.
+
+**Fixes:**
+- Every ImGui window's flags are now set field by field and read back (`Client/HUD/WindowFlags.lua`). The HUD refuses to show a window that can't be made click-through, and falls back to the status line instead.
+- When the last menu closes, mouse-look waits 200 ms (`data/hud.lua` `menu_release_ms`) until our menu window is gone. That way the DLL's synthetic MMB press can't land on it.
+- When a menu opens or closes, the log records BG3's cursor state. `!dag_cursor` logs it on demand.
+- The jump's `%d` format error in `Server/Net.lua` is fixed: it threw on every jump and cut the jump notice to other players. The native log's per-frame `RATE: clip rates …` spam is gone.
+
+| # | Do | Expect | Log |
+| --- | --- | --- | --- |
+| R3.1 | Load DEV-SAVE, `!dag_full_pov`, move the mouse | Our HUD draws **and the mouse turns the camera**. MMB: cursor appears, camera stops; MMB again: mouse-look back. | `Hud: built <w>x<h> … 3 slot icons, click-through` (no `flags not set`). No `HUD: ##DAG_… flags not set` line. native.log: `POV: mouselook ON (MMB toggles)` |
+| R3.2 | **Tab** | Party view opens, BG3's HUD comes back, **the cursor shows**, our Prepare Hotbar menu is on the right. Tab again: menu closes, mouse-look is back about 0.2 s later. | `Hud: menu PartyPanel open -> cursor free (mouse-look off), BG3 HUD back`, `Hud: cursor after menu open: BG3 ShowCursor=<…> cursor=<…> DLL holds rotate=false`; on close `Hud: menus closed -> mouse-look back on`, `Hud: cursor after menus closed: … DLL holds rotate=true`. native.log: `POV: mouselook OFF (menu open)` / `ON (MMB toggles)` |
+| R3.3 | **I**, then close it | Same with the inventory. | `Hud: menu CharacterPanel open …`, same cursor lines |
+| R3.4–R3.10 | Rows **R2.4–R2.10** below: bind a spell from the menu, cast it from its key, H pin, reload keeps the layout, Fire Bolt at the moving goblin (straight, then leading it), at a wall, Fireball | As in round 2 | As in round 2 |
+| R3.11 | Jump a few times | Same jump | `Net: Jump uuid=<…> dur=1280ms h=0.80 (hitbox lifted)`. No `deferred Osi error … Net.lua:269` |
+
+If the cursor is still invisible in a menu: with the menu open, open the SE console and type `client`, then `!dag_cursor`. It logs `Hud: cursor now: …`, which shows whether BG3 thinks the cursor is shown and whether the DLL still holds Camera Rotate.
+
 ## Round 2 (2026-10-12): fixes from round 1 + the Prepare Hotbar menu
 
 Round 1: BG3's HUD hid, but **ours didn't draw** (its texture bank wasn't loaded: it shipped only as `merged.lsx` under `Public/DarkAndGate`); **Tab stopped working** (collapsing PlayerPortraits killed its key binding); the **projectile hits were BG3's own** (Lua can't write a spell's damage fields, so the "visual" copy still dealt damage; our flight started 1.2 s late and the server's world ray rejected the "Door" physics group).

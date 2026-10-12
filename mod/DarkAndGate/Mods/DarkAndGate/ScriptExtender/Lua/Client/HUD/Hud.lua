@@ -20,6 +20,7 @@
 --   !dag_hud on | off | vanilla   (vanilla = ours AND BG3's, for debugging)
 --   !dag_hud widgets              log BG3's HUD widget names + visibility
 --   !dag_bow_bar <0..1> | demo | off
+--   !dag_cursor                   log BG3's cursor state + whether the DLL holds Camera Rotate
 
 local Log        = Ext.Require("Shared/Log.lua")
 local Net        = Ext.Require("Shared/Net.lua")
@@ -33,12 +34,14 @@ local VanillaHud = Ext.Require("Client/HUD/VanillaHud.lua")
 local SpellDefs  = Ext.Require("Shared/SpellDefs.lua")
 local FullPov    = Ext.Require("FullPov.lua")
 local HotbarMenu = Ext.Require("Client/HUD/HotbarMenu.lua")
+local WindowFlags = Ext.Require("Client/HUD/WindowFlags.lua")
 
 local M = { menuOpen = false }
 
 local mode = "on"              -- on | off | vanilla
 local ui = nil                 -- built window + elements
 local atlasOk = nil            -- nil = not checked yet
+local clickThrough = nil       -- false = the window would take the mouse: never shown
 local stats = { xpCur = 0, xpNext = 0, level = 0, hpPotions = 0, manaPotions = 0 }
 local bowDraw = nil            -- nil = hidden, else 0..1
 local bowDemo = nil
@@ -70,7 +73,7 @@ end
 -- an image can't bind, so build() checks the first layer and falls back to
 -- the status line (atlasOk = false) when it didn't bind.
 local function checkAtlas()
-    if atlasOk == false then return false end
+    if atlasOk == false or clickThrough == false then return false end
     return true
 end
 
@@ -155,7 +158,17 @@ local function build()
     computeGeo(vw, vh)
     local win = Ext.IMGUI.NewWindow("##DAG_FirstPersonHUD")
     set(win, "Closeable", false)
-    pcall(function() win.Flags = FLAGS end)
+    local badFlags = WindowFlags.Set(win, FLAGS)
+    -- A full-screen window that takes the mouse blocks BG3's camera and MMB
+    -- (SE hands ImGui every mouse event over a hoverable window): never show one.
+    if not WindowFlags.ClickThrough(win) then
+        clickThrough = false
+        Log.Write("Hud: the HUD window could not be made click-through (flags not set: " .. table.concat(badFlags, ", ")
+            .. ") -> not shown, status line instead (!dag_hud_status): it would block the camera")
+        pcall(function() win:Destroy() end)
+        return
+    end
+    clickThrough = true
     pcall(function() win.Scaling = "Absolute" end)
     pcall(function() win:SetStyle("WindowPadding", 0, 0) end)
     pcall(function() win:SetStyle("WindowBorderSize", 0) end)
@@ -268,8 +281,9 @@ local function build()
     ui = u
     shownState = nil
     lastFill, lastText = -1e9, -1e9
-    Log.Write(string.format("Hud: built %dx%d scale %.3f (art canvas %dx%d), %d slot icons", vw, vh, geo.s,
-        L.canvas[1], L.canvas[2], (function() local n = 0 for i = 1, 10 do if u.slots[i].e then n = n + 1 end end return n end)()))
+    Log.Write(string.format("Hud: built %dx%d scale %.3f (art canvas %dx%d), %d slot icons, click-through%s", vw, vh, geo.s,
+        L.canvas[1], L.canvas[2], (function() local n = 0 for i = 1, 10 do if u.slots[i].e then n = n + 1 end end return n end)(),
+        #badFlags > 0 and (" (flags not set: " .. table.concat(badFlags, ", ") .. ")") or ""))
 end
 
 -- ---------------------------------------------------------------------
@@ -504,6 +518,21 @@ local function setShown(on)
     if ui then set(ui.win, "Open", on); set(ui.win, "Visible", on) end
 end
 
+-- BG3's cursor (Ext.UI.GetCursorControl) + whether the DLL holds Camera
+-- Rotate, for the log: shows if a menu really freed the cursor.
+local function cursorState()
+    local parts = {}
+    local ok, cc = pcall(Ext.UI.GetCursorControl)
+    if ok and cc then
+        pcall(function() parts[#parts + 1] = "BG3 ShowCursor=" .. tostring(cc.ShowCursor) end)
+        pcall(function() parts[#parts + 1] = "cursor=" .. tostring(cc.RequestedCursor) end)
+    else
+        parts[#parts + 1] = "no cursor control"
+    end
+    parts[#parts + 1] = "DLL holds rotate=" .. tostring(State.MouseLookOn())
+    return table.concat(parts, " ")
+end
+
 local function tick()
     VanillaHud.Tick()
     local active = State.IsCombatActive()
@@ -512,13 +541,34 @@ local function tick()
     -- Our Prepare Hotbar menu: beside BG3's I / Tab panels, or pinned (H).
     pcall(HotbarMenu.Update, active, menu and menuName or nil)
     -- A BG3 panel (or our pinned menu) is open: the cursor is freed
-    -- (mouse-look off) until it closes.
+    -- (mouse-look off) until it closes. Mouse-look comes back
+    -- menu_release_ms after our menu window is gone: the DLL's synthetic MMB
+    -- press must not land on an ImGui window still under the cursor (SE would
+    -- give it to ImGui and the camera would stay stuck until MMB twice).
     local free = active and (menu or HotbarMenu.Pinned())
-    if free ~= M.menuOpen then
-        M.menuOpen = free
-        FullPov.SetMenuOpen(free)
-        Log.Write(free and ("Hud: " .. (menu and ("menu " .. tostring(menuName)) or "Prepare Hotbar menu") .. " open -> cursor free (mouse-look off)"
-            .. (menu and ", BG3 HUD back" or "")) or "Hud: menus closed -> mouse-look back on")
+    local t0 = now()
+    if free then
+        M.releaseAt = nil
+        if not M.menuOpen then
+            M.menuOpen = true
+            FullPov.SetMenuOpen(true)
+            Log.Write("Hud: " .. (menu and ("menu " .. tostring(menuName)) or "Prepare Hotbar menu") .. " open -> cursor free (mouse-look off)"
+                .. (menu and ", BG3 HUD back" or ""))
+            M.probeAt, M.probeWhy = t0 + (cfg.cursor_probe_ms or 400), "menu open"
+        end
+    elseif M.menuOpen then
+        M.releaseAt = M.releaseAt or (t0 + (cfg.menu_release_ms or 200))
+        if t0 >= M.releaseAt then
+            M.releaseAt = nil
+            M.menuOpen = false
+            FullPov.SetMenuOpen(false)
+            Log.Write("Hud: menus closed -> mouse-look back on")
+            M.probeAt, M.probeWhy = t0 + (cfg.cursor_probe_ms or 400), "menus closed"
+        end
+    end
+    if M.probeAt and t0 >= M.probeAt then
+        M.probeAt = nil
+        Log.Write("Hud: cursor after " .. tostring(M.probeWhy) .. ": " .. cursorState())
     end
     local want = active and not menu and mode ~= "off"
     -- BG3's HUD: hidden only while ours is up in "on" mode.
@@ -543,6 +593,13 @@ end
 function M.SetBowDraw(frac) bowDraw = frac end
 function M.Mode() return mode end
 function M.AtlasOk() return atlasOk end
+-- false = the art HUD can't be shown (atlas didn't bind, or its window
+-- couldn't be made click-through): the status line stands in.
+function M.Available()
+    if atlasOk == false or clickThrough == false then return false end
+    if atlasOk == nil then return nil end
+    return true
+end
 
 function M.UsePotion(kind)
     ClientNet.Send(Net.Channels.UsePotion, { kind = kind })
@@ -570,7 +627,7 @@ function M.Register()
             if a ~= "on" then VanillaHud.Restore("!dag_hud " .. a) end
             Log.Write("Hud: mode " .. mode)
         elseif a == "retry" then
-            atlasOk = nil
+            atlasOk, clickThrough = nil, nil
             destroy()
             Log.Write("Hud: atlas bind will be retried")
         elseif a == "widgets" then
@@ -578,6 +635,9 @@ function M.Register()
         else
             Log.Write("Hud: usage !dag_hud on|off|vanilla|widgets|retry (now " .. mode .. ")")
         end
+    end)
+    Ext.RegisterConsoleCommand("dag_cursor", function()
+        Log.Write("Hud: cursor now: " .. cursorState() .. (M.menuOpen and " (menu open)" or ""))
     end)
     Ext.RegisterConsoleCommand("dag_bow_bar", function(_, a)
         if a == "demo" then bowDemo = now(); bowDraw = nil
@@ -596,7 +656,7 @@ function M.Register()
     -- A previous Lua state (before a `reset`) may have left BG3's HUD hidden.
     pcall(VanillaHud.Recover)
     pcall(function() Ext.Events.SessionLoaded:Subscribe(function() pcall(VanillaHud.Recover) end) end)
-    Log.Write("Hud: registered (art HUD, !dag_hud on|off|vanilla|widgets, !dag_bow_bar)")
+    Log.Write("Hud: registered (art HUD, !dag_hud on|off|vanilla|widgets, !dag_bow_bar, !dag_cursor)")
 end
 
 return M

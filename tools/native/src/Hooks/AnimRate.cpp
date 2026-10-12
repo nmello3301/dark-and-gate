@@ -199,6 +199,9 @@ int      g_numClip = 0;
 std::atomic<uintptr_t> g_clipInst{ 0 };
 std::atomic<long> g_clipHits{ 0 };
 char     g_clipSpec[512] = "";
+// Last instance Lua asked for. g_clipInst is 0 while no clip ids are set, so
+// comparing against it re-applied (and logged) an empty spec every frame.
+uintptr_t g_clipReqInst = 0;
 // FixedString id -> rate (0 = not a target), filled lazily per spec.
 constexpr int kFsCache = 256;
 struct FsRate { uint32_t fs; float rate; };
@@ -357,7 +360,8 @@ long ClipHits() { return g_clipHits.load(); }
 void SetClipRates(uintptr_t instance, const char* spec)
 {
     if (!spec) spec = "";
-    if (instance == g_clipInst.load() && std::strcmp(spec, g_clipSpec) == 0) return;
+    if (instance == g_clipReqInst && std::strncmp(spec, g_clipSpec, sizeof(g_clipSpec) - 1) == 0) return;
+    g_clipReqInst = instance;
     if (instance && spec[0] && g_state == 0) Install();
     if (!g_gstTried) FindStringTable();
     while (g_clipLock.test_and_set(std::memory_order_acquire)) {}

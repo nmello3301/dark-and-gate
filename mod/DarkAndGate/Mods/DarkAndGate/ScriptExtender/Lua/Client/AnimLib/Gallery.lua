@@ -15,6 +15,7 @@ local Log       = Ext.Require("Shared/Log.lua")
 local Net       = Ext.Require("Shared/Net.lua")
 local ClientNet = Ext.Require("Client/Net.lua")
 local Aim       = Ext.Require("Client/Combat/Aim.lua")
+local WindowFlags = Ext.Require("Client/HUD/WindowFlags.lua")
 
 local M = {}
 
@@ -44,7 +45,7 @@ local function labelWindow(i)
     local ok = pcall(function()
         w = Ext.IMGUI.NewWindow("##DAG_AnimLabel_" .. i)
         trySet(w, "Closeable", false)
-        pcall(function() w.Flags = FLAGS end)
+        WindowFlags.Set(w, FLAGS)
         pcall(function() w:SetColor("WindowBg", { 0, 0, 0, 0 }) end)
         pcall(function() w:SetColor("Border", { 0, 0, 0, 0 }) end)
         w.text = w:AddText("")

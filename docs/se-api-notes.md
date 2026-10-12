@@ -104,6 +104,31 @@ built in Lua. It needs native hooks that read the mouse delta and drive
 the camera's yaw/pitch each frame. Rolled into the native plugin alongside
 camera follow and bone reads — see DECISIONS 2026-10-08.
 
+### IMGUI windows: flags are one field each, and hovered windows eat the mouse
+
+Found 2026-10-12 against SE v33 (the round 2 HUD playtest; source in
+`reference/bg3se`):
+
+- **There is no `win.Flags` field.** `P_BITMASK(Flags)` registers one
+  boolean property per `GuiWindowFlags` label (`LuaObjectProxies.cpp`,
+  `AddBitfieldProperty`), which is why the IDE helpers list `NoInputs`,
+  `NoTitleBar`, … under `ExtuiWindowBase` and no `Flags`. Set them one by
+  one (`win.NoInputs = true`) and read them back. `win.Flags = {...}` raises
+  an error, so wrapping it in `pcall` silently leaves the window with no
+  flags. `Client/HUD/WindowFlags.lua` does this.
+- **SE drops mouse events that ImGui wants.** `Extender/Client/SDL.cpp`:
+  while `io.WantCaptureMouse` is true, SDL mouse motion, button and wheel
+  events are not passed to BG3 or to `Ext.Events.MouseButtonInput`. ImGui
+  wants the mouse whenever a window without `NoInputs` / `NoMouseInputs`
+  is under the cursor, or a button was pressed on one and is still held. A
+  full-screen overlay without `NoInputs` therefore blocks BG3's camera
+  rotation and every click, including the DLL's synthetic MMB press. A
+  button that was pressed while no window was hovered is not ImGui's, so
+  it passes even over a window.
+- `Ext.UI.GetCursorControl()` returns BG3's cursor control (`ShowCursor`,
+  `RequestedCursor`, …). Logged by `Hud.lua` when a menu opens or closes
+  (`!dag_cursor`); values to be confirmed in round 3.
+
 ### Loose mod files do not override an installed pak
 
 Attempted 2026-10-08 against SE v32 and BG3 Patch 8: an installed

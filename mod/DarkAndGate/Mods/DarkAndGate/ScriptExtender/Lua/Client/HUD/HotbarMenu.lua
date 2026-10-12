@@ -25,6 +25,7 @@ local Hotbar    = Ext.Require("Client/Combat/Hotbar.lua")
 local SpellDefs = Ext.Require("Shared/SpellDefs.lua")
 local cfg       = Ext.Require("data/hud.lua")
 local dataSpells = Ext.Require("data/spells.lua")
+local WindowFlags = Ext.Require("Client/HUD/WindowFlags.lua")
 
 local M = {}
 
@@ -166,7 +167,8 @@ local function build()
     local vw, vh = viewport()
     local w = Ext.IMGUI.NewWindow("Prepare Hotbar##DAG_HotbarMenu")
     set(w, "Closeable", false)
-    pcall(function() w.Flags = { "NoSavedSettings", "NoCollapse" } end)
+    local bad = WindowFlags.Set(w, { "NoSavedSettings", "NoCollapse" })
+    if #bad > 0 then Log.Write("HotbarMenu: flags not set: " .. table.concat(bad, ", ")) end
     pcall(function() w:SetPos({ vw - 480, 90 }) end)
     pcall(function() w:SetSize({ 460, math.max(420, vh - 260) }) end)
     local u = { win = w }
