@@ -33,7 +33,11 @@ local nextId = 1
 local pending = {}    -- casterUuid -> launch waiting for BG3's projectile
 local active = {}     -- id -> projectile
 local debugSteps = false
-local WORLD = { "Terrain", "Scenery", "Item", "Door" }
+-- Physics groups for the world ray. The server rejected "Door" (playtest
+-- 2026-10-12: "not a valid 'PhysicsGroupFlags' bitfield value: Door"), so
+-- the sets are tried in order and the first one the server accepts is kept.
+local WORLD_SETS = { { "Terrain", "Scenery", "Item" }, { "Terrain", "Scenery" }, { "Terrain" } }
+local worldSet = 1
 
 local function now() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
 local function v3(p) return { tonumber(p.x or p[1]) or 0, tonumber(p.y or p[2]) or 0, tonumber(p.z or p[3]) or 0 } end
@@ -133,6 +137,7 @@ end
 function M.Launch(caster, spell, claim, castAt)
     local def = data.spells[spell]
     if data.enabled == false or not def then return false, "not a projectile spell" end
+    if not PSpells.Ready(spell) then return false, "clones " .. PSpells.VisualId(spell) .. " / " .. PSpells.ImpactId(spell) .. " not loaded" end
     local eye = claim.eye and v3(claim.eye) or nil
     local dir = claim.dir and norm(v3(claim.dir)) or nil
     if not eye or not dir then
@@ -182,6 +187,44 @@ local function start(p, projEnt, why)
         p.srcPos and string.format(", BG3 projectile SourcePos %s is %.2f m from our origin", fmt(p.srcPos), len(sub(p.srcPos, p.origin))) or ""))
 end
 
+-- BG3's projectile for a pending launch: polled every tick while a launch
+-- waits (the OnCreate subscription never matched in the 2026-10-12
+-- playtest, so every flight started 1.2 s late). Each projectile entity is
+-- looked at once; the first unreadable one logs why.
+local seenProj = {}
+local readErrLogged = false
+local function pollProjectiles()
+    if next(pending) == nil then return end
+    local ok, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ServerProjectile")
+    if not ok or not ents then
+        if not readErrLogged then readErrLogged = true; Log.Write("Projectiles: can not list ServerProjectile entities: " .. tostring(ents)) end
+        return
+    end
+    for _, e in ipairs(ents) do
+        local key = tostring(e)
+        if not seenProj[key] then
+            seenProj[key] = now()
+            local okC, caster, src, spell = pcall(function()
+                local c = e.ServerProjectile
+                local sp = "?"
+                pcall(function() sp = tostring(c.Spell.Prototype or c.Spell.OriginatorPrototype) end)
+                return tostring(c.Caster.Uuid.EntityUuid), { c.SourcePos[1], c.SourcePos[2], c.SourcePos[3] }, sp
+            end)
+            if not okC then
+                if not readErrLogged then readErrLogged = true; Log.Write("Projectiles: can not read a ServerProjectile: " .. tostring(caster)) end
+            else
+                local p = pending[caster]
+                if p then
+                    p.srcPos = src
+                    start(p, e, string.format("BG3 projectile %s seen after %d ms", tostring(spell), math.floor(now() - p.at)))
+                end
+            end
+        end
+    end
+    local t = now()
+    for k, at in pairs(seenProj) do if t - at > 30000 then seenProj[k] = nil end end
+end
+
 -- BG3's projectile for a pending launch appeared.
 local function onProjectileCreated(ent)
     Ext.OnNextTick(function()
@@ -204,20 +247,24 @@ local function worldHit(a, b)
     local seg = sub(b, a)
     local L = len(seg)
     if L < 1e-4 then return nil end
-    local okR, hit = pcall(Ext.Level.RaycastClosest, a, b, "Static", WORLD, {}, 1)
-    if not okR then
-        if not M.rayErrLogged then
-            M.rayErrLogged = true
-            Log.Write("Projectiles: server RaycastClosest ERROR (no wall hits): " .. tostring(hit))
+    while worldSet <= #WORLD_SETS do
+        local okR, hit = pcall(Ext.Level.RaycastClosest, a, b, "Static", WORLD_SETS[worldSet], {}, 1)
+        if okR then
+            if not M.raySetLogged then
+                M.raySetLogged = true
+                Log.Write("Projectiles: server world ray uses groups " .. table.concat(WORLD_SETS[worldSet], ","))
+            end
+            if not hit then return nil end
+            local okD, raw = pcall(function() return hit.Distance end)
+            raw = okD and tonumber(raw) or nil
+            if not raw then return nil end
+            return raw <= 1.0001 and raw * L or raw   -- Distance is a 0..1 fraction (spike 2)
         end
-        return nil
+        Log.Write(string.format("Projectiles: server RaycastClosest groups %s rejected (%s)",
+            table.concat(WORLD_SETS[worldSet], ","), tostring(hit)))
+        worldSet = worldSet + 1
     end
-    if not hit then return nil end
-    local okD, raw = pcall(function() return hit.Distance end)
-    raw = okD and tonumber(raw) or nil
-    if not raw then return nil end
-    local d = raw <= 1.0001 and raw * L or raw   -- Distance is a 0..1 fraction (spike 2)
-    return d
+    return nil
 end
 
 -- Distance from point p to segment a-b (for candidate filtering).
@@ -251,6 +298,10 @@ local function charHit(p, a, b)
                     local big = { x = cyl.x, z = cyl.z, y0 = cyl.y0 - r, y1 = cyl.y1 + r, r = cyl.r + r }
                     local d = Hitbox.RayHit(big, a, dir, L)
                     if d and (not best or d < best) then best, bestU, bestCyl = d, u, cyl end
+                    -- Closest approach (logged when the projectile misses).
+                    local mid = { f[1], math.max(cyl.y0, math.min(cyl.y1, (a[2] + b[2]) / 2)), f[3] }
+                    local gap = segDist(mid, a, b) - cyl.r - r
+                    if not p.closest or gap < p.closest.gap then p.closest = { gap = gap, uuid = u } end
                 end
             end
         end
@@ -260,9 +311,13 @@ local function charHit(p, a, b)
     return best, bestU, bestCyl
 end
 
+-- Osi.GetHitpoints returned -1 for spawned goblins (playtest 2026-10-12):
+-- read the Health component instead.
 local function hpOf(uuid)
-    local ok, hp = pcall(function() return Osi.GetHitpoints(uuid) end)
-    return ok and tonumber(hp) or nil
+    local ok, hp = pcall(function() return Ext.Entity.Get(uuid).Health.Hp end)
+    if ok and tonumber(hp) then return tonumber(hp) end
+    local okO, h2 = pcall(function() return Osi.GetHitpoints(uuid) end)
+    return okO and tonumber(h2) or nil
 end
 
 local function impact(p, pos, targetUuid, what, cyl)
@@ -274,8 +329,13 @@ local function impact(p, pos, targetUuid, what, cyl)
         removed = ok and "RequestDelete set" or "RequestDelete FAILED"
     end
     broadcast(Net.Channels.ProjectileHit, { id = p.id, pos = pos, target = targetUuid, what = what })
+    if what == "expired" or what == "world" then
+        local c = p.closest
+        p.missNote = c and string.format(" (closest character %s passed %.2f m from its cylinder)", c.uuid, math.max(0, c.gap)) or
+            " (no character near the path)"
+    end
     if what == "expired" then
-        Log.Write(string.format("PROJ #%d expired after %.1f m (no hit); BG3 projectile: %s", p.id, p.traveled, removed))
+        Log.Write(string.format("PROJ #%d expired after %.1f m (no hit)%s; BG3 projectile: %s", p.id, p.traveled, p.missNote, removed))
         return
     end
     local spellId = PSpells.ImpactId(p.spell)
@@ -291,9 +351,9 @@ local function impact(p, pos, targetUuid, what, cyl)
         local ok, err = pcall(function() Osi.CreateExplosionAtPosition(pos[1], pos[2], pos[3], spellId, level, p.caster) end)
         how = "CreateExplosionAtPosition " .. fmt(pos) .. " " .. (ok and "ok" or ("ERROR " .. tostring(err)))
     end
-    Log.Write(string.format("PROJ #%d HIT %s%s at %s after %.1f m / %.2f s%s: impact %s lvl %d via %s; BG3 projectile: %s",
+    Log.Write(string.format("PROJ #%d HIT %s%s at %s after %.1f m / %.2f s%s: impact %s lvl %d via %s; BG3 projectile: %s%s",
         p.id, what, targetUuid and (" " .. targetUuid) or "", fmt(pos), p.traveled, (now() - p.t0) / 1000,
-        zone and (" zone " .. zone) or "", spellId, level, how, removed))
+        zone and (" zone " .. zone) or "", spellId, level, how, removed, p.missNote or ""))
     if targetUuid and hp0 then
         local t1 = now() + 600
         local function check()
@@ -336,6 +396,8 @@ end
 
 local function tick()
     pcall(stepScan)
+    local okP, errP = pcall(pollProjectiles)
+    if not okP and not M.pollErrLogged then M.pollErrLogged = true; Log.Write("Projectiles: poll error " .. tostring(errP)) end
     local t = now()
     for caster, p in pairs(pending) do
         if t - p.at > (data.launch_wait_s or 1.2) * 1000 then

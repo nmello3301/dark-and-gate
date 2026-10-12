@@ -171,6 +171,7 @@ struct LuaState {
     float     strafeSign = 1.f;
     float     landSpeed = 3.f;
     float     wallH = 1.3f;
+    bool      menu = false;        // a BG3 panel is open (Lua, Client/HUD): mouse-look off, cursor free
     DWORD readTick  = 0;
 };
 
@@ -271,6 +272,7 @@ void PollLuaFile()
     s.strafeSign = ValF(buf, "strafe_sign", 1.f);
     s.landSpeed = ValF(buf, "rj_land_speed", 3.f);
     s.wallH = ValF(buf, "rj_wall_h", 1.3f);
+    s.menu = ValI(buf, "menu", 0) != 0;
     if (const char* v = FindVal(buf, "visual")) {
         s.visual = static_cast<uintptr_t>(std::strtoull(v, nullptr, 16));
     }
@@ -1015,7 +1017,9 @@ void PushMiddle(bool down)
 
 void UpdateMouselookState()
 {
-    const bool want = g_lua.on && g_lua.active;
+    // A BG3 panel (inventory, party view, map...) frees the cursor; the
+    // first-person camera itself stays (unlike dialogue, where active = 0).
+    const bool want = g_lua.on && g_lua.active && !g_lua.menu;
     const bool was  = g_mlWanted.load();
     if (want == was) return;
     g_mlWanted.store(want);
@@ -1026,7 +1030,7 @@ void UpdateMouselookState()
         // Leaving POV, or a dialog/cutscene started: let go of Rotate.
         if (g_toggled.load()) { g_toggled.store(false); PushMiddle(false); }
     }
-    dag::log::Writef("POV: mouselook %s", want ? "ON (MMB toggles)" : "OFF");
+    dag::log::Writef("POV: mouselook %s", want ? "ON (MMB toggles)" : (g_lua.on && g_lua.active && g_lua.menu ? "OFF (menu open)" : "OFF"));
 }
 
 // ---------------------------------------------------------------------

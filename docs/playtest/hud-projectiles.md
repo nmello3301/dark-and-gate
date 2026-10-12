@@ -1,5 +1,36 @@
 # Playtest: HUD + projectiles v1 (Pass A, 2026-10-12)
 
+## Round 2 (2026-10-12): fixes from round 1 + the Prepare Hotbar menu
+
+Round 1: BG3's HUD hid, but **ours didn't draw** (its texture bank wasn't loaded: it shipped only as `merged.lsx` under `Public/DarkAndGate`); **Tab stopped working** (collapsing PlayerPortraits killed its key binding); the **projectile hits were BG3's own** (Lua can't write a spell's damage fields, so the "visual" copy still dealt damage; our flight started 1.2 s late and the server's world ray rejected the "Door" physics group).
+
+Fixes:
+- HUD texture now ships the way MCM's does (`Public/Shared/...`, `merged.lsf` + an icon atlas), and is drawn by icon name.
+- BG3's widgets are hidden with opacity, so their keys keep working.
+- The clones come from a stats file.
+- The server polls for BG3's projectile every tick.
+- The world ray now uses groups the server accepts.
+
+| # | Do | Expect | Log |
+| --- | --- | --- | --- |
+| R2.1 | Load DEV-SAVE, `!dag_full_pov` | **Our HUD draws**: orbs, hotbar, potions, XP. BG3's hotbar / portraits / log are gone. | `Hud: atlas icon DAG_HUD_bar bound (texture 5b0b4f6e-…)`, `Hud: built …`, `VanillaHud: hidden HotBar, PlayerPortraits, …`. If instead `Hud: atlas icon DAG_HUD_bar did NOT bind …`, the status line shows, and SE's console has a warning saying why: copy that line to me. |
+| R2.2 | **Tab** | BG3's party view opens; BG3's HUD comes back; the **cursor is free** (mouse-look off); **our Prepare Hotbar menu** is on the right. Tab again closes it, and mouse-look comes back. | `Hud: menu PartyPanel open -> cursor free (mouse-look off), BG3 HUD back`, `HotbarMenu: built`, then `Hud: menus closed -> mouse-look back on`. native.log: `POV: mouselook OFF (menu open)` / `ON` |
+| R2.3 | **I** (also K, Esc) | Same for the inventory (and the spellbook / game menu; our menu appears with I / K only). | `Hud: menu CharacterPanel open …` / `menu GameMenu open …` |
+| R2.4 | In the menu: click slot **4**, then a spell from the list (e.g. one of Gale's level-1 spells) | The spell's icon is in slot 4, the selection moves to the next empty slot, and the HUD's hotbar shows the new icon. **Clear slot** / **Defaults** work. Search filters by name. | `HotbarMenu: slot 4 = <spell id>` |
+| R2.5 | Close the menu, press **4**, wait, **LMB** | That spell channels and casts like the others (its own prepare animation and mana cost). | `Hotbar: CASTING slot 4 = …`, `SpellCast: CAST …`. If it's rejected: `SpellCast: REJECTED … (<uuid> doesn't have it)` |
+| R2.6 | **H** | Pins the menu open with the cursor free anywhere in first person; H again closes it. | `HotbarMenu: pinned open …` / `closed` |
+| R2.7 | Reload the save (or switch character) | The layout you set is still there (per character). | `Hotbar: loaded the saved layout of <uuid>` |
+| R2.8 | Fire Bolt at the **moving** goblin, straight at it, then leading it | Straight shots miss more often. Led shots hit and deal damage **once** (no BG3 double hit). The bolt flies from your hand at the crosshair. | `ProjectileSpells: Projectile_FireBolt -> DAG_V_Projectile_FireBolt loaded (SpellRoll= SpellSuccess= …)`, `Projectiles: server world ray uses groups Terrain,Scenery,Item`, `PROJ #n flight starts (BG3 projectile DAG_V_Projectile_FireBolt seen after <ms> ms) …`, `PROJ #n HIT character … via CreateExplosion(…) ok; BG3 projectile: RequestDelete set`, `PROJ #n target HP a -> b (damage applied)`. Misses: `PROJ #n expired … (closest character <uuid> passed <m> m from its cylinder)` |
+| R2.9 | Fire Bolt at a wall / the ground | It stops there, and BG3's bolt vanishes there. | `PROJ #n HIT world at (…)` |
+| R2.10 | Fireball at the goblin | One explosion where our orb touched it (Dex save, 4 m). | `PROJ #n HIT character … via CreateExplosionAtPosition …` |
+
+Tell me:
+- Does BG3's bolt **look** right: start, path, vanishing at the hit?
+- Does the cast still feel right?
+- Is the menu usable: size, clicking, the spell list?
+
+The round-1 table below still applies to everything else (cast bar, potions, bow ring, the 8-item checklist).
+
 One pass on **DEV-SAVE**. Everything is in the deployed pak (no `reset` needed). After the run, `scripts\read-log.ps1` shows the merged log. The expected log lines are quoted so they can be grepped; `<…>` marks a value that varies.
 
 Arrows and throwables (Part C) are **not built** in this pass: they come only after the spell projectiles pass this test.

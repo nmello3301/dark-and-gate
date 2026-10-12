@@ -3,6 +3,7 @@
 -- in the art's canvas pixels (docs/design/hud/hud-full-layout.png).
 return {
     atlas = {
+        prefix = "DAG_HUD_",
         size = { 2048, 2048 },
         uuid = "5b0b4f6e-2d6a-4c1e-9b7a-d4a0f5e1c001",
         uv = {

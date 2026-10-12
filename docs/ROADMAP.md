@@ -176,6 +176,8 @@ HUD, using the developer's art ([design/hud.md](design/hud.md)):
   The vanilla HUD is hidden in POV and restored outside it, and in dialogue, menus and cutscenes. Commands: `!dag_hud on|off|vanilla`.
 - [ ] Spell cast bar (blue): fills over the cast time, shows READY when the loop starts, drains on cancel.
 - [ ] Bow draw bar (an amber arc around the crosshair): draw %, a 30 % marker and a full-draw tick (wired to the bows when they land).
+- [ ] **Prepare Hotbar menu** (our own; DECISIONS 2026-10-12): opens beside BG3's I / Tab panels in first person, H pins it; bind any of the character's spells to 1..0, saved per character; the server checks the caster has the spell.
+- [ ] BG3 panels usable in first person: Tab (party view) and I (inventory) open their panels; the cursor is free while a panel is open; BG3's HUD comes back with it.
 
 Projectiles, for spells ([design/projectiles.md](design/projectiles.md), [spikes/projectiles.md](spikes/projectiles.md)):
 - [x] Study: how BG3 projectiles move, how to steer and remove them, and how to build the impact-only spell variant. *(static, 2026-10-12: [spikes/projectiles.md](spikes/projectiles.md); in-game probes in the playtest)*
@@ -186,7 +188,7 @@ Projectiles, for spells ([design/projectiles.md](design/projectiles.md), [spikes
 - [ ] `!dag_spawn_dummy moving`: a dummy walking back and forth over about 6 m.
 - [ ] Fireball ground preview (if time allows).
 
-**Status 2026-10-12:** all of the above is written and deployed, and awaits the one-pass playtest ([playtest/hud-projectiles.md](playtest/hud-projectiles.md)). Not built yet: the Fireball ground preview, the DLL steering of BG3's projectile (only if the Lua probe shows it is needed), and a mana potion item.
+**Status 2026-10-12, round 1:** the vanilla HUD hid; our HUD did not draw (its texture bank wasn't loaded); Tab stopped working; projectiles "worked" on the moving goblin, but the hits were BG3's own projectile (the visual clone still dealt damage, our flight started 1.2 s late and the server's world ray errored). **Round 2** fixes all four and adds the Prepare Hotbar menu ([playtest/hud-projectiles.md](playtest/hud-projectiles.md), round 2 at the top). Not built yet: the Fireball ground preview, the DLL steering of BG3's projectile (only if the Lua probe shows it is needed), and a mana potion item.
 
 Then, only if the spell projectiles pass their test, arrows and throwables:
 - bows: draw, hold forever, release;

@@ -9,7 +9,7 @@
 					<attribute id="Localized" type="bool" value="False" />
 					<attribute id="Name" type="LSString" value="DAG_HUD_Atlas" />
 					<attribute id="SRGB" type="bool" value="False" />
-					<attribute id="SourceFile" type="LSString" value="Public/DarkAndGate/Assets/Textures/DAG_HUD_Atlas.dds" />
+					<attribute id="SourceFile" type="LSString" value="Public/Shared/Assets/Textures/Icons/DAG_HUD_Atlas.dds" />
 					<attribute id="Streaming" type="bool" value="True" />
 					<attribute id="Template" type="FixedString" value="Icons_Items" />
 					<attribute id="Type" type="int32" value="0" />

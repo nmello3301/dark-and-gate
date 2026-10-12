@@ -1,10 +1,13 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
--- Minimal hotbar: 10 slots (keys 1..0). ImGui "Prepare Hotbar" window
--- toggled with H.
+-- Hotbar: 10 slots (keys 1..0). Bound in the Prepare Hotbar menu
+-- (Client/HUD/HotbarMenu.lua; H or BG3's I / Tab panels), or with
+-- !dag_hotbar <slot> <spellId>.
 --
--- Slot value is a spell id (from data/spells.lua .spells key). Persist via
--- Ext.Vars / ModVars at session boundaries. For M1b, we also seed from
--- data/spells.lua default_hotbar if no saved layout exists.
+-- Slot value = a spell id (any spell the character has; Shared/SpellDefs.lua).
+-- Saved per character in DarkAndGate/hotbar-<uuid>.json (client file, so it
+-- survives reloads); a character without a saved layout gets data/spells.lua
+-- default_hotbar. (DESIGN: hotbars move into the save, server-owned, with
+-- the M4 native tab / multiplayer.)
 
 local Log    = Ext.Require("Shared/Log.lua")
 local State  = Ext.Require("Client/Combat/State.lua")
@@ -20,7 +23,42 @@ end
 
 local M = {}
 
-local windowOpen = false
+local owner = nil   -- uuid the current State.hotbar belongs to
+
+local function path(uuid) return "DarkAndGate/hotbar-" .. tostring(uuid) .. ".json" end
+
+local function save()
+    if not owner then return end
+    local t = {}
+    for i = 1, 10 do t[tostring(i)] = State.hotbar[i] or "" end
+    pcall(Ext.IO.SaveFile, path(owner), Ext.Json.Stringify(t))
+end
+
+-- Switch State.hotbar to `uuid`'s saved layout (or the defaults).
+local function load(uuid)
+    owner = uuid
+    for i = 1, 10 do State.hotbar[i] = nil end
+    local ok, txt = pcall(Ext.IO.LoadFile, path(uuid))
+    local okJ, t = false, nil
+    if ok and txt and txt ~= "" then okJ, t = pcall(Ext.Json.Parse, txt) end
+    if okJ and type(t) == "table" then
+        for i = 1, 10 do
+            local v = t[tostring(i)]
+            if v and v ~= "" then State.hotbar[i] = v end
+        end
+        Log.Write("Hotbar: loaded the saved layout of " .. tostring(uuid))
+    else
+        for slot, id in pairs(spells.default_hotbar) do State.hotbar[slot] = id end
+        Log.Write("Hotbar: no saved layout for " .. tostring(uuid) .. ", defaults")
+    end
+end
+
+-- Bind slot i (1..10) to spell id (nil clears). Saved at once.
+function M.SetSlot(i, id)
+    if not i or i < 1 or i > 10 then return end
+    State.hotbar[i] = (id and id ~= "") and id or nil
+    save()
+end
 
 local function ensureDefault()
     local empty = true
@@ -67,65 +105,43 @@ function M.PressSlot(slot)
     Prepare.Start(id)
 end
 
-function M.ToggleWindow()
-    windowOpen = not windowOpen
-    Log.Write("Hotbar: window " .. (windowOpen and "open" or "closed"))
-end
-
 function M.Reset()
     for i = 1, 10 do State.hotbar[i] = nil end
     ensureDefault()
+    save()
 end
 
--- ImGui rendering ------------------------------------------------------
-local function render()
-    if not windowOpen then return end
-    if not Ext.IMGUI then return end
-    -- SE's ImGui binding wraps a per-frame tree. We can't rely on it being
-    -- the only ImGui host; keep it simple.
-    local ok = pcall(function()
-        local w = Ext.IMGUI.NewWindow("Dark and Gate — Prepare Hotbar")
-        if not w then return end
-        w:AddText("Click a slot, then click a spell on the right to bind.")
-        local ids = {}
-        for id, _ in pairs(spells.spells) do table.insert(ids, id) end
-        table.sort(ids)
-        for slot = 1, 10 do
-            local label = string.format("Slot %d: %s", slot, State.hotbar[slot] or "(empty)")
-            w:AddText(label)
-        end
-        w:AddText("Known spells: " .. table.concat(ids, ", "))
-        -- M4 adds proper drag-drop. For M1b users assign via console:
-        w:AddText("Assign via: !dag_hotbar <slot> <spellId>")
-    end)
-    if not ok then
-        -- Older SE builds don't expose Ext.IMGUI.NewWindow. Fall back to a
-        -- log print once per toggle.
-        if windowOpen then
-            Log.Write("Hotbar: ImGui not available; use !dag_hotbar <slot> <id>")
-            windowOpen = false
-        end
-    end
+-- Follow the controlled character (party switch): its own saved layout.
+local lastCheck = -1e9
+local function tick()
+    local t = tonumber(Ext.Timer.MonotonicTime()) or 0
+    if t - lastCheck < 500 then return end
+    lastCheck = t
+    local okE, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    local me = okE and ents and ents[1] or nil
+    if not me then return end
+    local okU, uuid = pcall(function() return tostring(me.Uuid.EntityUuid) end)
+    if okU and uuid and uuid ~= owner then load(uuid) end
 end
 
 function M.Register()
     ensureDefault()
     Prepare.Register()
     Spells.Register()
-    Ext.Events.Tick:Subscribe(function() pcall(render) end)
+    Ext.Events.Tick:Subscribe(function() pcall(tick) end)
     Ext.RegisterConsoleCommand("dag_hotbar", function(_, slotArg, id)
         local slot = tonumber(slotArg)
         if not slot or slot < 1 or slot > 10 then
             Log.Write("Hotbar: usage !dag_hotbar <1-10> <spellId>"); return
         end
-        State.hotbar[slot] = id and id ~= "" and id or nil
+        M.SetSlot(slot, id)
         Log.Write(string.format("Hotbar: slot %d = %s", slot, tostring(State.hotbar[slot])))
     end)
     Ext.RegisterConsoleCommand("dag_hotbar_reset", function()
         M.Reset()
         Log.Write("Hotbar: reset to defaults")
     end)
-    Log.Write("Hotbar: registered (keys 1-0, H toggles window)")
+    Log.Write("Hotbar: registered (keys 1-0; layouts saved per character; menu: H, or BG3's I / Tab panels)")
 end
 
 return M

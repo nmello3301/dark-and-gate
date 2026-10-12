@@ -41,6 +41,7 @@ local Prepare = Ext.Require("Client/Combat/Prepare.lua")
 local Net       = Ext.Require("Shared/Net.lua")
 local ClientNet = Ext.Require("Client/Net.lua")
 local Hud       = Ext.Require("Client/HUD/Hud.lua")
+local HotbarMenu = Ext.Require("Client/HUD/HotbarMenu.lua")
 local hudCfg    = Ext.Require("data/hud.lua")
 
 local M = {}
@@ -172,9 +173,11 @@ local function onKey(event)
             key, evt, tostring(event.Repeat)))
     end
 
-    -- H toggles the hotbar window regardless of gate.
-    if key == HOTBAR_TOGGLE_KEY and evt == "KeyDown" then
-        Hotbar.ToggleWindow()
+    -- H pins the Prepare Hotbar menu (Client/HUD/HotbarMenu.lua) in first
+    -- person; BG3's own H (alchemy) is kept outside first person.
+    if key == HOTBAR_TOGGLE_KEY and State.IsCombatActive() then
+        if evt == "KeyDown" and not event.Repeat then HotbarMenu.TogglePinned() end
+        prevent(event)
         return
     end
 

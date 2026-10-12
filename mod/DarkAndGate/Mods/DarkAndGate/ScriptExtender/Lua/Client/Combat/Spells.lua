@@ -18,6 +18,7 @@ local State     = Ext.Require("Client/Combat/State.lua")
 local Aim       = Ext.Require("Client/Combat/Aim.lua")
 local ClientNet = Ext.Require("Client/Net.lua")
 local spells    = Ext.Require("data/spells.lua")
+local SpellDefs = Ext.Require("Shared/SpellDefs.lua")
 local Actions   = Ext.Require("Client/Combat/Actions.lua")
 local Prepare   = Ext.Require("Client/Combat/Prepare.lua")
 local airAction = Ext.Require("data/movement.lua").air_action
@@ -28,7 +29,7 @@ local M = {}
 local function nowMs() return tonumber(Ext.Timer.MonotonicTime()) end
 
 function M.Cast(spellId)
-    local def = spells.spells[spellId]
+    local def = SpellDefs.Get(spellId)
     if not def then
         Log.Write("Spells: unknown id " .. tostring(spellId)); return
     end
@@ -111,7 +112,7 @@ local baseOverride = nil
 function M.AddCastTimeModifier(id, fn) castMods[id] = fn; Log.Write("Spells: cast-time modifier added " .. tostring(id)) end
 function M.RemoveCastTimeModifier(id) castMods[id] = nil end
 function M.CastTime(spellId)
-    local def = spells.spells[spellId]
+    local def = SpellDefs.Get(spellId)
     local t = baseOverride or (def and (def.base_cast_s or def.cast_time_s)) or spells.base_cast_s or spells.cast_time_s or 0
     for id, fn in pairs(castMods) do
         local ok, f = pcall(fn, spellId)

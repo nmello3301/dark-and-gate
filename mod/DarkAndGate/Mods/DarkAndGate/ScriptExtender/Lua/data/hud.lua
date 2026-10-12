@@ -56,8 +56,22 @@ return {
     hide_vanilla = { "HotBar", "PlayerPortraits", "CombatLog", "Minimap", "TargetInfo",
                      "TurnModeInfo", "CombatantsOverlay", "HudIndicator" },
     reapply_s    = 1.0,
-    -- Widgets that mean "a menu is open" when visible: the art HUD hides and
-    -- the vanilla HUD is restored. Names logged by !dag_hud widgets.
-    menu_widgets = { "GameMenu", "Options", "Journal", "CharacterPanel", "Inventory", "SpellBook",
-                     "Map", "Trade", "Container", "LevelUp", "CharacterCreation", "Camp", "Respec" },
+    -- Widgets that mean "a menu is open" when visible: our HUD hides, BG3's
+    -- comes back and mouse-look lets go of the cursor (FullPov.SetMenuOpen)
+    -- until it closes. Names = the widgets BG3's keyboard UI state machine
+    -- loads in its panel / pause / popup layers (Mods/MainUI/GUI/
+    -- StateMachines/Keyboard.xaml); !dag_hud widgets lists what is there.
+    --   I = ToggleInventory -> CharacterPanel (also K spells, H alchemy)
+    --   Tab = TogglePartyCharacterView -> PartyPanel (a button on PlayerPortraits)
+    menu_widgets = {
+        "CharacterPanel", "PartyPanel", "CompanionsPanel", "Container", "Trade", "Examine", "Combine", "Insert",
+        "SplitItem", "LearnSpells", "Pickpocket", "RewardPanel", "Donate", "MakeCamp", "LongRest",
+        "TadpolePowersTree", "Book", "MessageBox", "JournalQuests", "JournalMap", "JournalInfo", "JournalDialogues",
+        "JournalInspiration", "JournalTutorials", "OverviewMap", "DialogueHistory", "CharacterLevelUp",
+        "CharacterRespec", "CharacterFullRespec", "CharacterChangeAppearance", "Henchmen",
+        "GameMenu", "GameOptions", "AudioOptions", "VideoOptions", "InterfaceOptions", "KeybindingOptions",
+        "ControllerOptions", "AccessibilityOptions", "SaveGame", "LoadGame",
+    },
+    -- Our "Prepare Hotbar" menu opens beside these BG3 panels (I, K, H, Tab).
+    hotbar_menu_with = { "CharacterPanel", "PartyPanel" },
 }

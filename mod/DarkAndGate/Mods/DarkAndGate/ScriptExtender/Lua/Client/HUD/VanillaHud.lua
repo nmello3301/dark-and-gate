@@ -1,10 +1,16 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
--- Hide / restore BG3's own HUD widgets (docs/spikes/hud-tech.md, lever A):
--- each named widget under Ext.UI.GetRoot():Find("ContentRoot") gets
--- Visibility = "Collapsed"; the value it had is remembered and written back
--- on Restore. Brawl finds the same widgets by name (credited in the spike).
+-- Hide / restore BG3's own HUD widgets (docs/spikes/hud-tech.md): each
+-- named widget under Ext.UI.GetRoot():Find("ContentRoot") is made invisible
+-- (Opacity 0) and click-through (IsHitTestVisible false); the values it had
+-- are remembered and written back on Restore. Brawl finds the same widgets
+-- by name (credited in the spike).
 --
---   VanillaHud.Hide()      collapse (and re-apply every reapply_s)
+-- NOT Visibility = Collapsed (first build): a collapsed widget's key
+-- bindings stop firing too. Tab (TogglePartyCharacterView) is bound on a
+-- button inside PlayerPortraits, so Tab did nothing in first person
+-- (playtest 2026-10-12); the same goes for keys bound on the HotBar.
+--
+--   VanillaHud.Hide()      hide (and re-apply every reapply_s)
 --   VanillaHud.Restore()   put every widget back as it was
 --   VanillaHud.MenuOpen()  a menu widget (data/hud.lua menu_widgets) is visible
 --   VanillaHud.Names()     "Name=Visibility" for every ContentRoot child (debug)
@@ -15,7 +21,7 @@ local cfg = Ext.Require("data/hud.lua")
 local M = {}
 
 local hidden = false
-local saved = {}        -- name -> original Visibility string
+local saved = {}        -- name -> { op = number, hit = bool }
 local lastApply = -1e9
 local loggedMissing = {}
 
@@ -53,33 +59,68 @@ local function vis(w)
     return ok and v or "?"
 end
 
-local function setVis(w, v)
-    local ok = pcall(function() w.Visibility = v end)
-    if not ok then ok = pcall(function() w:SetProperty("Visibility", v) end) end
+local function get(w, k)
+    local ok, v = pcall(function() return w[k] end)
+    if ok and v ~= nil then return v end
+    ok, v = pcall(function() return w:GetProperty(k) end)
+    return ok and v or nil
+end
+
+local function put(w, k, v)
+    local ok = pcall(function() w[k] = v end)
+    if not ok then ok = pcall(function() w:SetProperty(k, v) end) end
     return ok
+end
+
+local function isHidden(w)
+    return tonumber(get(w, "Opacity")) == 0 and get(w, "IsHitTestVisible") == false
 end
 
 local function apply(why)
     lastApply = now()
     local kids = children()
-    local done, missing = {}, {}
+    local done, missing, failed = {}, {}, {}
     for _, name in ipairs(cfg.hide_vanilla) do
         local w = kids[name]
         if w then
-            local v = vis(w)
-            if v ~= "Collapsed" then
-                if saved[name] == nil then saved[name] = v; persist() end
-                if setVis(w, "Collapsed") then done[#done + 1] = name end
+            if not isHidden(w) then
+                if saved[name] == nil then
+                    local op = tonumber(get(w, "Opacity")) or 1
+                    local hit = get(w, "IsHitTestVisible")
+                    saved[name] = { op = (op > 0) and op or 1, hit = (hit ~= false) }
+                    persist()
+                end
+                local a = put(w, "Opacity", 0)
+                local b = put(w, "IsHitTestVisible", false)
+                if a then done[#done + 1] = name .. (b and "" or " (still clickable)") else failed[#failed + 1] = name end
             end
         elseif not loggedMissing[name] then
             loggedMissing[name] = true
             missing[#missing + 1] = name
         end
     end
-    if #done > 0 or #missing > 0 then
-        Log.Write(string.format("VanillaHud: hidden %s (%s)%s", #done > 0 and table.concat(done, ", ") or "nothing new", why,
-            #missing > 0 and (" -- not found: " .. table.concat(missing, ", ")) or ""))
+    if #done > 0 or #missing > 0 or #failed > 0 then
+        Log.Write(string.format("VanillaHud: hidden %s (%s)%s%s", #done > 0 and table.concat(done, ", ") or "nothing new", why,
+            #missing > 0 and (" -- not found: " .. table.concat(missing, ", ")) or "",
+            #failed > 0 and (" -- FAILED: " .. table.concat(failed, ", ")) or ""))
     end
+end
+
+local function restoreFrom(tbl, kids)
+    local back = {}
+    for name, v in pairs(tbl) do
+        local w = kids[name]
+        if w then
+            local op = (type(v) == "table" and tonumber(v.op)) or 1
+            local hit = not (type(v) == "table" and v.hit == false)
+            put(w, "Opacity", op)
+            put(w, "IsHitTestVisible", hit)
+            -- A widget the first build collapsed comes back too.
+            if type(v) == "string" and v ~= "?" then put(w, "Visibility", v) end
+            back[#back + 1] = name
+        end
+    end
+    return back
 end
 
 function M.Hide(why)
@@ -92,12 +133,7 @@ end
 function M.Restore(why)
     if not hidden then return end
     hidden = false
-    local kids = children()
-    local back = {}
-    for name, v in pairs(saved) do
-        local w = kids[name]
-        if w and setVis(w, (v ~= "?" and v) or "Visible") then back[#back + 1] = name end
-    end
+    local back = restoreFrom(saved, children())
     saved = {}
     persist()
     Log.Write(string.format("VanillaHud: restored %s (%s)", #back > 0 and table.concat(back, ", ") or "nothing", why or "restore"))
@@ -111,21 +147,17 @@ function M.Recover()
     if not ok or not txt or txt == "" or txt == "{}" then return end
     local okJ, old = pcall(Ext.Json.Parse, txt)
     if not okJ or type(old) ~= "table" then return end
-    local kids = children()
-    local back = {}
-    for name, v in pairs(old) do
-        local w = kids[name]
-        if w and setVis(w, (v ~= "?" and v) or "Visible") then back[#back + 1] = name end
-    end
+    local back = restoreFrom(old, children())
+    if #back == 0 then return end   -- UI not ready yet: try again at SessionLoaded
     pcall(Ext.IO.SaveFile, SAVE_PATH, "{}")
-    Log.Write("VanillaHud: recovered after reset: " .. (#back > 0 and table.concat(back, ", ") or "nothing (UI not ready?)"))
+    Log.Write("VanillaHud: recovered after reset: " .. table.concat(back, ", "))
 end
 
 -- A visible menu widget means the player is in a menu.
 local menuCache = { at = -1e9, open = false, name = nil }
 function M.MenuOpen()
     local t = now()
-    if t - menuCache.at < 250 then return menuCache.open, menuCache.name end
+    if t - menuCache.at < 200 then return menuCache.open, menuCache.name end
     menuCache.at = t
     local kids = children()
     menuCache.open, menuCache.name = false, nil
@@ -138,12 +170,14 @@ end
 
 function M.Names()
     local parts = {}
-    for name, w in pairs(children()) do parts[#parts + 1] = name .. "=" .. vis(w) end
+    for name, w in pairs(children()) do
+        parts[#parts + 1] = string.format("%s=%s/op%s", name, vis(w), tostring(get(w, "Opacity")))
+    end
     table.sort(parts)
     return table.concat(parts, ", ")
 end
 
--- Call every tick: re-collapse widgets the game made visible again.
+-- Call every tick: re-hide widgets the game showed again.
 function M.Tick()
     if hidden and now() - lastApply > (cfg.reapply_s or 1.0) * 1000 then pcall(apply, "re-apply") end
 end

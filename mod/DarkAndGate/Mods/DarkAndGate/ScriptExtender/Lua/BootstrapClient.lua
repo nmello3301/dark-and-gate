@@ -78,6 +78,8 @@ CombatHUD.Register()
 CombatDebug.Register()
 -- First-person HUD with the developer's art (replaces BG3's HUD in POV).
 Ext.Require("Client/HUD/Hud.lua").Register()
+-- Prepare Hotbar menu (bind spells to 1..0): beside BG3's I / Tab panels, H pins it.
+Ext.Require("Client/HUD/HotbarMenu.lua").Register()
 -- Projectile system v1: the clones' stats + the client-side visual probe.
 Ext.Require("Shared/ProjectileSpells.lua").Register("Client")
 Ext.Require("Client/Combat/ProjectileView.lua").Register()

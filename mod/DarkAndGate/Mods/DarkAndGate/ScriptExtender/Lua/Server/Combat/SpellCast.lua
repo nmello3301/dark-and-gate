@@ -15,6 +15,7 @@ local Net = Ext.Require("Shared/Net.lua")
 local ServerNet = Ext.Require("Server/Net.lua")
 local Mana = Ext.Require("Server/Combat/Mana.lua")
 local Projectiles = Ext.Require("Server/Combat/Projectiles.lua")
+local SpellDefs = Ext.Require("Shared/SpellDefs.lua")
 local spells = Ext.Require("data/spells.lua")
 
 local M = {}
@@ -75,6 +76,31 @@ local function castAtTarget(caster, spellId, target)
     })
 end
 
+-- Does the caster have this spell (its spell container = what BG3 offers on
+-- its own hotbar, or its spellbook)? Checked for spells bound from the menu.
+local function knows(caster, spellId)
+    local found, checked = false, false
+    pcall(function()
+        local e = Ext.Entity.Get(caster)
+        pcall(function()
+            for _, m in ipairs(e.SpellContainer.Spells) do
+                checked = true
+                if tostring(m.SpellId.OriginatorPrototype) == spellId then found = true end
+            end
+        end)
+        if not found then
+            pcall(function()
+                for _, sd in ipairs(e.SpellBook.Spells) do
+                    checked = true
+                    if tostring(sd.Id.OriginatorPrototype) == spellId or tostring(sd.Id.Prototype) == spellId then found = true end
+                end
+            end)
+        end
+    end)
+    if not checked then return true end   -- can't read the components: don't block (logged by the caller's success)
+    return found
+end
+
 -- Channelled casting: when each user armed which spell (SpellArm).
 local armed = {}   -- userId -> { spell, at = ms }
 local function nowMs() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
@@ -123,7 +149,7 @@ function M.Register()
 
         -- Cast time: the release must come cast_time_s after the arm.
         do
-            local def0 = spells.spells[parsed.spell]
+            local def0 = SpellDefs.Get(parsed.spell)
             local a = armed[userId]
             local base = (a and a.castTime) or (def0 and (def0.base_cast_s or def0.cast_time_s)) or spells.base_cast_s or spells.cast_time_s or 0
             local need = base - (spells.cast_time_tolerance_s or 0)
@@ -140,8 +166,18 @@ function M.Register()
             local caster = ServerNet.UserToCharacter(userId)
             if not caster then return end
             local spellId = parsed.spell
-            local def = spells.spells[spellId]
-            local cost = (def and def.cost) or (spells.cost_by_level[def and def.level or 0] or 0)
+            local def = SpellDefs.Get(spellId)
+            if not def then
+                Log.Write("SpellCast: REJECTED " .. tostring(spellId) .. " (no such spell)")
+                return
+            end
+            -- A spell bound from the Prepare Hotbar menu must be one the caster
+            -- has (data/spells.lua's M1b test spells are allowed for the slice).
+            if def.derived and not knows(caster, spellId) then
+                Log.Write(string.format("SpellCast: REJECTED %s (%s doesn't have it)", tostring(spellId), tostring(caster)))
+                return
+            end
+            local cost = SpellDefs.Cost(spellId)
             local okSpend, state = Mana.TrySpend(userId, caster, cost)
             if not okSpend then
                 Log.Write(string.format("SpellCast: INSUFFICIENT MANA spell=%s cost=%d have=%.1f",

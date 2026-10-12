@@ -357,15 +357,24 @@ def bow_arc(layout, frames=21, size=168):
 
 
 ATLAS_UUID = "5b0b4f6e-2d6a-4c1e-9b7a-d4a0f5e1c001"
-ATLAS_DDS = os.path.join(ROOT, "mod", "DarkAndGate", "Public", "DarkAndGate", "Assets", "Textures", "DAG_HUD_Atlas.dds")
-ATLAS_BANK = os.path.join(ROOT, "mod", "DarkAndGate", "Public", "DarkAndGate", "Content", "UI", "[PAK]_DAG_HUD",
-                          "merged.lsx")
+ICON_PREFIX = "DAG_HUD_"
+# Same layout as Mod Configuration Menu's shipped UI textures (the one that
+# is known to load): Public/Shared/{Assets/Textures/Icons, Content/UI/[PAK]_x,
+# GUI}, unique DAG_ names. 2026-10-12 playtest: a bank only as merged.lsx
+# under Public/DarkAndGate was never loaded ("NOT FOUND in the texture bank").
+SHARED = os.path.join(ROOT, "mod", "DarkAndGate", "Public", "Shared")
+ATLAS_DDS = os.path.join(SHARED, "Assets", "Textures", "Icons", "DAG_HUD_Atlas.dds")
+ATLAS_BANK = os.path.join(SHARED, "Content", "UI", "[PAK]_DAG_HUD", "merged.lsx")
+ATLAS_GUI = os.path.join(SHARED, "GUI", "DAG_HUD_Atlas.lsx")
+DIVINE = os.path.join(ROOT, "tools", "lslib", "Packed", "Tools", "Divine.exe")
 
 
 def atlas(layout, W=2048):
     """Pack every layer into one RGBA texture (shelf packing), write it as an
-    uncompressed DX10 DDS (R8G8B8A8, the format MCM ships) plus a texture
-    bank entry, and record each layer's UV rect for AddImage(uuid, size, uv0, uv1)."""
+    uncompressed DX10 DDS (R8G8B8A8, the format MCM ships), a texture bank
+    entry (.lsx + .lsf) and an icon atlas naming each layer DAG_HUD_<layer>,
+    and record each layer's UV rect (ImGui draws them by icon name and
+    clips them by UV)."""
     names = sorted(f[:-4] for f in os.listdir(OUT) if f.endswith(".png") and f not in ("preview.png", "atlas.png"))
     imgs = {n: Image.open(os.path.join(OUT, n + ".png")).convert("RGBA") for n in names}
     order = sorted(names, key=lambda n: -imgs[n].height)
@@ -392,10 +401,62 @@ def atlas(layout, W=2048):
     sheet.save(os.path.join(OUT, "atlas.png"))
     write_dds(sheet, ATLAS_DDS)
     os.makedirs(os.path.dirname(ATLAS_BANK), exist_ok=True)
-    with open(ATLAS_BANK, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(BANK_LSX.format(uuid=ATLAS_UUID, src="Public/DarkAndGate/Assets/Textures/DAG_HUD_Atlas.dds"))
-    layout["atlas"] = {"uuid": ATLAS_UUID, "size": [W, H], "uv": uv}
+    with open(ATLAS_BANK, "w", encoding="utf-8", newline=chr(10)) as fh:
+        fh.write(BANK_LSX.format(uuid=ATLAS_UUID, src="Public/Shared/Assets/Textures/Icons/DAG_HUD_Atlas.dds"))
+    lsf = ATLAS_BANK[:-4] + ".lsf"
+    if os.path.exists(DIVINE):
+        import subprocess
+        r = subprocess.run([DIVINE, "--game", "bg3", "--action", "convert-resource", "--source", ATLAS_BANK,
+                            "--destination", lsf, "--loglevel", "warn"], capture_output=True, text=True)
+        print("texture bank .lsf:", "ok" if r.returncode == 0 and os.path.exists(lsf) else ("FAILED " + r.stdout + r.stderr))
+    else:
+        print("WARNING: Divine.exe not found, no merged.lsf written")
+    os.makedirs(os.path.dirname(ATLAS_GUI), exist_ok=True)
+    icons = "".join(ICON_UV.format(key=ICON_PREFIX + n, u1=uv[n][0], v1=uv[n][1], u2=uv[n][2], v2=uv[n][3]) for n in names)
+    with open(ATLAS_GUI, "w", encoding="utf-8", newline=chr(10)) as fh:
+        fh.write(GUI_LSX.format(uuid=ATLAS_UUID, w=W, h=H, icons=icons))
+    layout["atlas"] = {"uuid": ATLAS_UUID, "prefix": ICON_PREFIX, "size": [W, H], "uv": uv}
     print("atlas %dx%d, %d layers -> %s" % (W, H, len(names), ATLAS_DDS))
+
+
+GUI_LSX = r"""<?xml version="1.0" encoding="UTF-8"?>
+<save>
+  <version major="4" minor="0" revision="9" build="322"/>
+  <region id="TextureAtlasInfo">
+    <node id="root">
+      <children>
+        <node id="TextureAtlasIconSize">
+          <attribute id="Height" value="64" type="int32"/>
+          <attribute id="Width" value="64" type="int32"/>
+        </node>
+        <node id="TextureAtlasPath">
+          <attribute id="Path" value="Assets\Textures\Icons\DAG_HUD_Atlas.dds" type="string"/>
+          <attribute id="UUID" value="{uuid}" type="FixedString"/>
+        </node>
+        <node id="TextureAtlasTextureSize">
+          <attribute id="Height" value="{h}" type="int32"/>
+          <attribute id="Width" value="{w}" type="int32"/>
+        </node>
+      </children>
+    </node>
+  </region>
+  <region id="IconUVList">
+    <node id="root">
+      <children>
+{icons}      </children>
+    </node>
+  </region>
+</save>
+"""
+
+ICON_UV = """        <node id="IconUV">
+          <attribute id="MapKey" value="{key}" type="FixedString"/>
+          <attribute id="U1" value="{u1:.6f}" type="float"/>
+          <attribute id="V1" value="{v1:.6f}" type="float"/>
+          <attribute id="U2" value="{u2:.6f}" type="float"/>
+          <attribute id="V2" value="{v2:.6f}" type="float"/>
+        </node>
+"""
 
 
 BANK_LSX = """<?xml version="1.0" encoding="utf-8"?>

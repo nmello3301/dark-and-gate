@@ -21,6 +21,7 @@ local Aim    = Ext.Require("Client/Combat/Aim.lua")
 local spells = Ext.Require("data/spells.lua")
 local Spells = Ext.Require("Client/Combat/Spells.lua")
 local ArtHud = Ext.Require("Client/HUD/Hud.lua")
+local SpellDefs = Ext.Require("Shared/SpellDefs.lua")
 
 local M = {}
 
@@ -142,7 +143,7 @@ local function render()
     if not hudOn then return end
 
     local armedId = State.armedSpell
-    local def = armedId and spells.spells[armedId] or nil
+    local def = armedId and SpellDefs.Get(armedId) or nil
     updateAim(armedId, def)
     local parts = { string.format("Mana %d/%d", math.floor(State.mana.current), math.floor(State.mana.max)) }
     if armedId then

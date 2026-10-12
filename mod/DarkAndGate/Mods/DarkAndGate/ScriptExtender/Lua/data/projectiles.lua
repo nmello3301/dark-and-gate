@@ -38,44 +38,24 @@ return {
     -- every tick (Lua SetWorldTranslate; the DLL route comes after this probe).
     client_steer  = true,
 
-    -- Per spell. speed_mps = "template" reads InitialSpeed from the spell's
-    -- projectile template (Trajectories), falling back to fallback_speed_mps.
+    -- Per spell. speed_mps = "template" reads InitialSpeed (and a Linear
+    -- VelocityMode's Acceleration) from the spell's projectile template
+    -- (Trajectories), falling back to fallback_speed_mps.
     -- impact_mode: "target" = CreateExplosion on the hit character (world
     -- hits use the point), "point" = always CreateExplosionAtPosition.
-    -- visual / impact: stats overrides on the clones (BG3 stats syntax).
+    -- The visual / impact clones: Public/DarkAndGate/Stats/Generated/Data/
+    -- DAG_Projectiles.txt (Fire Bolt's impact has no attack roll: our aim
+    -- decides the hit; Fireball keeps its Dex save and 4 m).
     spells = {
         Projectile_FireBolt = {
             speed_mps = "template", fallback_speed_mps = 30,
             gravity = 0.0, drag = 0.0, radius_m = 0.15,
             impact_mode = "target",
-            visual = {
-                SpellRoll = "", SpellSuccess = "", SpellFail = "", SpellProperties = "",
-                TargetConditions = "", UseCosts = "", TargetRadius = "200",
-            },
-            impact = {
-                -- Our aim decides the hit (DESIGN: spell attacks are aimed), so
-                -- the attack roll goes and the damage is unconditional.
-                SpellRoll = "", SpellSuccess = "",
-                SpellProperties = "DealDamage(LevelMapValue(D10Cantrip),Fire,Magical);GROUND:SurfaceChange(Ignite);GROUND:SurfaceChange(Melt)",
-                TargetConditions = "", UseCosts = "", TargetRadius = "200",
-                ExplodeRadius = "0.6", AreaRadius = "0.6",
-                add_flags = { "ImmediateCast" },
-            },
         },
         Projectile_Fireball = {
             speed_mps = "template", fallback_speed_mps = 22,
             gravity = 0.0, drag = 0.0, radius_m = 0.30,
             impact_mode = "point",
-            visual = {
-                SpellRoll = "", SpellSuccess = "", SpellFail = "", SpellProperties = "",
-                TargetConditions = "", UseCosts = "", TargetRadius = "200",
-                ExplodeRadius = "0", AreaRadius = "0",
-            },
-            impact = {
-                -- Saves stay dice (DESIGN): the Dex save, 8d6 / half, 4 m.
-                UseCosts = "", TargetRadius = "200",
-                add_flags = { "ImmediateCast" },
-            },
         },
     },
 

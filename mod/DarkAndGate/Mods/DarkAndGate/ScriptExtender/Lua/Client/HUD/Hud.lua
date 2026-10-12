@@ -30,8 +30,11 @@ local spells     = Ext.Require("data/spells.lua")
 local cfg        = Ext.Require("data/hud.lua")
 local L          = Ext.Require("data/hud_layout.lua")
 local VanillaHud = Ext.Require("Client/HUD/VanillaHud.lua")
+local SpellDefs  = Ext.Require("Shared/SpellDefs.lua")
+local FullPov    = Ext.Require("FullPov.lua")
+local HotbarMenu = Ext.Require("Client/HUD/HotbarMenu.lua")
 
-local M = {}
+local M = { menuOpen = false }
 
 local mode = "on"              -- on | off | vanilla
 local ui = nil                 -- built window + elements
@@ -60,25 +63,18 @@ local function player()
     return ok and ents and ents[1] or nil
 end
 
--- The atlas must be a loaded texture before any AddImage binds it (SE
--- release notes: binding a missing texture used to crash).
+-- The atlas is drawn by icon name (data/hud_layout.lua atlas.prefix .. layer),
+-- like Mod Configuration Menu draws its own shipped icons: the icon atlas
+-- Public/Shared/GUI/DAG_HUD_Atlas.lsx points at the texture bank entry
+-- (Public/Shared/Content/UI/[PAK]_DAG_HUD/merged.lsf). SE only warns when
+-- an image can't bind, so build() checks the first layer and falls back to
+-- the status line (atlasOk = false) when it didn't bind.
 local function checkAtlas()
-    if atlasOk ~= nil then return atlasOk end
-    local uuid = L.atlas.uuid
-    local ok, r = pcall(Ext.Resource.Get, uuid, "Texture")
-    if ok and r then
-        atlasOk = true
-        Log.Write("Hud: atlas texture " .. uuid .. " found in the texture bank")
-    elseif ok then
-        atlasOk = false
-        Log.Write("Hud: atlas texture " .. uuid .. " NOT FOUND in the texture bank -> art HUD off (status line instead);"
-            .. " check Public/DarkAndGate/Content/UI/[PAK]_DAG_HUD in the pak. !dag_hud force tries anyway")
-    else
-        atlasOk = true   -- SE can't look this type up: try it (logged)
-        Log.Write("Hud: can't check the atlas texture (" .. tostring(r) .. "), drawing it anyway")
-    end
-    return atlasOk
+    if atlasOk == false then return false end
+    return true
 end
+
+local function iconName(layerName) return (L.atlas.prefix or "DAG_HUD_") .. layerName end
 
 -- ---------------------------------------------------------------------
 -- Layout: canvas (art pixels) -> screen
@@ -109,7 +105,7 @@ local function layer(win, name, x, y, w, h)
     local uv = L.atlas.uv[name]
     if not uv then return nil end
     w, h = w or uv[5], h or uv[6]
-    local e = win:AddImage(L.atlas.uuid, { w * geo.s, h * geo.s }, { uv[1], uv[2] }, { uv[3], uv[4] })
+    local e = win:AddImage(iconName(name), { w * geo.s, h * geo.s }, { uv[1], uv[2] }, { uv[3], uv[4] })
     set(e, "AbsolutePosition", { sx(x), sy(y) })
     return { e = e, uv = uv, x = x, y = y, w = w, h = h, last = nil }
 end
@@ -168,6 +164,29 @@ local function build()
     pcall(function() win:SetSize({ vw, vh }) end)
     local u = { win = win, vw = vw, vh = vh, sig = hotbarSignature(), orbs = {}, slots = {}, keys = {} }
     local P = L.pieces
+
+    -- Did the atlas bind? (ImageData.Icon is only set when the icon AND its
+    -- texture loaded.)
+    do
+        local probe = layer(win, "bar", 0, 0, 1, 1)
+        local okI, icon = pcall(function() return tostring(probe.e.ImageData.Icon) end)
+        local okT, tex = pcall(function() return tostring(probe.e.ImageData.TextureResource) end)
+        local bound = okI and icon == iconName("bar")
+        pcall(function() probe.e:Destroy() end)
+        set(probe.e, "Visible", false)
+        if not bound then
+            atlasOk = false
+            Log.Write(string.format("Hud: atlas icon %s did NOT bind (Icon=%s, Texture=%s): the icon atlas or texture bank"
+                .. " wasn't loaded -> status line instead (!dag_hud_status). SE's console shows the reason as a warning.",
+                iconName("bar"), okI and icon or "?", okT and tex or "?"))
+            pcall(function() win:Destroy() end)
+            return
+        end
+        if atlasOk == nil then
+            atlasOk = true
+            Log.Write(string.format("Hud: atlas icon %s bound (texture %s)", iconName("bar"), okT and tex or "?"))
+        end
+    end
 
     for _, k in ipairs({ "h", "m" }) do
         local r = P["orb_" .. k .. "_full"]
@@ -239,7 +258,7 @@ local function build()
     -- Bow ring around the screen centre (screen px, not the canvas).
     local bs = cfg.bow_ring_px
     local buv = L.atlas.uv.bow_00
-    local okB, be = pcall(function() return win:AddImage(L.atlas.uuid, { bs, bs }, { buv[1], buv[2] }, { buv[3], buv[4] }) end)
+    local okB, be = pcall(function() return win:AddImage(iconName("bow_00"), { bs, bs }, { buv[1], buv[2] }, { buv[3], buv[4] }) end)
     if okB and be then
         u.bow = be
         set(be, "AbsolutePosition", { vw / 2 - bs / 2, vh / 2 - bs / 2 })
@@ -324,11 +343,7 @@ local function readHp()
     return nil
 end
 
-local function spellCost(id)
-    local def = spells.spells[id]
-    if not def then return 0 end
-    return def.cost or (spells.cost_by_level[def.level or 0] or 0)
-end
+local function spellCost(id) return SpellDefs.Cost(id) end
 
 local function armedSlot()
     if not State.armedSpell then return nil end
@@ -385,7 +400,7 @@ local function updateCast(u)
         set(cb.ready and cb.ready.e, "Visible", false); if cb.ready then cb.ready.last = nil end
         clipLeft(cb.fill, fillP)
     end
-    local name = armed and ((spells.spells[armed] or {}).label or armed) or ""
+    local name = armed and ((SpellDefs.Get(armed) or {}).label or armed) or ""
     local label = cast.state == "ready" and ("READY " .. name) or (cast.state == "casting" and string.format("%s %.1fs", name, cast.left or 0) or "")
     placeCentered(cb.label, label, sx(L.canvas[1] / 2), sy(cb.y) - 4)
 end
@@ -494,6 +509,17 @@ local function tick()
     local active = State.IsCombatActive()
     local menu, menuName = false, nil
     if active then menu, menuName = VanillaHud.MenuOpen() end
+    -- Our Prepare Hotbar menu: beside BG3's I / Tab panels, or pinned (H).
+    pcall(HotbarMenu.Update, active, menu and menuName or nil)
+    -- A BG3 panel (or our pinned menu) is open: the cursor is freed
+    -- (mouse-look off) until it closes.
+    local free = active and (menu or HotbarMenu.Pinned())
+    if free ~= M.menuOpen then
+        M.menuOpen = free
+        FullPov.SetMenuOpen(free)
+        Log.Write(free and ("Hud: " .. (menu and ("menu " .. tostring(menuName)) or "Prepare Hotbar menu") .. " open -> cursor free (mouse-look off)"
+            .. (menu and ", BG3 HUD back" or "")) or "Hud: menus closed -> mouse-look back on")
+    end
     local want = active and not menu and mode ~= "off"
     -- BG3's HUD: hidden only while ours is up in "on" mode.
     if want and mode == "on" then VanillaHud.Hide("first person") else
@@ -503,6 +529,7 @@ local function tick()
     if not want or not checkAtlas() then setShown(false); return end
     local vw, vh = viewport()
     if not ui or ui.vw ~= vw or ui.vh ~= vh or ui.sig ~= hotbarSignature() then build() end
+    if not ui then return end
     setShown(true)
     local t = now()
     if t - lastFill >= 1000 / (cfg.fill_hz or 30) then lastFill = t; updateFills(ui) end
@@ -542,13 +569,14 @@ function M.Register()
             mode = a
             if a ~= "on" then VanillaHud.Restore("!dag_hud " .. a) end
             Log.Write("Hud: mode " .. mode)
-        elseif a == "force" then
-            atlasOk = true
-            Log.Write("Hud: atlas check skipped (force)")
+        elseif a == "retry" then
+            atlasOk = nil
+            destroy()
+            Log.Write("Hud: atlas bind will be retried")
         elseif a == "widgets" then
             Log.Write("Hud: BG3 HUD widgets: " .. VanillaHud.Names())
         else
-            Log.Write("Hud: usage !dag_hud on|off|vanilla|widgets (now " .. mode .. ")")
+            Log.Write("Hud: usage !dag_hud on|off|vanilla|widgets|retry (now " .. mode .. ")")
         end
     end)
     Ext.RegisterConsoleCommand("dag_bow_bar", function(_, a)

@@ -1,0 +1,308 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<save>
+  <version major="4" minor="0" revision="9" build="322"/>
+  <region id="TextureAtlasInfo">
+    <node id="root">
+      <children>
+        <node id="TextureAtlasIconSize">
+          <attribute id="Height" value="64" type="int32"/>
+          <attribute id="Width" value="64" type="int32"/>
+        </node>
+        <node id="TextureAtlasPath">
+          <attribute id="Path" value="Assets\Textures\Icons\DAG_HUD_Atlas.dds" type="string"/>
+          <attribute id="UUID" value="5b0b4f6e-2d6a-4c1e-9b7a-d4a0f5e1c001" type="FixedString"/>
+        </node>
+        <node id="TextureAtlasTextureSize">
+          <attribute id="Height" value="2048" type="int32"/>
+          <attribute id="Width" value="2048" type="int32"/>
+        </node>
+      </children>
+    </node>
+  </region>
+  <region id="IconUVList">
+    <node id="root">
+      <children>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_bar" type="FixedString"/>
+          <attribute id="U1" value="0.000000" type="float"/>
+          <attribute id="V1" value="0.206055" type="float"/>
+          <attribute id="U2" value="0.725586" type="float"/>
+          <attribute id="V2" value="0.341309" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_bow_00" type="FixedString"/>
+          <attribute id="U1" value="0.230469" type="float"/>
+          <attribute id="V1" value="0.342285" type="float"/>
+          <attribute id="U2" value="0.312500" type="float"/>
+          <attribute id="V2" value="0.424316" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_bow_01" type="FixedString"/>
+          <attribute id="U1" value="0.313477" type="float"/>
+          <attribute id="V1" value="0.342285" type="float"/>
+          <attribute id="U2" value="0.395508" type="float"/>
+          <attribute id="V2" value="0.424316" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_bow_02" type="FixedString"/>
+          <attribute id="U1" value="0.396484" type="float"/>
+          <attribute id="V1" value="0.342285" type="float"/>
+          <attribute id="U2" value="0.478516" type="float"/>
+          <attribute id="V2" value="0.424316" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_bow_03" type="FixedString"/>
+          <attribute id="U1" value="0.479492" type="float"/>
+          <attribute id="V1" value="0.342285" type="float"/>
+          <attribute id="U2" value="0.561523" type="float"/>
+          <attribute id="V2" value="0.424316" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_bow_04" type="FixedString"/>
+          <attribute id="U1" value="0.562500" type="float"/>
+          <attribute id="V1" value="0.342285" type="float"/>
+          <attribute id="U2" value="0.644531" type="float"/>
+          <attribute id="V2" value="0.424316" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_bow_05" type="FixedString"/>
+          <attribute id="U1" value="0.645508" type="float"/>
+          <attribute id="V1" value="0.342285" type="float"/>
+          <attribute id="U2" value="0.727539" type="float"/>
+          <attribute id="V2" value="0.424316" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_bow_06" type="FixedString"/>
+          <attribute id="U1" value="0.728516" type="float"/>
+          <attribute id="V1" value="0.342285" type="float"/>
+          <attribute id="U2" value="0.810547" type="float"/>
+          <attribute id="V2" value="0.424316" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_bow_07" type="FixedString"/>
+          <attribute id="U1" value="0.811523" type="float"/>
+          <attribute id="V1" value="0.342285" type="float"/>
+          <attribute id="U2" value="0.893555" type="float"/>
+          <attribute id="V2" value="0.424316" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_bow_08" type="FixedString"/>
+          <attribute id="U1" value="0.894531" type="float"/>
+          <attribute id="V1" value="0.342285" type="float"/>
+          <attribute id="U2" value="0.976562" type="float"/>
+          <attribute id="V2" value="0.424316" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_bow_09" type="FixedString"/>
+          <attribute id="U1" value="0.000000" type="float"/>
+          <attribute id="V1" value="0.457520" type="float"/>
+          <attribute id="U2" value="0.082031" type="float"/>
+          <attribute id="V2" value="0.539551" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_bow_10" type="FixedString"/>
+          <attribute id="U1" value="0.083008" type="float"/>
+          <attribute id="V1" value="0.457520" type="float"/>
+          <attribute id="U2" value="0.165039" type="float"/>
+          <attribute id="V2" value="0.539551" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_bow_11" type="FixedString"/>
+          <attribute id="U1" value="0.166016" type="float"/>
+          <attribute id="V1" value="0.457520" type="float"/>
+          <attribute id="U2" value="0.248047" type="float"/>
+          <attribute id="V2" value="0.539551" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_bow_12" type="FixedString"/>
+          <attribute id="U1" value="0.249023" type="float"/>
+          <attribute id="V1" value="0.457520" type="float"/>
+          <attribute id="U2" value="0.331055" type="float"/>
+          <attribute id="V2" value="0.539551" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_bow_13" type="FixedString"/>
+          <attribute id="U1" value="0.332031" type="float"/>
+          <attribute id="V1" value="0.457520" type="float"/>
+          <attribute id="U2" value="0.414062" type="float"/>
+          <attribute id="V2" value="0.539551" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_bow_14" type="FixedString"/>
+          <attribute id="U1" value="0.415039" type="float"/>
+          <attribute id="V1" value="0.457520" type="float"/>
+          <attribute id="U2" value="0.497070" type="float"/>
+          <attribute id="V2" value="0.539551" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_bow_15" type="FixedString"/>
+          <attribute id="U1" value="0.498047" type="float"/>
+          <attribute id="V1" value="0.457520" type="float"/>
+          <attribute id="U2" value="0.580078" type="float"/>
+          <attribute id="V2" value="0.539551" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_bow_16" type="FixedString"/>
+          <attribute id="U1" value="0.581055" type="float"/>
+          <attribute id="V1" value="0.457520" type="float"/>
+          <attribute id="U2" value="0.663086" type="float"/>
+          <attribute id="V2" value="0.539551" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_bow_17" type="FixedString"/>
+          <attribute id="U1" value="0.664062" type="float"/>
+          <attribute id="V1" value="0.457520" type="float"/>
+          <attribute id="U2" value="0.746094" type="float"/>
+          <attribute id="V2" value="0.539551" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_bow_18" type="FixedString"/>
+          <attribute id="U1" value="0.747070" type="float"/>
+          <attribute id="V1" value="0.457520" type="float"/>
+          <attribute id="U2" value="0.829102" type="float"/>
+          <attribute id="V2" value="0.539551" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_bow_19" type="FixedString"/>
+          <attribute id="U1" value="0.830078" type="float"/>
+          <attribute id="V1" value="0.457520" type="float"/>
+          <attribute id="U2" value="0.912109" type="float"/>
+          <attribute id="V2" value="0.539551" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_bow_20" type="FixedString"/>
+          <attribute id="U1" value="0.913086" type="float"/>
+          <attribute id="V1" value="0.457520" type="float"/>
+          <attribute id="U2" value="0.995117" type="float"/>
+          <attribute id="V2" value="0.539551" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_castbar_fill" type="FixedString"/>
+          <attribute id="U1" value="0.000000" type="float"/>
+          <attribute id="V1" value="0.604980" type="float"/>
+          <attribute id="U2" value="0.641602" type="float"/>
+          <attribute id="V2" value="0.613281" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_castbar_frame" type="FixedString"/>
+          <attribute id="U1" value="0.245605" type="float"/>
+          <attribute id="V1" value="0.540527" type="float"/>
+          <attribute id="U2" value="0.501465" type="float"/>
+          <attribute id="V2" value="0.562500" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_castbar_ready" type="FixedString"/>
+          <attribute id="U1" value="0.000000" type="float"/>
+          <attribute id="V1" value="0.614258" type="float"/>
+          <attribute id="U2" value="0.641602" type="float"/>
+          <attribute id="V2" value="0.622559" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_meniscus_h" type="FixedString"/>
+          <attribute id="U1" value="0.642578" type="float"/>
+          <attribute id="V1" value="0.623535" type="float"/>
+          <attribute id="U2" value="0.767578" type="float"/>
+          <attribute id="V2" value="0.627930" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_meniscus_m" type="FixedString"/>
+          <attribute id="U1" value="0.768555" type="float"/>
+          <attribute id="V1" value="0.623535" type="float"/>
+          <attribute id="U2" value="0.893555" type="float"/>
+          <attribute id="V2" value="0.627930" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_orb_h_empty" type="FixedString"/>
+          <attribute id="U1" value="0.726562" type="float"/>
+          <attribute id="V1" value="0.206055" type="float"/>
+          <attribute id="U2" value="0.840820" type="float"/>
+          <attribute id="V2" value="0.320312" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_orb_h_frame" type="FixedString"/>
+          <attribute id="U1" value="0.000000" type="float"/>
+          <attribute id="V1" value="0.000000" type="float"/>
+          <attribute id="U2" value="0.169922" type="float"/>
+          <attribute id="V2" value="0.205078" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_orb_h_full" type="FixedString"/>
+          <attribute id="U1" value="0.841797" type="float"/>
+          <attribute id="V1" value="0.206055" type="float"/>
+          <attribute id="U2" value="0.956055" type="float"/>
+          <attribute id="V2" value="0.320312" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_orb_m_empty" type="FixedString"/>
+          <attribute id="U1" value="0.000000" type="float"/>
+          <attribute id="V1" value="0.342285" type="float"/>
+          <attribute id="U2" value="0.114258" type="float"/>
+          <attribute id="V2" value="0.456543" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_orb_m_frame" type="FixedString"/>
+          <attribute id="U1" value="0.170898" type="float"/>
+          <attribute id="V1" value="0.000000" type="float"/>
+          <attribute id="U2" value="0.341797" type="float"/>
+          <attribute id="V2" value="0.205078" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_orb_m_full" type="FixedString"/>
+          <attribute id="U1" value="0.115234" type="float"/>
+          <attribute id="V1" value="0.342285" type="float"/>
+          <attribute id="U2" value="0.229492" type="float"/>
+          <attribute id="V2" value="0.456543" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_potion_health" type="FixedString"/>
+          <attribute id="U1" value="0.172363" type="float"/>
+          <attribute id="V1" value="0.540527" type="float"/>
+          <attribute id="U2" value="0.208496" type="float"/>
+          <attribute id="V2" value="0.591797" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_potion_mana" type="FixedString"/>
+          <attribute id="U1" value="0.209473" type="float"/>
+          <attribute id="V1" value="0.540527" type="float"/>
+          <attribute id="U2" value="0.244629" type="float"/>
+          <attribute id="V2" value="0.591797" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_slot_empty" type="FixedString"/>
+          <attribute id="U1" value="0.062012" type="float"/>
+          <attribute id="V1" value="0.540527" type="float"/>
+          <attribute id="U2" value="0.116211" type="float"/>
+          <attribute id="V2" value="0.597168" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_slot_normal" type="FixedString"/>
+          <attribute id="U1" value="0.117188" type="float"/>
+          <attribute id="V1" value="0.540527" type="float"/>
+          <attribute id="U2" value="0.171387" type="float"/>
+          <attribute id="V2" value="0.597168" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_slot_selected" type="FixedString"/>
+          <attribute id="U1" value="0.000000" type="float"/>
+          <attribute id="V1" value="0.540527" type="float"/>
+          <attribute id="U2" value="0.061035" type="float"/>
+          <attribute id="V2" value="0.604004" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_xp_cap" type="FixedString"/>
+          <attribute id="U1" value="0.642578" type="float"/>
+          <attribute id="V1" value="0.614258" type="float"/>
+          <attribute id="U2" value="0.659180" type="float"/>
+          <attribute id="V2" value="0.622559" type="float"/>
+        </node>
+        <node id="IconUV">
+          <attribute id="MapKey" value="DAG_HUD_xp_fill" type="FixedString"/>
+          <attribute id="U1" value="0.000000" type="float"/>
+          <attribute id="V1" value="0.623535" type="float"/>
+          <attribute id="U2" value="0.641602" type="float"/>
+          <attribute id="V2" value="0.631836" type="float"/>
+        </node>
+      </children>
+    </node>
+  </region>
+</save>

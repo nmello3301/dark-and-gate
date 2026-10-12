@@ -1,13 +1,17 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- The two clones each projectile spell needs (data/projectiles.lua):
 --   DAG_V_<spell>  "visual": the same cast, animation, trail and look, no
---                  effect at all -- BG3 flies it, we remove it at our hit;
+--                  roll and no effect -- BG3 flies it, we remove it at our hit;
 --   DAG_I_<spell>  "impact": instant, no costs -- applied at our hit with
 --                  Osi.CreateExplosion / CreateExplosionAtPosition.
--- Made with Ext.Stats.Create(name, "SpellData", parent) on StatsLoaded on
--- both sides (no sync needed while loading), and once at registration for a
--- Lua `reset` mid-session (the server then Syncs). The spell's own entry is
--- never changed (DESIGN: spells stay BG3 data).
+-- They live in the mod's stats file
+-- (Public/DarkAndGate/Stats/Generated/Data/DAG_Projectiles.txt, "using" the
+-- spell, as vanilla builds its own variants): Script Extender v32 can't
+-- write functor fields (SpellSuccess / SpellProperties) from Lua -- the
+-- first build tried and logged "cannot write properties of this type",
+-- so its visual clone still dealt damage (playtest 2026-10-12).
+-- This module only checks they loaded and logs what they hold. The spells'
+-- own entries are never changed (DESIGN: spells stay BG3 data).
 
 local Log  = Ext.Require("Shared/Log.lua")
 local data = Ext.Require("data/projectiles.lua")
@@ -17,66 +21,50 @@ local M = {}
 function M.VisualId(spell) return "DAG_V_" .. spell end
 function M.ImpactId(spell) return "DAG_I_" .. spell end
 
-local function setField(st, k, v)
-    local ok, err = pcall(function() st[k] = v end)
-    if not ok and tonumber(v) then ok, err = pcall(function() st[k] = tonumber(v) end) end
-    return ok, err
-end
-
-local function addFlags(st, flags)
-    if not flags or #flags == 0 then return true end
-    local list, have = {}, {}
-    pcall(function() for _, f in ipairs(st.SpellFlags) do list[#list + 1] = tostring(f); have[tostring(f)] = true end end)
-    for _, f in ipairs(flags) do if not have[f] then list[#list + 1] = f end end
-    local ok, err = pcall(function() st.SpellFlags = list end)
-    return ok, err
-end
-
-local function make(name, parent, overrides, sync)
+local function get(name)
     local st = nil
     pcall(function() st = Ext.Stats.Get(name) end)
-    local how = "updated"
-    if not st then
-        local ok, r = pcall(Ext.Stats.Create, name, "SpellData", parent)
-        if not ok or not r then return "CREATE FAILED " .. tostring(r) end
-        st, how = r, "created"
-    end
-    local bad = {}
-    for k, v in pairs(overrides or {}) do
-        if k == "add_flags" then
-            local ok, err = addFlags(st, v)
-            if not ok then bad[#bad + 1] = "SpellFlags: " .. tostring(err) end
-        else
-            local ok, err = setField(st, k, v)
-            if not ok then bad[#bad + 1] = k .. ": " .. tostring(err) end
-        end
-    end
-    if sync then pcall(function() st:Sync() end) end
-    return how .. (#bad > 0 and (" (errors: " .. table.concat(bad, "; ") .. ")") or "")
+    return st
 end
 
-local function exists(name)
-    local have = false
-    pcall(function() have = Ext.Stats.Get(name) ~= nil end)
-    return have
+local function field(st, k)
+    local ok, v = pcall(function() return st[k] end)
+    if not ok then return "?" end
+    if type(v) == "userdata" or type(v) == "table" then
+        local okJ, j = pcall(Ext.Json.Stringify, v, { Beautify = false, IterateUserdata = true, StringifyInternalTypes = true })
+        v = okJ and j or tostring(v)
+    end
+    v = tostring(v)
+    return #v > 60 and (v:sub(1, 57) .. "...") or v
 end
 
-local function apply(why, sync)
+local okCount = 0
+function M.Ok() return okCount end
+
+local function check(why)
     if data.enabled == false then return end
-    for spell, def in pairs(data.spells) do
-        if exists(spell) then
-            local v = make(M.VisualId(spell), spell, def.visual, sync)
-            local i = make(M.ImpactId(spell), spell, def.impact, sync)
-            Log.Write(string.format("ProjectileSpells: %s -> visual %s %s, impact %s %s (%s)", spell, M.VisualId(spell), v,
-                M.ImpactId(spell), i, why))
+    okCount = 0
+    for spell in pairs(data.spells) do
+        if get(spell) then
+            local v, i = get(M.VisualId(spell)), get(M.ImpactId(spell))
+            if v and i then okCount = okCount + 1 end
+            Log.Write(string.format("ProjectileSpells: %s -> %s %s (SpellRoll=%s SpellSuccess=%s SpellProperties=%s), %s %s (SpellRoll=%s SpellProperties=%s ExplodeRadius=%s) [%s]",
+                spell, M.VisualId(spell), v and "loaded" or "MISSING", v and field(v, "SpellRoll") or "-",
+                v and field(v, "SpellSuccess") or "-", v and field(v, "SpellProperties") or "-",
+                M.ImpactId(spell), i and "loaded" or "MISSING", i and field(i, "SpellRoll") or "-",
+                i and field(i, "SpellProperties") or "-", i and field(i, "ExplodeRadius") or "-", why))
         end
     end
+end
+
+-- Both clones of `spell` exist (else the server casts the spell the old way).
+function M.Ready(spell)
+    return get(M.VisualId(spell)) ~= nil and get(M.ImpactId(spell)) ~= nil
 end
 
 function M.Register(context)
-    Ext.Events.StatsLoaded:Subscribe(function() apply("StatsLoaded", false) end)
-    -- After a Lua `reset` the stats are already loaded.
-    if exists("Projectile_FireBolt") then apply("register", context == "Server") end
+    Ext.Events.StatsLoaded:Subscribe(function() check("StatsLoaded") end)
+    if get("Projectile_FireBolt") then check("register") end
 end
 
 return M
