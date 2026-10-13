@@ -82,6 +82,7 @@ end
 
 local function onLevelGameplayStarted(level, _)
     debugPrint("LevelGameplayStarted", level)
+    if DAG_SkipLevel and DAG_SkipLevel(level) then return end -- DAG: not in character creation
     onStarted(level)
 end
 

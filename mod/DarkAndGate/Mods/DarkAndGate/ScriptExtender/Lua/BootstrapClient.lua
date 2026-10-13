@@ -106,12 +106,20 @@ Ext.Require("Client/Crouch.lua").Register()
 -- V companion modes + server toasts; first person after teleports.
 Ext.Require("Client/Companions.lua").Register()
 Ext.Require("Client/Travel.lua").Register()
+-- !dag_play: the whole mod on, remembered; first person by itself after
+-- loads and character creation (Client/PlayMode.lua, Server/PlayMode.lua).
+Ext.Require("Client/PlayMode.lua").Register()
 local ConsoleForward = Ext.Require("Shared/ConsoleForward.lua")
 ConsoleForward.Forward({
     "dag_ai", "dag_ai_aim", "dag_ai_react", "dag_ai_debug", "dag_shield_pct", "dag_shield_debug",
     "dag_bleedout", "dag_revive_time", "dag_downme", "dag_stealth", "dag_stealth_debug",
     -- Test kit (Server/Combat/TestKit.lua) and the bow's draw time.
-    "dag_chest", "dag_goblins", "dag_god", "dag_bow_draw",
+    "dag_chest", "dag_goblins", "dag_god", "dag_bow_draw", "dag_learn",
+    -- Max HP bonus (Server/Combat/HpBonus.lua); a stuck dialogue state (Server/Scene.lua);
+    -- a use BG3 keeps repeating (Server/Combat/Interact.lua).
+    "dag_hp", "dag_scene", "dag_unstick",
+    -- The enemies' pace (Server/Combat/Pace.lua).
+    "dag_enemy_pace",
 })
 -- Forwarded commands carry the camera's forward ("ahead of you" spawns).
 local AimForCtx = Ext.Require("Client/Combat/Aim.lua")
@@ -127,8 +135,14 @@ local JumpAnims = Ext.Require("Client/Movement/JumpAnims.lua")
 local Jump      = Ext.Require("Client/Movement/Jump.lua")
 JumpAnims.Register()
 Jump.Register()
--- WASD speed knob + locomotion rate sync (native lever, MoveSpeed.cpp).
+-- WASD speed knob + locomotion rate sync (native lever, MoveSpeed.cpp), and
+-- the direct WASD controller's settings (MoveFeel.cpp, !dag_move_mode).
 Ext.Require("Client/Movement/Movement.lua").Register()
+-- Direct controller: the locomotion Start / End / turn clips fast-forwarded.
+Ext.Require("Client/Movement/LocoSkip.lua").Register()
+-- !dag_move_metrics on|off: start / stop / reverse / strafe timings (DLL) and
+-- the client/server drift (Server/MoveProbe.lua).
+Ext.Require("Client/Movement/MoveMetrics.lua").Register()
 -- WASD in real-time fights: BG3's own through the DLL, the server as the
 -- fallback (Client/Movement/CombatMove.lua).
 Ext.Require("Client/Movement/CombatMove.lua").Register()

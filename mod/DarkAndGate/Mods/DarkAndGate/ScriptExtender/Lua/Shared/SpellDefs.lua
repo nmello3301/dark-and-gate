@@ -8,14 +8,16 @@
 --              MultiStrike -> "target" (a character under the crosshair, else
 --              the point), Shout -> "self", Teleportation -> "teleport",
 --              everything else (Zone, Cone, Wall, Rush, Throw...) -> "point"
---   unlimited_range  false: only data/spells.lua spells get the raised
---              TargetRadius (Shared/SpellRange.lua); a derived spell keeps
---              BG3's range so BG3 never refuses it or walks the caster
---   range_m    stats TargetRadius (number), else 18
+--   unlimited_range  false: only data/spells.lua spells fly through our
+--              projectile system along the crosshair line
+--   range_m    the spell's first-person range (Shared/SpellRange.lua: 70 m
+--              shots, 30 m areas and multi-target spells, BG3's own range
+--              otherwise), else 18
 --   label/icon stats DisplayName / Icon
 -- Shared: the server prices and validates casts with the same table.
 
 local spells = Ext.Require("data/spells.lua")
+local SpellRange = Ext.Require("Shared/SpellRange.lua")
 
 local M = {}
 
@@ -53,7 +55,7 @@ local function derive(id)
         level = level,
         cost = spells.cost_by_level[level] or 0,
         cooldown_ms = level == 0 and 400 or 1500,
-        range_m = tonumber(str(st.TargetRadius)) or 18,
+        range_m = SpellRange.RangeOf(id) or tonumber(str(st.TargetRadius)) or 18,
         unlimited_range = false,
         projectile = isProjectile,
         label = label(st, id),
@@ -68,6 +70,7 @@ function M.Get(id)
     if not id then return nil end
     local d = spells.spells[id]
     if d then
+        if d.range_m == nil then d.range_m = SpellRange.RangeOf(id) or 18 end
         if d.label == nil or d.icon == nil then
             local x = memo[id] or derive(id)
             memo[id] = x

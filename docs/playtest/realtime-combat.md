@@ -46,10 +46,26 @@ One pass, about 45 minutes. Built in commits `cb90cdf` through `df5a8a8` (Parts 
 | 21 | Drink with T (health) and Y (mana); with a crossbow: shoot, R, shoot. | T / Y drink; R reloads (ring fills), then the next click shoots at once. | `Bow: reloading the LightCrossbows (1.5 s)`, `Bow: crossbow loaded`, `Bows: Gale reloads the crossbow` |
 | 22 | Draw a bow, hold it past full draw, let go. | The bow comes up in the first ~0.7 s, the string pulls back over the rest of the 3 s and stays at full draw; on release the shot plays and the arrow leaves at once. | `Bow: draw 3.00s left of 3.0s: raise …Prepare (0.67s at x1.00), pull …Antic (… held from 3.0s)` |
 | 23 | `!dag_goblins`, then walk and run with WASD through the fight (Shift = walk / run), cast spells and shoot while moving. | You move exactly as out of combat; goblins run (not sprint) to you; your own casts never move the view (no wall / black screen). | native.log `COMBATWASD: ON`; client.log no `CombatMove: … the server walks you` (if it appears, the fallback carried you); native.log no `POV: camera … is … m from you` (if it appears, the view stayed on you anyway) |
-| 24 | Watch the melee goblins and the caster for 20 s. | They act every 2-3 s, not every 6 s. | `AI: Goblin … -> swing #n` about every 2.5 s |
+| 24 | Watch the melee goblins and the caster for 20 s. | They act every 2-3 s, not every 6 s. (Superseded: 4 s, step 29.) | `AI: Goblin … -> swing #n` about every 2.5 s |
 | 25 | In a fight, cast Ray of Frost at a goblin and Fireball at the ground near one. | The view never zooms to the target or goes black. | native.log `POV: camera … (other camera on the main view …)` lines show BG3's cast cameras being overridden |
 | 27 | In a fight, cast Fireball (at a goblin, at the ground, at the sky). | The view stays in your head the whole time, never black. | client.log `CamGuard: dropped BG3's 'Projectile' combat camera request` |
 | 28 | Cast Grease, then jump across it (and once land in it). | Crossing in the air: no fall; landing in it works as usual. | `AirSurfaces: … in the air -> PRONE removed` |
 | 26 | `!dag_goblins`, then run more than 30 m away from all of them (or `!dag_goblins clear` one by one far away). | 4 s after the last goblin is past 30 m the fight ends (combat music stops); walking back starts a new fight. | `FightEnd: no enemy within 30 m … -> the fight ends`, `TestKit: N goblin(s) can walk to you` |
+
+## Pace, your side, ranges (added 2026-10-12, third round)
+
+Stand at the DEV-SAVE start with a companion in the party. `!dag_god` (not `party`) keeps you alive; leave the companion without god mode.
+
+| # | Do this | It should | Log lines |
+| --- | --- | --- | --- |
+| 29 | `!dag_goblins`, watch the goblins for 30 s. | Each goblin acts about every 4 s (not 2–3 s); the archer draws for 3 s and shoots again right after, about every 4 s, not every 6–8 s. | `AI: fight roster: Goblin … (enemy, every 3.8 s), Shadowheart (companion, every 4.1 s), Gale (you)`; `AI: … -> swing #n` / `draws its Shortbows` about 4 s apart |
+| 30 | Same fight: watch your companion. | It fights: casts, shoots or runs in and swings at a goblin about every 4 s; never stands idle while goblins are near. | `AI: Shadowheart starts casting …` or `AI: Shadowheart (companion) found nothing to do (…) -> attacks Goblin … with its weapon`; if it idles: `AI: Shadowheart (companion) did nothing this pulse: <why>` or `… has had no AI pulse for N s (…)` |
+| 31 | Walk north into the gate fight (the cutscene starts it). | The tiefling / druid defenders and your companions fight the goblins at the same 4 s pace. | `AI: fight roster: …` lists each one as `ally`, `companion` or `enemy` |
+| 32 | Fire Bolt at the sky, then at something 50–65 m away. | The bolt flies out of sight to about 70 m and is gone; things up to 70 m away get hit. | `Spells: Projectile_FireBolt aim far 70.0 m`, `PROJ #n launch … range 70 m`, `PROJ #n expired after 70.0 m` |
+| 33 | A bow at full draw: shoot at the sky and at a far target. | BG3's arrow is seen all the way (no longer vanishing at 40 m); an arrow that hits nothing ends at about 70 m. | `PROJ #n launch Projectile_MainHandAttack … range 70 m`, `visual clone … cast at` up to 72 m out |
+| 34 | Arm Fireball and Grease, aim far past 30 m (and at the sky); release. | The ring stops 30 m out on the ground and the spell lands there; Fireball at the sky bursts about 30 m out instead of vanishing. | `Targeting: Fireball area indicator … range 30 m`, `Spells: Projectile_Fireball aim far -> ring 30.0 m`, `PROJ #n HIT range` or `HIT world` |
+| 35 | Arm Sleep (or Bless) and pick a goblin 25 m away, then one 40 m away. | 25 m: picked (circle under it); 40 m: not pickable. | `Targeting: Sleep armed -> targeted (up to 6 targets, range 30 m …)`, `Targeting: Sleep picks … (25.x m)` |
+
+Server start line: `SpellRange: N shot spells (70 m), M area / multi-target spells (30 m); K raised (StatsLoaded); Projectile_FireBolt 18 -> 70, … Target_Sleep 18 -> 30, …`.
 
 **Knobs if something is off:** `!dag_combat_wasd on|off` (BG3's own WASD in fights), `!dag_combat_move auto|server|off` (the server fallback), `!dag_ai_interval <s>` (AI cadence, next fight), `!dag_combat_cam on|off` (BG3's combat camera mode back / away), `!dag_bow_draw <s>` (draw time), `!dag_ai_aim <deg>`, `!dag_ai_react <ms>`, `!dag_shield_pct <0-1>`, `!dag_bleedout <s>`, `!dag_revive_time <s>`, `!dag_crouch_speed <x>`, `!dag_stealth_debug on`, `!dag_ai off` (Brawl's own attacks back), `!dag_stealth off` (vanilla detection only).

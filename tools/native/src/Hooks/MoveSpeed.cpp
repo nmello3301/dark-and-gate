@@ -44,6 +44,8 @@ std::atomic<float> g_walk{ 1.f };
 std::atomic<float> g_runM{ 1.f };
 std::atomic<float> g_tWalk{ 0.25f };   // from BG3WASD's WalkSpeed
 std::atomic<long>  g_calls{ 0 };
+// Direct move mode (MoveFeel.cpp): this frame's ground speed, -1 = off.
+std::atomic<float> g_direct{ -1.f };
 
 alignas(16) uint8_t g_block[0x5c0] = {};
 float g_lastS = 0, g_lastR = 0, g_lastSo = 0, g_lastRo = 0;
@@ -70,6 +72,16 @@ uint8_t* __fastcall Hook(void* character, void* a2, void* a3, void* a4, uint8_t 
     float S = 0, R = 0;
     if (!t || !ReadTemplate(t, S, R)) return t;
     g_lastS = S; g_lastR = R;
+    const float ds = g_direct.load(std::memory_order_relaxed);
+    if (ds >= 0.f && R >= 0.2f && R <= 30.f) {
+        // Direct move mode: the speed is MoveFeel's this frame, whatever the
+        // input magnitude (Stroll = Run, so the lerp lands on it).
+        const float v = ds < 0.05f ? 0.05f : ds;
+        *reinterpret_cast<float*>(g_block + kStroll) = v;
+        *reinterpret_cast<float*>(g_block + kRun) = v;
+        g_lastSo = v; g_lastRo = v;
+        return g_block;
+    }
     if ((wm == 1.f && rm == 1.f) || S < 0.f || R < 0.2f || R > 30.f) {
         g_lastSo = S; g_lastRo = R;
         return t;
@@ -183,6 +195,19 @@ void Set(float walkMult, float runMult)
 }
 
 const char* State() { return g_why; }
+
+void SetDirectSpeed(float mps) { g_direct.store(mps, std::memory_order_relaxed); }
+
+float NaturalSpeed(bool walking)
+{
+    // What vanilla WASD moves at with our multipliers: BG3WASD's walk (the
+    // template lerp at its WalkSpeed) x walkMult, or Run x runMult.
+    float S = g_lastS, R = g_lastR;
+    if (!(R >= 0.2f && R <= 30.f)) { S = 1.4f; R = 3.75f; }   // not seen yet: human defaults
+    const float tw = g_tWalk.load(std::memory_order_relaxed);
+    return walking ? (S + tw * (R - S)) * g_walk.load(std::memory_order_relaxed)
+                   : R * g_runM.load(std::memory_order_relaxed);
+}
 
 void Read(float& stroll, float& run, float& tWalk, float& strollOut, float& runOut, long& calls)
 {

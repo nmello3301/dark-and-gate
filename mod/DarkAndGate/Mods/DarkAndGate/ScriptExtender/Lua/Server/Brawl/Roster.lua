@@ -30,7 +30,9 @@ local function addBrawler(entityUuid, replaceExistingBrawler)
             local existingBrawler = BrawlState.Session.Brawlers[level][entityUuid]
             -- Preserve actionInterval from any existing brawler entry within this combat.  The first addBrawler call (at first EnteredCombat) computes
             -- from the natural rolled init before our bumps fire; subsequent re-adds (level changes, party joins, etc.) would otherwise read the bumped InitiativeRoll.
+            -- DAG: each side's own pace (enemies: BG3's difficulty; Server/Combat/Pace.lua)
             local actionInterval = existingBrawler and existingBrawler.actionInterval
+                or (DAG_ActionInterval and DAG_ActionInterval(entityUuid, TurnOrder.getInitiativeRoll(entityUuid)))
                 or TurnOrder.calculateActionInterval(TurnOrder.getInitiativeRoll(entityUuid))
             local brawler = {
                 uuid = entityUuid,

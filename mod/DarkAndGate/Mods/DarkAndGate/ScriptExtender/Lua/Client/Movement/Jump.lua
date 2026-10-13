@@ -39,6 +39,8 @@
 --   !dag_jump_play_anims [on|off]          jump clips on/off (lift unaffected)
 --   !dag_jump_mult <x> / !dag_jump_height <m>   the same as !dag_jump, one value
 --   !dag_jump_moving_anims auto|on|off     clips on moving jumps (see above)
+--   !dag_jump_sync_guard on|off            real mode: skip the engine's reset
+--                                          when the server changes flag 0x20
 
 local Log       = Ext.Require("Shared/Log.lua")
 local MCM       = Ext.Require("Shared/MCM.lua")
@@ -398,6 +400,16 @@ function M.Register()
         Log.Write("Jump: A/D in the air flipped, strafe_sign = " .. tostring(FullPov.FlipStrafe()))
     end)
     FullPov.SetRealJumpTuning(D.strafe_sign, D.land_speed, D.wall_check_m)
+    -- The server's flag-0x20 change ~60 ms after take-off makes the engine
+    -- stop all movement; the DLL skips that reset during a jump (playtest 5).
+    local syncGuard = D.sync_guard ~= false
+    FullPov.SetJumpSyncGuard(syncGuard)
+    Ext.RegisterConsoleCommand("dag_jump_sync_guard", function(_, x)
+        if x == "on" then syncGuard = true elseif x == "off" then syncGuard = false end
+        FullPov.SetJumpSyncGuard(syncGuard)
+        Log.Write("Jump: sync guard " .. (syncGuard and "ON" or "off")
+            .. " (the engine's stop-everything reset ~60 ms after take-off is " .. (syncGuard and "skipped" or "allowed") .. "; native.log RJUMP sync lines)")
+    end)
     if D.mode == "real" then FullPov.SetJumpMode("real") end
 
     Ext.RegisterConsoleCommand("dag_jump_moving_anims", function(_, x)

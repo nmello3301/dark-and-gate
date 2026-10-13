@@ -48,6 +48,15 @@ uint8_t* WriteCall5(uint8_t* callSite, void* newTarget);
 // allocated near enough or if callSite[0] != 0xE8.
 uint8_t* InstallFarCall5(uint8_t* callSite, void* newTarget);
 
+// RWX memory within ±2GB of `nearAddr` (for code stubs a rel32 CALL must
+// reach). nullptr if nothing in range is free.
+uint8_t* AllocNear(void* nearAddr, size_t size);
+
+// Overwrites n (1..8) code bytes at `at`. When they sit inside one aligned
+// 8-byte block, one interlocked 64-bit store swaps them, so a thread running
+// that code never sees a half-written instruction; otherwise a plain copy.
+bool PatchCode(uint8_t* at, const uint8_t* bytes, size_t n);
+
 // Same as InstallFarCall5 for a 5-byte `E9` tail JMP. The hook must have
 // the target's signature and return the target's result (it runs as the
 // callee). Returns the OLD jump target, or nullptr if jmpSite[0] != 0xE9

@@ -400,7 +400,7 @@ local function getSpellInfo(spellType, spellName, hostLevel)
             isGapCloser = spell.SpellType == "Rush",
             isSpell = spell.SpellSchool ~= "None",
             isEvocation = spell.SpellSchool == "Evocation",
-            targetRadius = spell.TargetRadius,
+            targetRadius = (DAG_SpellRangeVanilla and DAG_SpellRangeVanilla(spellName)) or spell.TargetRadius, -- DAG: BG3's own range (Shared/SpellRange.lua)
             range = spell.Range,
             costs = costs,
             type = spellType,

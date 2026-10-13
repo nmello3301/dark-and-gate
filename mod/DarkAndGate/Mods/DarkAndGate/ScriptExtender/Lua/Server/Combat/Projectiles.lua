@@ -46,6 +46,7 @@ local data      = Ext.Require("data/projectiles.lua")
 local Shields   = Ext.Require("Server/Combat/Shields.lua")
 local Party     = Ext.Require("Server/Party.lua")
 local Damage    = Ext.Require("Server/Combat/Damage.lua")
+local SpellRange = Ext.Require("Shared/SpellRange.lua")
 
 local M = {}
 
@@ -222,15 +223,25 @@ function M.Launch(caster, spell, claim, castAt)
         farD = math.min(farD, math.sqrt(h[1] * h[1] + h[2] * h[2] + h[3] * h[3]) + (data.visual_overshoot_m or 2))
     end
     local far = add(origin, dir, farD)
+    -- The flight ends at the spell's range (data/projectiles.lua max_range_m:
+    -- 70 m shots and arrows); an area spell (Fireball) at its area range, or
+    -- just past the ring it was aimed at, + range_slack_m.
+    local maxRange = data.max_range_m or 70
+    if SpellRange.ClassOf(spell) == "area" then
+        local r = SpellRange.RangeOf(spell) or maxRange
+        if claim.hitPoint then r = math.max(r, len(sub(v3(claim.hitPoint), origin))) end
+        maxRange = math.min(maxRange, r + (data.range_slack_m or 3))
+    end
     local okV = castAt(caster, PSpells.VisualId(spell), { x = far[1], y = far[2], z = far[3] })
     local id = nextId; nextId = nextId + 1
     pending[caster] = {
         id = id, caster = caster, spell = spell, def = def, origin = origin, dir = dir, speed = speed, gravity = gravity,
         accel = tsp.accel or 0, at = now(), target = claim.targetUuid, visualCast = okV, npc = claim.npc,
         dmgMult = tonumber(claim.dmgMult), draw = tonumber(claim.draw), launchWait = tonumber(claim.launch_wait_s),
+        maxRange = maxRange,
     }
-    Log.Write(string.format("PROJ #%d launch %s: origin %s dir (%.3f,%.3f,%.3f) speed %.1f m/s accel %.1f gravity %.2f r %.2f m%s, visual clone %s %s",
-        id, spell, fmt(origin), dir[1], dir[2], dir[3], speed, tsp.accel or 0, gravity, def.radius_m or 0.15,
+    Log.Write(string.format("PROJ #%d launch %s: origin %s dir (%.3f,%.3f,%.3f) speed %.1f m/s accel %.1f gravity %.2f r %.2f m, range %.0f m%s, visual clone %s %s",
+        id, spell, fmt(origin), dir[1], dir[2], dir[3], speed, tsp.accel or 0, gravity, def.radius_m or 0.15, maxRange,
         claim.draw and string.format(", draw %.0f %% (damage x%.2f)", claim.draw * 100, tonumber(claim.dmgMult) or 1) or "",
         PSpells.VisualId(spell), okV and ("cast at " .. fmt(far)) or "FAILED to cast"))
     return true
@@ -248,7 +259,7 @@ local function start(p, projEnt, why)
     broadcast(Net.Channels.ProjectileLaunch, {
         id = p.id, caster = p.caster, spell = p.spell, origin = p.origin, vel = p.vel,
         gravity = p.gravity or p.def.gravity or 0, drag = p.def.drag or 0, accel = p.accel or 0,
-        radius = p.def.radius_m or 0.15, maxT = (data.max_range_m or 120) / math.max(1, p.speed),
+        radius = p.def.radius_m or 0.15, maxT = (p.maxRange or data.max_range_m or 70) / math.max(1, p.speed),
     })
     Log.Write(string.format("PROJ #%d flight starts (%s)%s", p.id, why,
         p.srcPos and string.format(", BG3 projectile SourcePos %s is %.2f m from our origin", fmt(p.srcPos), len(sub(p.srcPos, p.origin))) or ""))
@@ -438,7 +449,7 @@ local function impact(p, pos, targetUuid, what, cyl, shielded)
         removed = ok and "RequestDelete set" or "RequestDelete FAILED"
     end
     broadcast(Net.Channels.ProjectileHit, { id = p.id, pos = pos, target = targetUuid, what = what })
-    if what == "expired" or what == "world" then
+    if what == "expired" or what == "world" or what == "range" then
         local c = p.closest
         p.missNote = c and string.format(" (closest character %s passed %.2f m from its cylinder)", c.uuid, math.max(0, c.gap)) or
             " (no character near the path)"
@@ -527,7 +538,8 @@ local function stepOne(p, dt)
     end
     p.pos, p.vel = b, nv
     p.traveled = p.traveled + L
-    if p.traveled >= (data.max_range_m or 120) then impact(p, b, nil, "expired"); return true end
+    -- Out of range: gone, or an area spell (burst_at_range) bursts there.
+    if p.traveled >= (p.maxRange or data.max_range_m or 70) then impact(p, b, nil, p.def.burst_at_range and "range" or "expired"); return true end
     return false
 end
 

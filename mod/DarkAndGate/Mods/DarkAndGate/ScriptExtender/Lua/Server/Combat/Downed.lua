@@ -16,6 +16,20 @@
 --     of F or another action (cast, swing, jump, potion) cancels it; moving
 --     out of range only pauses it. Up at revive_hp: RemoveStatusesWithType
 --     DOWNED + SetHitpoints (Larian's own pattern, Shadowheart on the beach).
+--   * control stays on a downed player: when BG3 hands that user's control to
+--     another party member (playtest 2026-10-13: Lae'zel, who then counted as
+--     "controlled", got no AI and stood still until she went down too), it is
+--     handed back (MakePlayerActive, the story's own call; Brawl's portrait
+--     re-select as the fallback), so the companion keeps fighting on AI.
+--   * BG3's game over waits for the bleed-out. The story (GLO_GameOverLogic)
+--     ends the game once every party member is "defeated", and downed counts:
+--     the second downing ended the game at once. While a party member is
+--     downed, "Downed" is in the story's own list of defeats that don't end
+--     the game (DB_GameOver_DefeatCausesNotGameOver, where Larian keeps
+--     TempBanished / TempPetrified); only then, so saves without anyone downed
+--     don't carry it. A downed character who dies was already "defeated", so
+--     the story doesn't check again: its check (PROC_GameOver_CheckGameOver)
+--     runs after such a death unless the story ran it itself.
 -- Every state change is logged and broadcast (DownedState) for the client
 -- (Client/Downed.lua: orbit camera, banner, revive bar).
 --   !dag_bleedout <s>   !dag_revive_time <s>   !dag_downme   (server or client console)
@@ -42,6 +56,14 @@ local pendingDown = {} -- uuid -> ms to confirm at
 local companionGoing = {} -- companion uuid -> downed uuid
 local modeSource = nil -- fn(companionUuid) -> "follow"|"wait"|"camp"
 local lastBroadcast = -1e9
+local holdTries = {}   -- downed uuid -> times control was handed back this down
+local holdCheck = {}   -- downed uuid -> { at, user, other }: is control back?
+local GAMEOVER_CAUSE = "Downed"
+local gameOverHeld = false
+local storyCheckAt = -1e9     -- the story's last PROC_GameOver_CheckGameOver
+local deathCheck = nil        -- { at, since }: run the game-over check unless the story did
+local gaveUp = {}             -- Osiris user id -> true: pressed Give up while nobody stood
+local ended = false           -- everyone gave up and BG3's game over is up: nothing runs any more
 
 local function now() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
 local name = Damage.Name
@@ -68,21 +90,71 @@ function M.SetModeSource(fn) modeSource = fn end
 function M.IsDowned(uuid) return downed[Party.Norm(uuid)] ~= nil end
 function M.Downed() return downed end
 
+local function downedNow(u)
+    if downed[u] or pendingDown[u] then return true end
+    local ok, v = pcall(function() return Osi.HasAppliedStatusOfType(u, "DOWNED") end)
+    return ok and tonumber(v) == 1
+end
+
+-- ---------------------------------------------------------------------
+-- BG3's game over waits while a party member bleeds out (header)
+-- ---------------------------------------------------------------------
+local function partyDown()
+    for u in pairs(downed) do if Party.IsMember(u) then return true end end
+    for u in pairs(pendingDown) do if Party.IsMember(u) then return true end end
+    return false
+end
+
+local function gameOverFact()
+    local ok, rows = pcall(function() return Osi.DB_GameOver_DefeatCausesNotGameOver:Get(GAMEOVER_CAUSE) end)
+    return ok and type(rows) == "table" and #rows > 0
+end
+
+local function syncGameOver(why)
+    if ended then return end
+    local want = partyDown()
+    if want == gameOverHeld then return end
+    local ok, err = pcall(function()
+        if want then Osi.DB_GameOver_DefeatCausesNotGameOver(GAMEOVER_CAUSE)
+        else Osi.DB_GameOver_DefeatCausesNotGameOver:Delete(GAMEOVER_CAUSE) end
+    end)
+    gameOverHeld = want
+    Log.Write(string.format("Downed: BG3's game over %s (%s)%s", want and "waits while a party member bleeds out" or "is vanilla again (nobody downed)",
+        why, ok and "" or (" ERROR " .. tostring(err))))
+end
+
+local function partyCounts()
+    local up, down, dead = 0, 0, 0
+    for _, u in ipairs(Party.Members()) do
+        if isDead(u) then dead = dead + 1 elseif downedNow(u) then down = down + 1 else up = up + 1 end
+    end
+    return up, down, dead
+end
+
+-- A downed party member died: the story won't check for a game over by itself.
+local function checkAfterDeath()
+    local t = now()
+    if not deathCheck then deathCheck = { at = t + 1000, since = t } end
+end
+
 -- ---------------------------------------------------------------------
 -- Broadcast
 -- ---------------------------------------------------------------------
-local function send(uuid, st, state)
+-- standing: party members on their feet (0 = the Give up button shows).
+local function send(uuid, st, state, standing)
     local msg = {
         uuid = uuid, name = name(uuid), state = state, left = st and st.left or 0, total = st and st.total or 0,
         paused = st and st.reviver ~= nil or false, reviver = st and st.reviver or nil,
         reviverName = st and st.reviver and name(st.reviver) or nil, progress = st and st.progress or 0,
         outOfRange = st and st.outOfRange or false, reviveS = D.revive_s,
+        standing = standing or (partyCounts()),
     }
     pcall(function() Ext.Net.BroadcastMessage(Net.Channels.DownedState, Ext.Json.Stringify(msg)) end)
 end
 
 local function broadcastAll()
-    for u, st in pairs(downed) do send(u, st, "downed") end
+    local standing = partyCounts()
+    for u, st in pairs(downed) do send(u, st, "downed", standing) end
 end
 
 -- ---------------------------------------------------------------------
@@ -116,6 +188,8 @@ end
 local function upAgain(uuid, why)
     local st = downed[uuid]
     downed[uuid] = nil
+    holdTries[uuid], holdCheck[uuid] = nil, nil
+    gaveUp = {}   -- someone stands again: a give up starts over
     for c, t in pairs(companionGoing) do if t == uuid then companionGoing[c] = nil end end
     if st then
         Log.Write(string.format("Downed: %s is UP again (%s) after %.1f s downed, HP %s", name(uuid), why, (now() - st.since) / 1000,
@@ -142,10 +216,120 @@ local function bleedOut(uuid)
         return
     end
     downed[uuid] = nil
+    holdTries[uuid], holdCheck[uuid] = nil, nil
     local ok, err = pcall(function() Osi.Die(uuid, 3, NULL, 0, 0) end)
     Log.Write(string.format("Downed: %s BLED OUT after %d s -> dead%s (vanilla revives only: Withers, Revivify, scrolls)", name(uuid),
         D.bleedout_s, ok and "" or (" (Osi.Die ERROR " .. tostring(err) .. ")")))
     send(uuid, nil, "dead")
+    if Party.IsMember(uuid) then checkAfterDeath() end
+end
+
+-- ---------------------------------------------------------------------
+-- Control stays on a downed player (header)
+-- ---------------------------------------------------------------------
+local function onControl(user, new, prev)
+    if not prev or prev == new or not Party.IsMember(prev) or isDead(prev) or not downedNow(prev) then return end
+    local n = (holdTries[prev] or 0) + 1
+    holdTries[prev] = n
+    local most = D.control_back_tries or 3
+    if n > most then
+        if n == most + 1 then
+            Log.Write(string.format("Downed: BG3 keeps moving control off %s (downed): left on %s after %d tries", name(prev), name(new), most))
+        end
+        return
+    end
+    Log.Write(string.format("Downed: BG3 moved control from %s (downed) to %s -> back to %s, so %s stays on companion AI",
+        name(prev), name(new), name(prev), name(new)))
+    Ext.OnNextTick(function()
+        if isDead(prev) or not downedNow(prev) then return end
+        local ok, err = pcall(function() Osi.MakePlayerActive(prev) end)
+        if not ok then Log.Write("Downed: MakePlayerActive ERROR " .. tostring(err)) end
+        holdCheck[prev] = { at = now() + 500, user = user, other = new, tries = n }
+    end)
+end
+
+-- Half a second after MakePlayerActive: back, or Brawl's portrait re-select.
+local function checkControl(t)
+    for u, h in pairs(holdCheck) do
+        if t >= h.at then
+            holdCheck[u] = nil
+            if Party.Controlled(h.user) == u then
+                Log.Write(string.format("Downed: control is back on %s", name(u)))
+            elseif not isDead(u) and downedNow(u) then
+                local ok = pcall(function() Ext.Net.PostMessageToUser(h.user, "DAG_BrawlSelectCharacter", u) end)
+                Log.Write(string.format("Downed: control still on %s after MakePlayerActive -> %s's portrait re-selected on the client%s",
+                    name(Party.Controlled(h.user) or h.other), name(u), ok and "" or " (send FAILED)"))
+            end
+        end
+    end
+end
+
+-- ---------------------------------------------------------------------
+-- Give up (developer 2026-10-13: so nobody waits 3 min when no one is left
+-- to revive them). Offered while no party member stands. Each player (each
+-- Osiris user with characters in the party) gives up once; when all have,
+-- "Downed" leaves the story's not-a-game-over list and the story's own check
+-- runs: BG3's party-wipe game over, exactly as vanilla when everyone is
+-- down. Nobody is killed for it.
+-- ---------------------------------------------------------------------
+local function reply(peer, t)
+    pcall(function() Ext.Net.PostMessageToUser(peer, Net.Channels.GiveUpReply, Ext.Json.Stringify(t)) end)
+end
+
+local function partyUsers()
+    local seen, list = {}, {}
+    for _, u in ipairs(Party.Members()) do
+        local user = Party.UserOf(u)
+        if user and not seen[user] then seen[user] = true; list[#list + 1] = user end
+    end
+    return list
+end
+
+local function endGame(why)
+    ended = true
+    pcall(function() Osi.DB_GameOver_DefeatCausesNotGameOver:Delete(GAMEOVER_CAUSE) end)
+    gameOverHeld = false
+    local okC, err = pcall(function() Osi.PROC_GameOver_CheckGameOver() end)
+    -- User queries answer true / false (SE Docs/API.md).
+    local okA, alive = pcall(function() return Osi.QRY_GameOver_AliveCharactersLeft() end)
+    local okB, blocked = pcall(function() return Osi.QRY_GameOver_BlockGameOver() end)
+    if (okA and alive == true) or (okB and blocked == true) then
+        ended, gaveUp = false, {}
+        Log.Write(string.format("Downed: everyone gave up (%s), but BG3 shows no game over now (%s) -> the bleed-out goes on", why,
+            (okB and blocked == true) and "the story blocks it here" or "the story still counts someone as standing"))
+        pcall(function() Ext.Net.BroadcastMessage(Net.Channels.Toast, Ext.Json.Stringify({ text = "BG3 doesn't allow a game over right now", secs = 4 })) end)
+        return
+    end
+    Log.Write(string.format("Downed: GAME OVER (%s): BG3's party-wipe game over%s", why, okC and "" or (" ERROR " .. tostring(err))))
+    pcall(function() Ext.Net.BroadcastMessage(Net.Channels.GameOver, Ext.Json.Stringify({ by = why })) end)
+end
+
+local function giveUp(peer, uuid)
+    if ended then return end
+    local user = Party.UserFromPeer(peer)
+    if not uuid or not Party.IsMember(uuid) or Party.UserOf(uuid) ~= user or not (isDead(uuid) or downedNow(uuid)) then
+        Log.Write(string.format("Downed: give up refused: %s isn't this player's downed or dead character", name(uuid)))
+        reply(peer, { ok = false, text = "You can only give up while you are down" })
+        return
+    end
+    local up = partyCounts()
+    if up > 0 then
+        Log.Write(string.format("Downed: %s's give up refused: %d party member(s) still standing", name(uuid), up))
+        reply(peer, { ok = false, text = "Someone in your party is still standing" })
+        return
+    end
+    gaveUp[user] = true
+    local waiting = {}
+    for _, u in ipairs(partyUsers()) do
+        if not gaveUp[u] then waiting[#waiting + 1] = name(Party.Controlled(u) or "?") end
+    end
+    if #waiting > 0 then
+        Log.Write(string.format("Downed: %s gave up; waiting for %s", name(uuid), table.concat(waiting, ", ")))
+        reply(peer, { ok = true, waiting = true, text = "Waiting for " .. table.concat(waiting, ", ") .. " to give up" })
+        return
+    end
+    reply(peer, { ok = true })
+    endGame(name(uuid) .. " gave up")
 end
 
 -- ---------------------------------------------------------------------
@@ -239,6 +423,7 @@ end
 local lastT = nil
 local dispatchAt = -1e9
 local function tick()
+    if ended then return end
     local t = now()
     for u, at in pairs(pendingDown) do
         if t >= at then
@@ -249,6 +434,19 @@ local function tick()
             end
         end
     end
+    if next(holdCheck) then checkControl(t) end
+    if deathCheck and t >= deathCheck.at then
+        local since = deathCheck.since
+        deathCheck = nil
+        syncGameOver("a downed party member died")
+        if storyCheckAt < since then
+            local up, down, dead = partyCounts()
+            local ok, err = pcall(function() Osi.PROC_GameOver_CheckGameOver() end)
+            Log.Write(string.format("Downed: BG3's game-over check after the death (party: %d standing, %d downed, %d dead%s)%s", up, down, dead,
+                (up == 0 and down == 0) and ": nobody left, game over" or "", ok and "" or (" ERROR " .. tostring(err))))
+        end
+    end
+    syncGameOver("the downed list changed")
     local dt = lastT and math.min(0.5, (t - lastT) / 1000) or 0
     lastT = t
     if next(downed) == nil then return end
@@ -291,6 +489,8 @@ function M.Register()
         local u = Party.Norm(char)
         if tonumber(isDowned) == 1 then
             pendingDown[u] = now() + 500
+            -- Now, before the story's own 500 ms check marks them defeated.
+            syncGameOver(name(u) .. " went down")
         else
             pendingDown[u] = nil
             if downed[u] then upAgain(u, "BG3: no longer downed (healed?)") end
@@ -298,9 +498,30 @@ function M.Register()
     end)
     Ext.Osiris.RegisterListener("Died", 1, "after", function(char)
         local u = Party.Norm(char)
+        local wasDown = downed[u] ~= nil or pendingDown[u] ~= nil
         if downed[u] then downed[u] = nil; send(u, nil, "dead") end
+        pendingDown[u], holdTries[u], holdCheck[u] = nil, nil, nil
         cancelBy(u, "died")
+        if wasDown and Party.IsMember(u) then checkAfterDeath() end
     end)
+    -- Brought back the vanilla ways (Withers, Revivify, a scroll): the client
+    -- leaves the "YOU DIED" camera.
+    Ext.Osiris.RegisterListener("Resurrected", 1, "after", function(char)
+        local u = Party.Norm(char)
+        if Party.IsMember(u) then
+            Log.Write("Downed: " .. name(u) .. " was resurrected -> first person again")
+            gaveUp = {}
+            send(u, nil, "up")
+        end
+    end)
+    -- The downed screen's Give up button / G (Client/Downed.lua).
+    Ext.RegisterNetListener(Net.Channels.GiveUp, function(_, payload, peer)
+        local ok, p = pcall(Ext.Json.Parse, payload)
+        if not ok or type(p) ~= "table" then return end
+        Ext.OnNextTick(function() giveUp(peer, Party.Norm(p.uuid)) end)
+    end)
+    Ext.Osiris.RegisterListener("PROC_GameOver_CheckGameOver", 0, "after", function() storyCheckAt = now() end)
+    Party.OnControl(onControl)
     Ext.Osiris.RegisterListener("LevelGameplayStarted", 2, "after", function()
         ensurePassives("level start")
         -- A save made while downed: the status survived, our timer didn't.
@@ -308,6 +529,9 @@ function M.Register()
             local ok, v = pcall(function() return Osi.HasAppliedStatusOfType(u, "DOWNED") end)
             if ok and tonumber(v) == 1 and not isDead(u) then startDown(u, "still downed after a load: timer restarted") end
         end
+        -- The story's game-over list as the save has it (a save made while downed carries our fact).
+        gameOverHeld = gameOverFact()
+        syncGameOver("level start")
     end)
     Ext.Osiris.RegisterListener("CharacterJoinedParty", 1, "after", function() ensurePassives("joined the party") end)
     -- Players hold F (Client/Interact.lua).
@@ -352,21 +576,32 @@ function M.Register()
         if tonumber(v) then D.revive_s = math.max(0.2, tonumber(v)) end
         Log.Write(string.format("Downed: revive takes %.1f s of holding F within %.1f m", D.revive_s, D.revive_range_m))
     end)
-    ConsoleForward.Server("dag_downme", function()
+    -- !dag_downme [all]: you, or every party member still standing (to test
+    -- the game over waiting and the Give up button).
+    ConsoleForward.Server("dag_downme", function(_, a)
         local c = ConsoleForward.Caller()
-        local u = (c and Party.CharacterOfPeer(c.peer)) or Party.Controlled(nil)
-        local hp = Damage.Hp(u) or 1
-        -- God mode would stop the hit: lifted for it, back once down.
-        local god = Damage.Invincible(u)
-        if god then pcall(function() Osi.RemoveStatus(u, Damage.GOD_STATUS, u) end) end
-        Log.Write(string.format("Downed: !dag_downme -> %d damage to %s (BG3's downed flow)%s", hp + 5, name(u),
-            god and "; god mode lifted for this hit" or ""))
-        pcall(function() Osi.ApplyDamage(u, hp + 5, "Bludgeoning", NULL) end)
-        if god then
-            Ext.Timer.WaitFor(1500, function()
-                local ok = pcall(function() Osi.ApplyStatus(u, Damage.GOD_STATUS, -1, 1, u) end)
-                Log.Write(string.format("Downed: god mode back on %s%s", name(u), ok and "" or " (ApplyStatus FAILED)"))
-            end)
+        local me = (c and Party.CharacterOfPeer(c.peer)) or Party.Controlled(nil)
+        local list = { me }
+        if a == "all" then
+            list = {}
+            for _, u in ipairs(Party.Members()) do
+                if not isDead(u) and not downedNow(u) then list[#list + 1] = u end
+            end
+        end
+        for _, u in ipairs(list) do
+            local hp = Damage.Hp(u) or 1
+            -- God mode would stop the hit: lifted for it, back once down.
+            local god = Damage.Invincible(u)
+            if god then pcall(function() Osi.RemoveStatus(u, Damage.GOD_STATUS, u) end) end
+            Log.Write(string.format("Downed: !dag_downme%s -> %d damage to %s (BG3's downed flow)%s", a == "all" and " all" or "", hp + 5,
+                name(u), god and "; god mode lifted for this hit" or ""))
+            pcall(function() Osi.ApplyDamage(u, hp + 5, "Bludgeoning", NULL) end)
+            if god then
+                Ext.Timer.WaitFor(1500, function()
+                    local ok = pcall(function() Osi.ApplyStatus(u, Damage.GOD_STATUS, -1, 1, u) end)
+                    Log.Write(string.format("Downed: god mode back on %s%s", name(u), ok and "" or " (ApplyStatus FAILED)"))
+                end)
+            end
         end
     end)
     ensurePassives("register")

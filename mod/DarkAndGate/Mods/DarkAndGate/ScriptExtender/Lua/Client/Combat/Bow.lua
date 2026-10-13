@@ -239,7 +239,8 @@ function M.Cancel(why)
 end
 
 local function shoot(f, d)
-    local aim = Aim.SpellAim(spells.aim_far_m or 100)
+    -- Arrows reach data/spells.lua shot_range_m (70 m; the flight ends there too).
+    local aim = Aim.SpellAim(spells.shot_range_m or 70)
     if not aim then
         Log.Write("Bow: camera not readable, no shot")
         if d then lower(d, "no aim") end

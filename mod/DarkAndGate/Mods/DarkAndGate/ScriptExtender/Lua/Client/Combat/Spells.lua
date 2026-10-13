@@ -39,11 +39,13 @@ function M.Cast(spellId)
 
     local kind = def.kind or "target"
     local far = def.unlimited_range
-    local range = far and (spells.aim_far_m or 100) or (def.range_m or 30.0)
+    -- The spell's first-person range (data/spells.lua: 70 m shots, 30 m
+    -- areas and multi-target spells; Shared/SpellRange.lua).
+    local range = def.range_m or 30.0
 
     -- Shooting spells: straight down the crosshair line, nothing else
     -- (Aim.SpellAim). A character on the line is the target; otherwise the
-    -- world point or the far point along the line.
+    -- world point or the far point along the line, at most `range` away.
     local straight = far and kind ~= "self" and Aim.SpellAim(range) or nil
 
     local payload = {
@@ -64,6 +66,12 @@ function M.Cast(spellId)
             return
         end
         local p = straight.pos
+        -- An area spell (Fireball) with nothing on the line within its range
+        -- lands where its ring shows: pulled back to the range, on the ground.
+        if straight.via == "far" then
+            local ap = Targeting.AreaAim(spellId)
+            if ap then p = ap; straight.via = "far -> ring" end
+        end
         if straight.target and kind == "target" then payload.targetUuid = straight.target end
         payload.hitPoint = { x = p[1], y = p[2], z = p[3] }
         -- The aim line itself (projectile system: the server flies the
@@ -82,7 +90,12 @@ function M.Cast(spellId)
             Log.Write(string.format("Spells: %s -> character %s at %.1f m", spellId, t.target, t.distance or 0))
         else
             local pos, dist, via
-            if far then pos, dist, via = Aim.AimPoint(range) else pos, dist, via = Aim.GroundPoint(range) end
+            -- An area spell lands where its ring shows (Targeting.AreaAim).
+            local ap, eye = Targeting.AreaAim(spellId)
+            if ap then
+                pos, via = ap, "ring"
+                dist = eye and math.sqrt((ap[1] - eye[1]) ^ 2 + (ap[2] - eye[2]) ^ 2 + (ap[3] - eye[3]) ^ 2) or nil
+            elseif far then pos, dist, via = Aim.AimPoint(range) else pos, dist, via = Aim.GroundPoint(range) end
             if not pos then
                 Log.Write("Spells: camera not readable -- aborting " .. spellId)
                 return

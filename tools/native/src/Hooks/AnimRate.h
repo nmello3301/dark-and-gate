@@ -58,6 +58,14 @@ void SetNpcClipRates(const char* spec);
 // Calls scaled by an NPC clip rate since the start.
 long NpcClipHits();
 
+// Locomotion transition skip (2026-10-13, direct move mode): on `instance`,
+// nodes playing one of `ids` (comma-separated mapping-id GUIDs: the
+// locomotion Start / End*Foot / turn clips, Client/Movement/LocoSkip.lua)
+// run at `rate`, on top of everything above. Its own table, so it never
+// fights the bow / spell SetClipRates. "" or rate 1 = off.
+void SetLocoSkip(uintptr_t instance, const char* ids, float rate);
+long LocoHits();
+
 // FixedString id -> text through ls::gGlobalStringTable (found lazily on
 // the first call). SEH-guarded; false and "" on any failure. Used by
 // GenomeCapture.cpp.

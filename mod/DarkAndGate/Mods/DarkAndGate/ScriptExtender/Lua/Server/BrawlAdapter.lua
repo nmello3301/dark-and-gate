@@ -23,6 +23,7 @@
 local Log = Ext.Require("Shared/Log.lua")
 local cfg = Ext.Require("data/realtime.lua")
 local ConsoleForward = Ext.Require("Shared/ConsoleForward.lua")
+local SpellRange = Ext.Require("Shared/SpellRange.lua")
 
 local Adapter = { listening = false }
 
@@ -60,10 +61,22 @@ local function applySettings()
     S.AutoPauseOnDowned = false          -- downed = our bleed-out, never a pause
     S.AutoPauseOnCombatStart = false
     S.ActionInterval = tonumber(cfg.action_interval_s) or 6.0
+    -- How much initiative shifts each fighter's pace (Brawl shipped 0.3).
+    Constants.ACTION_INTERVAL_RESCALING = tonumber(cfg.initiative_spread) or Constants.ACTION_INTERVAL_RESCALING
     DAG_MoveGait = cfg.move_gait   -- Brawl Movement.getMovementSpeed (DAG patch)
     S.CombatRoundDuration = tonumber(cfg.round_s) or 6.0
     S.FullAuto = false
     S.HitpointsMultiplier = tonumber(cfg.hitpoints_multiplier) or 1.0
+    -- At x1 Brawl's HP scaling only rewrites every fighter's Health with the
+    -- same values (+ Replicate), at each level start, fight join and HP change
+    -- (a Health subscription per party member). Off at x1 (2026-10-13: it ran on
+    -- the character creation dummy when BG3 crashed there; !dag_hp is ours).
+    if S.HitpointsMultiplier == 1.0 then
+        local noop = function() end
+        BrawlState.setupPartyMembersHitpoints = noop
+        BrawlState.modifyHitpoints = noop
+        BrawlState.revertHitpoints = noop
+    end
     S.CompanionTactics = cfg.companion_tactics or "Balanced"
     S.DefensiveTacticsMaxDistance = tonumber(cfg.defensive_tactics_max_distance) or 15
     S.CompanionAIMaxSpellLevel = tonumber(cfg.companion_ai_max_spell_level) or 0
@@ -134,6 +147,9 @@ local function registerStateLog()
         uuid = okU and uuid or tostring(entity)
         if fight.joined[uuid] then return end
         fight.joined[uuid] = true
+        -- Brawl's invisible combat helpers rejoin every round: not logged.
+        local okH, helper = pcall(function() return Utils.isCombatHelper(uuid) end)
+        if okH and helper then fire("EnteredCombat", uuid, combatGuid); return end
         local okG, group = pcall(Osi.GetCombatGroupID, uuid)
         local okP, isPlayer = pcall(Osi.IsPartyMember, uuid, 1)
         Log.Write(string.format("RT: %s joined combat %s (%s, group %s)", name(uuid), tostring(combatGuid),
@@ -176,7 +192,7 @@ local function enable(why)
     Adapter.listening = true
     local okH, host = pcall(Osi.GetHostCharacter)
     local okR, level = pcall(Osi.GetRegion, okH and host or nil)
-    if okR and level then Listeners.onStarted(level) end
+    if okR and level and not DAG_SkipLevel(level) then Listeners.onStarted(level) end
     Log.Write("RT: real-time fights ON (" .. tostring(why) .. ")")
     fire("Enabled")
 end
@@ -190,6 +206,9 @@ local function disable(why)
     Movement.removeAllDashSpeedBoosts()
     Log.Write("RT: real-time fights OFF -> the next fight is BG3's vanilla turn-based (" .. tostring(why) .. ")")
 end
+
+-- Real time on (!dag_play, Server/PlayMode.lua).
+function Adapter.Enable(why) enable(why) end
 
 -- True when this character's fight is really turn-based right now: in combat
 -- with real time off, or the party paused into force-turn-based. Scripted
@@ -242,6 +261,17 @@ function Adapter.Register()
         Quests = Quests, Listeners = Listeners, TurnOrder = TurnOrder, RealTime = RT,
     }
     DAG_BrawlModule = function(n) return registry[n] end   -- Memo.lua (DAG patch)
+    -- Brawl stays out of character creation (Listeners.onLevelGameplayStarted, DAG patch).
+    DAG_SkipLevel = function(level)
+        local ok, v = pcall(Osi.IsCharacterCreationLevel, level)
+        local skip = ok and tonumber(v) == 1
+        if skip then Log.Write("RT: " .. tostring(level) .. " is character creation: Brawl's level start skipped") end
+        return skip
+    end
+    -- Brawl's AI keeps BG3's own spell ranges (how close NPCs and companions
+    -- walk before they cast); ours are for the player's aim (Shared/SpellRange.lua;
+    -- DAG patches in Utils.getSpellRange and Spells.getSpellInfo).
+    DAG_SpellRangeVanilla = SpellRange.Vanilla
     loaded = true
     applySettings()
     registerStateLog()
@@ -265,17 +295,21 @@ function Adapter.Register()
             Log.Write("RT: Brawl debug lines " .. (on and "ON (into the session log)" or "OFF"))
         else status() end
     end)
-    -- !dag_ai_interval <s>: how often Brawl's AI acts (data/realtime.lua
-    -- action_interval_s); fighters already in a fight keep their timers.
+    -- !dag_ai_interval <s>: how often your side's AI acts (companions and NPC
+    -- allies, data/realtime.lua action_interval_s; the enemies' pace follows
+    -- BG3's difficulty, Server/Combat/Pace.lua). Fighters already in a fight
+    -- keep their timers.
     ConsoleForward.Server("dag_ai_interval", function(_, v)
         if tonumber(v) then
             BrawlState.Settings.ActionInterval = math.max(1.0, tonumber(v))
             cfg.action_interval_s = BrawlState.Settings.ActionInterval
         end
-        Log.Write(string.format("RT: AI acts every %.1f s (initiative-scaled; from the next fight)", BrawlState.Settings.ActionInterval))
+        Log.Write(string.format("RT: your side's AI pace %.1f s (initiative +-%.0f %% scale; from the next fight; enemies: !dag_enemy_pace)",
+            BrawlState.Settings.ActionInterval, (Constants.ACTION_INTERVAL_RESCALING or 0) * 100))
     end)
-    Log.Write(string.format("RT: Brawl import loaded (%d modules; real time %s; round %s s; !dag_rt on|off|status|debug)",
-        16, BrawlState.Settings.ModEnabled and "on" or "off", tostring(BrawlState.Settings.CombatRoundDuration)))
+    Log.Write(string.format("RT: Brawl import loaded (%d modules; real time %s; round %s s; your side's AI pace %.1f s, enemies' by BG3's difficulty (Server/Combat/Pace.lua), initiative scale %.2f; !dag_rt on|off|status|debug)",
+        16, BrawlState.Settings.ModEnabled and "on" or "off", tostring(BrawlState.Settings.CombatRoundDuration),
+        BrawlState.Settings.ActionInterval, Constants.ACTION_INTERVAL_RESCALING or 0))
 end
 
 return Adapter

@@ -74,6 +74,33 @@
 --   loco_deadband   multipliers within this of 1.0 leave the clips alone.
 --   idle_speed      m/s under which the character counts as standing.
 --
+--   Direct controller (DECISIONS 2026-10-13, MoveFeel.cpp,
+--   docs/spikes/move-feel.md): BG3's own controller-mode WASD path (the
+--   one BG3WASD drives: walls, ground, nav grid, server sync) with its
+--   start delay, speed ramps and stop slide taken out; our own velocity.
+--   mode            "direct" | "vanilla" (BG3WASD exactly as before).
+--                   First person only; third person is always vanilla.
+--                   !dag_move_mode, MCM "move_direct".
+--   accel_time      seconds from standing to full speed (0 = instant).
+--   decel_time      seconds from full speed to a stop (0 = instant). A
+--                   reversal brakes, then accelerates.
+--   turn            body facing while moving: "engine" (BG3's own steering,
+--                   the default: playtest 2 picked it), "instant" (faces the
+--                   movement direction at once; BG3's steering keeps its own
+--                   yaw and fights it, so the body flickers), or a number in
+--                   degrees per second (the same fight). Never delays movement.
+--   input           direction of the move: "raw" = the physical W/A/S/D
+--                   on our own camera's forward (what the real jump steers
+--                   with) | "game" = BG3's own movement vector (turned by
+--                   the yaw of BG3's active gameplay camera object). Either
+--                   way BG3's own keys still decide whether you may move
+--                   (chat, dialogue) and walk / run.
+--   skip_loco_transitions  direct mode: the locomotion Start / End*Foot /
+--                   turn clips (found by name per character,
+--                   Client/Movement/LocoSkip.lua) play at loco_transition_rate,
+--                   so no start or stop pose is held while you already move
+--                   or have stopped.
+--
 -- prepare: spell prepare loop while a hotbar spell is armed
 -- (Client/Combat/Prepare.lua). The clip ids come from the spell's own
 -- SpellAnimation stats (slot 0 = prepare, slot 1 = loop; logged per spell).
@@ -102,6 +129,7 @@ return {
         strafe_sign   = -1,       -- A/D in the air (playtest: +1 was reversed)
         land_speed    = 3.0,      -- m/s, max fall speed handed back at the end of the curve
         wall_check_m  = 1.5,      -- real mode: wall check height above the feet (chest; rocks pass under; 2026-10-10 tuned 1.3 -> 1.5)
+        sync_guard    = true,     -- real mode: the server's flag-0x20 reset ~60 ms after take-off doesn't stop the jump (playtest 5)
         -- 2026-10-10: no take-off windup (the Cast clip felt clunky; jumps
         -- that skipped it felt much better) -> ascend, descend only.
         use_cast      = false,
@@ -127,6 +155,13 @@ return {
         loco_sync     = true,
         loco_deadband = 0.03,
         idle_speed    = 0.3,
+        mode          = "direct",
+        accel_time    = 0.06,
+        decel_time    = 0.04,
+        turn          = "engine",
+        input         = "raw",
+        skip_loco_transitions = true,
+        loco_transition_rate  = 5.0,
     },
     -- C = crouch = BG3's sneaking (Client/Crouch.lua, DECISIONS 2026-10-12).
     --   speed_mult   walk / run x this while crouched (SNEAKING also caps to walk)

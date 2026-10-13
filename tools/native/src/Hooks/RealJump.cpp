@@ -58,6 +58,27 @@ GetStateFn g_getState = nullptr;
 UpdateFn   g_origUpdate = nullptr;
 int*       g_counter = nullptr;
 bool       g_hooked = false;
+VoidStateFn g_origExit = nullptr;
+bool       g_inFallUpdate = false;
+
+// The client's reset for "the server changed character flag 0x20"
+// (0x141FE20D0, called from the character sync handler 0x141FDCC60 at
+// 0x141FDE059 when that flag changes on a character with a character light,
+// 0x2000): it clears the character light's data, exits the action layer,
+// StopMovement(machine, force) and stops steering. The server changes the
+// flag about 60 ms after every take-off (the jump clip, Osi.PlayAnimation):
+// playtest 5 logged it ending every real jump (RJUMP exit, callers
+// 0x1FE2224 <- 0x1FDE05E), and the light reset is the likely take-off
+// flicker. While our jump runs, and 0.6 s after its planned end, it is
+// skipped for our character (jump.sync_guard, !dag_jump_sync_guard).
+// Entry: push r14; sub rsp, 40h (6 bytes, no RIP-relative operand).
+constexpr const char* kSyncResetPattern =
+    "41 56 48 83 EC 40 48 8B 82 A8 00 00 00 4C 8B F2 48 89 5C 24 50 B9 03 00 00 00";
+constexpr uint8_t kSyncResetEntry[] = { 0x41, 0x56, 0x48, 0x83, 0xEC, 0x40 };
+using SyncResetFn = void(__fastcall*)(void* sys, void* character, uint8_t flag);
+SyncResetFn volatile g_origSyncReset = nullptr;
+std::atomic<bool> g_syncGuard{ true };
+long g_syncSeen = 0, g_syncSkipped = 0;
 char       g_why[128] = "not installed";
 
 std::atomic<void*> g_char{ nullptr };
@@ -103,6 +124,7 @@ struct Jump {
     int      seq = 0;
     uint8_t* state = nullptr;
     uint8_t* character = nullptr;
+    uint8_t* machine = nullptr;
     LARGE_INTEGER t0 = {};
     float    durMs = 0, h = 0, k = 3;
     float    start[3] = {};      // take-off position
@@ -326,7 +348,9 @@ uint64_t __fastcall HookUpdate(uint8_t* st, uint8_t* gameTime)
     std::memcpy(g_j.wrote, s, 12);
     ++g_j.frames;
 
+    g_inFallUpdate = true;
     const uint64_t r = g_origUpdate(st, gameTime);
+    g_inFallUpdate = false;
     const int stNow = *reinterpret_cast<int*>(st + 0x54);
     if (stNow >= 2) {
         g_j.active = false;
@@ -334,6 +358,51 @@ uint64_t __fastcall HookUpdate(uint8_t* st, uint8_t* gameTime)
                          g_j.seq, u, y, stNow, g_j.frames, g_j.reseeds);
     }
     return r;
+}
+
+// Falling Exit (vtable slot 6): who ends our jump while we still steer it?
+// Logs the engine callers (module rvas) once per jump.
+void __fastcall HookExit(uint8_t* st)
+{
+    if (g_j.active && st == g_j.state) {
+        void* frames[8] = {};
+        const USHORT n = RtlCaptureStackBackTrace(1, 8, frames, nullptr);
+        char buf[160] = {};
+        size_t len = 0;
+        for (USHORT i = 0; i < n && len + 20 < sizeof(buf); ++i) {
+            const uintptr_t a = reinterpret_cast<uintptr_t>(frames[i]);
+            const int w = (a >= g_base && a < g_base + 0x8000000)
+                ? std::snprintf(buf + len, sizeof(buf) - len, " 0x%llX", static_cast<unsigned long long>(a - g_base))
+                : std::snprintf(buf + len, sizeof(buf) - len, " ?");
+            if (w > 0) len += static_cast<size_t>(w);
+        }
+        LARGE_INTEGER now; QueryPerformanceCounter(&now);
+        const float u = static_cast<float>(Seconds(g_j.t0, now) * 1000.0 / g_j.durMs);
+        dag::log::Writef("RJUMP exit seq=%d at u=%.2f after %d frames%s: the engine is ending our falling state (callers rva%s)",
+                         g_j.seq, u, g_j.frames, g_inFallUpdate ? " (inside its own Update: a landing)" : "", buf);
+    }
+    g_origExit(st);
+}
+
+void __fastcall HookSyncReset(void* sys, void* character, uint8_t flag)
+{
+    if (character && character == g_char.load(std::memory_order_relaxed)) {
+        ++g_syncSeen;
+        LARGE_INTEGER now; QueryPerformanceCounter(&now);
+        const double ms = g_j.seq && g_j.t0.QuadPart ? Seconds(g_j.t0, now) * 1000.0 : 1e9;
+        const bool inJump = ms >= 0.0 && ms < g_j.durMs + 600.0;
+        if (inJump && g_syncGuard.load(std::memory_order_relaxed)) {
+            ++g_syncSkipped;
+            if (g_syncSkipped <= 20 || g_syncSkipped % 50 == 0)
+                dag::log::Writef("RJUMP sync #%ld: the server set flag 0x20 = %d on us %.0f ms after take-off (seq %d) -> "
+                                 "the engine's stop-everything reset skipped (sync guard)", g_syncSkipped, flag ? 1 : 0, ms, g_j.seq);
+            return;
+        }
+        if (g_syncSeen <= 20 || g_syncSeen % 50 == 0)
+            dag::log::Writef("RJUMP sync: the server set flag 0x20 = %d on us (%s) -> the engine's stop-everything reset runs",
+                             flag ? 1 : 0, inJump ? "during a jump, guard off" : "no jump");
+    }
+    g_origSyncReset(sys, character, flag);
 }
 
 bool HookVtable(uint8_t* st)
@@ -360,6 +429,11 @@ bool HookVtable(uint8_t* st)
     slots[4] = reinterpret_cast<void*>(&HookUpdate);
     DWORD tmp = 0;
     VirtualProtect(&slots[4], sizeof(void*), old, &tmp);
+    if (VirtualProtect(&slots[6], sizeof(void*), PAGE_READWRITE, &old)) {
+        g_origExit = reinterpret_cast<VoidStateFn>(slots[6]);
+        slots[6] = reinterpret_cast<void*>(&HookExit);
+        VirtualProtect(&slots[6], sizeof(void*), old, &tmp);
+    }
     g_hooked = true;
     dag::log::Writef("RJUMP: Falling Update hooked (vtable rva 0x%llX slot 4, orig rva 0x%llX)",
                      static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(vtp) - g_base),
@@ -392,6 +466,16 @@ void Install()
     } else {
         dag::log::Writef("RJUMP: ground-probe call pattern not found -> no wall/ceiling checks");
     }
+    if (uint8_t* sr = dag::patternscan::Find(mod, kSyncResetPattern)) {
+        if (dag::patternscan::InstallEntryDetour(sr, kSyncResetEntry, sizeof(kSyncResetEntry), reinterpret_cast<void*>(&HookSyncReset),
+                                                 reinterpret_cast<void* volatile*>(&g_origSyncReset)))
+            dag::log::Writef("RJUMP: sync guard on the server-flag reset at rva 0x%llX",
+                             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(sr) - g_base));
+        else
+            dag::log::Writef("RJUMP: sync guard refused (reset entry bytes differ) -> jumps can be cut off ~60 ms in");
+    } else {
+        dag::log::Writef("RJUMP: sync guard: reset pattern not found -> jumps can be cut off ~60 ms in");
+    }
     strcpy_s(g_why, "ready");
     dag::log::Writef("RJUMP: GetState at rva 0x%llX", static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(gs) - g_base));
 }
@@ -414,9 +498,14 @@ void ForgetCharacter()
 void SetStrafeSign(float s) { g_strafeSign = s < 0.f ? -1.f : 1.f; }
 void SetLandSpeed(float vmax) { if (vmax > 0.1f && vmax < 50.f) g_landSpeed = vmax; }
 void SetWallHeight(float h) { if (h > 0.2f && h < 3.f) g_wallH = h; }
+void SetSyncGuard(bool on)
+{
+    if (g_syncGuard.exchange(on) != on) dag::log::Writef("RJUMP: sync guard %s", on ? "ON" : "off");
+}
 
 void MeasureFrame()
 {
+    Active();   // notices a jump taken off the machine, every frame
     // Inertia: measured horizontal velocity of the WASD character.
     void* c = g_char.load(std::memory_order_relaxed);
     if (!c) return;
@@ -469,7 +558,7 @@ bool Start(float durMs, float h, float k, const float camFwdXZ[2], int seq)
     } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 
     g_j = Jump{};
-    g_j.seq = seq; g_j.state = st; g_j.character = c;
+    g_j.seq = seq; g_j.state = st; g_j.character = c; g_j.machine = machine;
     g_j.durMs = durMs > 50.f ? durMs : 50.f; g_j.h = h; g_j.k = k < 1.f ? 1.f : k;
     std::memcpy(g_j.start, pos, 12);
     std::memcpy(g_j.pos, pos, 12);
@@ -493,7 +582,42 @@ bool Start(float durMs, float h, float k, const float camFwdXZ[2], int seq)
     return true;
 }
 
-bool Active() { return g_j.active; }
+// True while our jump steers. Something else can take the falling state
+// off the movement machine mid-air (playtest 2026-10-13: 11 of 53 running
+// jumps ended with no end line, and the view snapped back to the ground).
+// That ends the jump here, logged, instead of leaving it "active" until the
+// next one (where a later ledge fall would have been steered by it).
+// GetType (vtable slot 1) of a movement state, -1 if none / unreadable.
+int StateType(void* st)
+{
+    if (!st) return -1;
+    __try {
+        auto get = reinterpret_cast<int(__fastcall*)(void*)>(VtSlot(st, 1));
+        return get ? get(st) : -1;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return -1;
+    }
+}
+
+bool Active()
+{
+    if (!g_j.active) return false;
+    void* l1 = nullptr;
+    const bool ok = g_j.machine && dag::safemem::ReadPtr(g_j.machine, 0x40, l1);
+    LARGE_INTEGER now; QueryPerformanceCounter(&now);
+    const float u = static_cast<float>(Seconds(g_j.t0, now) * 1000.0 / g_j.durMs);
+    if (ok && l1 == g_j.state && u < 2.f) return true;
+    g_j.active = false;
+    void* l0 = nullptr;
+    if (ok) dag::safemem::ReadPtr(g_j.machine, 0x38, l0);
+    dag::log::Writef("RJUMP interrupted seq=%d at u=%.2f after %d frames, re-seeds=%d (%s; now layer 0 type %d, layer 1 type %d)",
+                     g_j.seq, u, g_j.frames, g_j.reseeds,
+                     !ok ? "movement machine unreadable"
+                         : (l1 != g_j.state ? "the falling state left the movement machine" : "never handed back"),
+                     StateType(l0), StateType(l1));
+    return false;
+}
+
 const char* State() { return g_why; }
 
 }  // namespace dag::realjump

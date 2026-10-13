@@ -531,7 +531,9 @@ local function getWeightedTargets(brawler, potentialTargets, bonusActionOnly, he
         if not M.Utils.isToT() or (Mods.ToT.PersistentVars.Scenario and potentialTargetUuid ~= Mods.ToT.PersistentVars.Scenario.CombatHelper) then
             debugPrint(brawler.displayName, "checking potential target", M.Utils.getDisplayName(potentialTargetUuid), potentialTargetUuid)
             local weightedTarget
-            if (M.Utils.isAliveAndCanFight(potentialTargetUuid) or M.Utils.isDowned(potentialTargetUuid)) and (healingNeeded or M.Osi.IsAlly(brawler.uuid, potentialTargetUuid) == 0) then
+            -- DAG: nobody attacks a downed character (hits can't kill one: our bleed-out, Server/Combat/Downed.lua)
+            local skipDowned = DAG_SkipDownedTargets and M.Utils.isDowned(potentialTargetUuid) and M.Osi.IsAlly(brawler.uuid, potentialTargetUuid) == 0
+            if not skipDowned and (M.Utils.isAliveAndCanFight(potentialTargetUuid) or M.Utils.isDowned(potentialTargetUuid)) and (healingNeeded or M.Osi.IsAlly(brawler.uuid, potentialTargetUuid) == 0) then
                 if brawler.uuid == potentialTargetUuid then
                     local preparedSpells = Ext.Entity.Get(brawler.uuid).SpellBookPrepares.PreparedSpells
                     debugPrint("has direct heal?", M.State.hasDirectHeal(brawler.uuid, preparedSpells, false, bonusActionOnly))

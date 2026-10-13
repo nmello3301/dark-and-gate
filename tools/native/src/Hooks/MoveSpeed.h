@@ -26,6 +26,16 @@ void Set(float walkMult, float runMult);
 // For the status line: "ok" / "failed: ..." / "not installed".
 const char* State();
 
+// Direct move mode (MoveFeel.cpp, docs/spikes/move-feel.md): while >= 0 the
+// hook hands back Stroll = Run = mps, so the WASD update moves at exactly
+// that speed whatever the input magnitude. -1 = off (the multipliers above).
+void SetDirectSpeed(float mps);
+
+// The speed vanilla WASD would give with the current multipliers: the walk
+// (BG3WASD's walk lerp x walkMult) or the run (Run x runMult), in m/s.
+// Human defaults until the hook has seen the character's template.
+float NaturalSpeed(bool walking);
+
 // Last values seen in the hook: template Stroll / Run, BG3WASD's walk
 // lerp t, our Stroll' / Run', and how many calls since install.
 void Read(float& stroll, float& run, float& tWalk, float& strollOut, float& runOut, long& calls);

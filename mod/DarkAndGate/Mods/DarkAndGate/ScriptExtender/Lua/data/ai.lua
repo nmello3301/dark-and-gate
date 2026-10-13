@@ -38,6 +38,29 @@
 --                      spells commit their target point (with aim_error_deg)
 --                      at the start of it, so you can step out of the area
 --   busy_pad_ms        after an action, before Brawl's next pulse may act
+-- Targets:
+--   skip_downed_targets  nobody attacks a downed character: hits can't kill one
+--                      (our bleed-out, Server/Combat/Downed.lua), so enemies go
+--                      for whoever still stands (playtest 2026-10-13: the imps
+--                      kept shooting a downed player for 3 minutes)
+-- The pace (data/realtime.lua: your side action_interval_s, enemies
+-- enemy_pace_s by BG3's difficulty, Server/Combat/Pace.lua):
+--   pace.slack_ms      a pulse less than a pace (minus this) after the
+--                      fighter's last action started, or while that action
+--                      still runs, waits: the fighter acts as soon as both
+--                      are over (+ pace.retry_pad_ms), not a whole pace later
+-- Your side (developer 2026-10-12: companions and allies "play for the
+-- players side"), companions and NPC allies:
+--   side.fallback      when Brawl's AI finds nothing for one to do, it attacks
+--                      the nearest enemy in sight within side.fallback_range_m
+--                      with its weapon: its bow / crossbow when its archetype
+--                      is ranged and the enemy is farther than side.melee_m,
+--                      else its melee weapon (our swing / shot)
+--   side.log_every_s   why one did nothing is logged once per reason, and
+--                      again after this long
+--   side.stall_paces   one that got no AI pulse for this many paces (at least
+--                      side.stall_min_s) in a fight is logged with its state,
+--                      and its pulse is restarted when Brawl would run it
 return {
     enabled = true,
     ranged = {
@@ -61,5 +84,8 @@ return {
     },
     cast_time_s = 1.5,
     busy_pad_ms = 300,
+    skip_downed_targets = true,
+    pace = { slack_ms = 250, retry_pad_ms = 50 },
+    side = { fallback = true, fallback_range_m = 25, melee_m = 3.0, log_every_s = 15, stall_paces = 3, stall_min_s = 10 },
     log = true,
 }

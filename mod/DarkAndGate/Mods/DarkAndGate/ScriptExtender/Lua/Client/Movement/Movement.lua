@@ -25,8 +25,19 @@
 -- speed (walk or run, from the DLL's template read) the measured speed is
 -- closer to.
 --
+-- Direct controller (DECISIONS 2026-10-13, MoveFeel.cpp,
+-- docs/spikes/move-feel.md): in first person, BG3's own controller-mode WASD
+-- path with its start delay, speed ramps and stop slide taken out, our own
+-- velocity (move.accel_time / decel_time), and the body facing the movement
+-- direction (move.turn). "vanilla" = BG3WASD's movement exactly as before;
+-- third person is always vanilla. The speeds above (walk / run x multipliers
+-- x modifiers) are the direct controller's target speeds too.
+--
 -- Commands: !dag_speed_mult <x>, !dag_walk_speed <x>, !dag_run_speed <x>,
---           !dag_move_status, !dag_loco_sync on|off
+--           !dag_move_status, !dag_loco_sync on|off,
+--           !dag_move_mode vanilla|direct, !dag_move_accel <s>,
+--           !dag_move_decel <s>, !dag_move_turn instant|engine|<deg/s>,
+--           !dag_move_input game|raw (!dag_move_metrics: MoveMetrics.lua)
 
 local Log      = Ext.Require("Shared/Log.lua")
 local MCM      = Ext.Require("Shared/MCM.lua")
@@ -139,6 +150,44 @@ local function gaitOf(v, w, r)
     return dw <= dr and "walk" or "run", expW, expR
 end
 
+-- ---------------------------------------------------------------------
+-- Direct controller settings -> DLL (FullPov.SetMoveFeel, MoveFeel.cpp)
+-- ---------------------------------------------------------------------
+local feel = { turn = D.turn or "engine", input = D.input or "raw", hold = false }
+
+local function turnValue(t)
+    if t == "instant" then return -1 elseif t == "engine" then return 0 end
+    local n = tonumber(t)
+    return (n and n > 0) and n or -1
+end
+
+function M.Direct() return MCM.Get("move_direct") and true or false end
+
+local function pushFeel()
+    FullPov.SetMoveFeel({
+        mode  = M.Direct() and 1 or 0,
+        accel = math.max(0, tonumber(MCM.Get("move_accel_time")) or D.accel_time or 0.06),
+        decel = math.max(0, tonumber(MCM.Get("move_decel_time")) or D.decel_time or 0.04),
+        turn  = turnValue(feel.turn),
+        raw   = feel.input == "raw" and 1 or 0,
+        hold  = feel.hold and 1 or 0,
+    })
+end
+
+-- Input released for the direct controller beyond what BG3's own movement
+-- keys already ignore (nothing uses it yet).
+function M.SetHold(on)
+    feel.hold = on and true or false
+    pushFeel()
+end
+
+local function feelLine()
+    return string.format("mode %s (DLL %s, speed %s m/s, target %s) accel %.3fs decel %.3fs turn %s input %s",
+        M.Direct() and "direct" or "vanilla", tostring(FullPov.StatusValue("mf")), tostring(FullPov.StatusValue("mfv")),
+        tostring(FullPov.StatusValue("mftarget")), tonumber(MCM.Get("move_accel_time")) or 0,
+        tonumber(MCM.Get("move_decel_time")) or 0, tostring(feel.turn), tostring(feel.input))
+end
+
 local function tick()
     local now = nowMs()
     local ent = player()
@@ -157,6 +206,7 @@ local function tick()
                 #names > 0 and (", modifiers: " .. table.concat(names, ", ")) or ""))
         end
         FullPov.SetMove(S.walk, S.run)
+        pushFeel()
     end
 
     -- Locomotion play rate follows the gait's multiplier.
@@ -191,12 +241,16 @@ local function status()
         tostring(FullPov.StatusValue("move")), tostring(FullPov.StatusValue("tmplStroll")), tostring(FullPov.StatusValue("tmplRun")),
         tostring(FullPov.StatusValue("walkT")), tostring(FullPov.StatusValue("outStroll")), tostring(FullPov.StatusValue("outRun")),
         tostring(FullPov.StatusValue("moveCalls")), tostring(FullPov.StatusValue("rateHits"))))
+    Log.Write("Move: " .. feelLine())
 end
 
 function M.Register()
     MCM.DefineNumber("move_walk_speed", D.walk_speed, "Walk speed multiplier", D.min_mult, D.max_mult)
     MCM.DefineNumber("move_run_speed", D.run_speed, "Run speed multiplier", D.min_mult, D.max_mult)
     MCM.DefineNumber("move_speed_mult", D.speed_mult, "Overall movement speed multiplier", D.min_mult, D.max_mult)
+    MCM.DefineBool("move_direct", (D.mode or "direct") == "direct", "Direct WASD movement (instant start, stop and turn)")
+    MCM.DefineNumber("move_accel_time", D.accel_time or 0.06, "Direct movement: seconds to full speed", 0, 0.5)
+    MCM.DefineNumber("move_decel_time", D.decel_time or 0.04, "Direct movement: seconds to a stop", 0, 0.5)
 
     Ext.Events.Tick:Subscribe(function() pcall(tick) end)
 
@@ -211,11 +265,38 @@ function M.Register()
     numCmd("dag_walk_speed", "move_walk_speed")
     numCmd("dag_run_speed", "move_run_speed")
     Ext.RegisterConsoleCommand("dag_move_status", function() status() end)
+    Ext.RegisterConsoleCommand("dag_move_mode", function(_, a)
+        if a == "direct" or a == "vanilla" then MCM.Set("move_direct", a == "direct") end
+        pushFeel()
+        Log.Write("Move: " .. feelLine() .. ((a == "direct" or a == "vanilla") and "" or "  (usage: !dag_move_mode vanilla|direct)"))
+    end)
+    local function secCmd(cmd, key)
+        Ext.RegisterConsoleCommand(cmd, function(_, x)
+            if tonumber(x) then MCM.Set(key, math.max(0, tonumber(x))) end
+            pushFeel()
+            Log.Write("Move: " .. feelLine())
+        end)
+    end
+    secCmd("dag_move_accel", "move_accel_time")
+    secCmd("dag_move_decel", "move_decel_time")
+    Ext.RegisterConsoleCommand("dag_move_turn", function(_, a)
+        if a == "instant" or a == "engine" then feel.turn = a
+        elseif tonumber(a) and tonumber(a) > 0 then feel.turn = tonumber(a) end
+        pushFeel()
+        Log.Write("Move: " .. feelLine())
+    end)
+    Ext.RegisterConsoleCommand("dag_move_input", function(_, a)
+        if a == "game" or a == "raw" then feel.input = a end
+        pushFeel()
+        Log.Write("Move: " .. feelLine())
+    end)
     Ext.RegisterConsoleCommand("dag_loco_sync", function(_, a)
         if a == "off" or a == "0" then S.locoSync = false elseif a == "on" or a == "1" then S.locoSync = true end
         Log.Write("Move: locomotion rate sync " .. (S.locoSync and "ON" or "OFF"))
     end)
-    Log.Write("Move: registered (!dag_speed_mult / !dag_walk_speed / !dag_run_speed / !dag_move_status / !dag_loco_sync)")
+    pushFeel()
+    Log.Write("Move: registered (!dag_speed_mult / !dag_walk_speed / !dag_run_speed / !dag_move_status / !dag_loco_sync / "
+        .. "!dag_move_mode / !dag_move_accel / !dag_move_decel / !dag_move_turn / !dag_move_input); " .. feelLine())
 end
 
 return M

@@ -22,6 +22,8 @@ return {
         revive_range_m   = 1.5,   -- reviver within this distance of the body
         revive_hp        = 1,     -- HP after a revive
         companion_range_m = 25,   -- companions come to revive from this far
+        control_back_tries = 3,   -- BG3 moves your control off your downed body: handed back this many times per down
+        give_up_confirm_s = 5,    -- nobody standing: Give up (button / G) a second time within this ends the game
         orbit_distance_m = 3.5,   -- downed camera: distance from the body
         orbit_up_m       = 0.6,   -- the point it circles, above the body's root
         orbit_pitch_min  = -10,   -- degrees (+ = above, looking down)

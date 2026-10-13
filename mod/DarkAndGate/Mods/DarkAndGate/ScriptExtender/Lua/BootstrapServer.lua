@@ -46,6 +46,8 @@ Ext.Require("Server/Combat/HudStats.lua").Register()
 Ext.Require("Server/Party.lua").Register()
 Ext.Require("Shared/ConsoleForward.lua").RegisterServer()
 Ext.Require("Server/BrawlAdapter.lua").Register()
+-- The AI pace per side: enemies by BG3's difficulty, your side 4 s.
+Ext.Require("Server/Combat/Pace.lua").Register()
 -- Real-time rules: no reactions / Sneak Attack in real-time fights.
 Ext.Require("Server/Combat/NoReactions.lua").Register()
 -- Enemy / companion AI on our rules (swings, projectiles, cast time) and
@@ -78,6 +80,15 @@ Ext.Require("Server/Combat/FightEnd.lua").Register()
 -- Ground surfaces don't touch a first-person jumper in the air.
 Ext.Require("Server/Combat/AirSurfaces.lua").Register()
 Ext.Require("Server/Combat/TestKit.lua").Register()
+-- !dag_hp 50 [party]: max HP bonus (BG3's IncreaseMaxHP(N%) on a hidden status).
+Ext.Require("Server/Combat/HpBonus.lua").Register()
+-- !dag_play from a client: the server's parts on, level / character creation info.
+Ext.Require("Server/PlayMode.lua").Register()
+-- Dialogues / cutscenes: clients hide our HUD and release input (Server/Scene.lua).
+Ext.Require("Server/Scene.lua").Register()
+-- !dag_move_metrics: the server's own position of a client's character, for
+-- the client/server drift (Client/Movement/MoveMetrics.lua).
+Ext.Require("Server/MoveProbe.lua").Register()
 
 -- Animation browser + gallery (server side: preview copies).
 local AnimLib = Ext.Require("Server/AnimLib.lua")

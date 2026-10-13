@@ -110,11 +110,21 @@ Net.Channels = {
     Toast             = "DAG_Toast",
     -- Downed / bleed-out / revive (Server/Combat/Downed.lua, Client/Downed.lua).
     -- Server -> clients: DownedState { uuid, name, state = "downed"|"up"|"dead",
-    --   left = s, total = s, paused, reviver?, reviverName?, progress = 0..1 }
+    --   left = s, total = s, paused, reviver?, reviverName?, progress = 0..1,
+    --   standing = party members still on their feet }
     -- Client -> server: ReviveHold { target, hold = true|false } (F held near a
     --   downed ally; false = F let go or another action cancels it).
     DownedState       = "DAG_DownedState",
     ReviveHold        = "DAG_ReviveHold",
+    -- Give up, offered while nobody in the party stands (the downed screen's
+    -- button / G). Client -> server: GiveUp { uuid } (the client's downed or
+    -- dead character). Server -> that client: GiveUpReply { ok, waiting?, text }
+    -- (waiting = other players still have to give up). Server -> clients:
+    -- GameOver { by } (BG3's game-over screen is up: our HUD and first person
+    -- stand aside).
+    GiveUp            = "DAG_GiveUp",
+    GiveUpReply       = "DAG_GiveUpReply",
+    GameOver          = "DAG_GameOver",
     -- F interaction (Client/LookAt.lua + Client/Interact.lua, Server/Combat/Interact.lua).
     -- Client -> server: InteractClassify { target }  (what is this?)
     --                   InteractRequest  { target }  (F tapped on it)
@@ -159,6 +169,21 @@ Net.Channels = {
     -- starts / ends.
     CombatMove        = "DAG_CombatMove",
     CombatMoveState   = "DAG_CombatMoveState",
+    -- !dag_play (Client/PlayMode.lua, Server/PlayMode.lua). Client -> server:
+    -- PlayMode { on } at session start and when typed; server -> that client
+    -- (and to every client at each level start): PlayReady { level, cc }
+    -- (cc = character creation: first person waits).
+    PlayMode          = "DAG_PlayMode",
+    PlayReady         = "DAG_PlayReady",
+    -- Server -> clients: a dialogue / cutscene runs or ended (Server/Scene.lua):
+    -- Scene { on }. Our HUD, input and first person stand aside while on.
+    Scene             = "DAG_Scene",
+    -- Movement-feel metrics (!dag_move_metrics: Client/Movement/MoveMetrics.lua,
+    -- Server/MoveProbe.lua). Client -> server: MoveProbeReq { on }; server ->
+    -- that client every 50 ms while on: MoveProbe { x, y, z } (the server's
+    -- own position of the client's character), to measure client/server drift.
+    MoveProbeReq      = "DAG_MoveProbeReq",
+    MoveProbe         = "DAG_MoveProbe",
 }
 
 -- Every channel both sides care about. Both server and client must register
@@ -194,6 +219,9 @@ Net.AllChannels = {
     Net.Channels.Toast,
     Net.Channels.DownedState,
     Net.Channels.ReviveHold,
+    Net.Channels.GiveUp,
+    Net.Channels.GiveUpReply,
+    Net.Channels.GameOver,
     Net.Channels.InteractClassify,
     Net.Channels.InteractInfo,
     Net.Channels.InteractRequest,
@@ -210,6 +238,11 @@ Net.AllChannels = {
     Net.Channels.ContainerUI,
     Net.Channels.CombatMove,
     Net.Channels.CombatMoveState,
+    Net.Channels.PlayMode,
+    Net.Channels.PlayReady,
+    Net.Channels.Scene,
+    Net.Channels.MoveProbeReq,
+    Net.Channels.MoveProbe,
 }
 
 return Net

@@ -286,6 +286,48 @@ float NpcClipRateFor(uintptr_t inst, uint8_t* ctx)
     return r > 0.f ? r : 1.f;
 }
 
+// ---- locomotion transition skip (2026-10-13, direct move mode) ---------
+// The player's locomotion Start / End*Foot / turn clips (mapping ids found by
+// clip name in Lua, Client/Movement/LocoSkip.lua) play at one rate, so they
+// are over at once instead of holding a start or stop pose while the direct
+// controller already moves or has stopped. Its own table: the bow and spell
+// code own SetClipRates.
+constexpr int kLocoIds = 48;
+char     g_locoId[kLocoIds][40];
+int      g_numLoco = 0;
+float    g_locoRate = 1.f;
+char     g_locoSpec[kLocoIds * 40] = "";
+uintptr_t g_locoReqInst = 0;
+std::atomic<uintptr_t> g_locoInst{ 0 };
+std::atomic<long> g_locoHits{ 0 };
+constexpr int kLocoFsCache = 256;
+struct LocoFs { uint32_t fs; bool hit; };
+LocoFs   g_locoFs[kLocoFsCache];
+int      g_locoFsN = 0;
+std::atomic_flag g_locoLock = ATOMIC_FLAG_INIT;
+
+float LocoRateFor(uint8_t* ctx)
+{
+    uint8_t* a = SocketVar(ctx, 0);
+    if (!a) return 1.f;
+    uint32_t fs = 0;
+    __try { fs = *reinterpret_cast<uint32_t*>(a); } __except (EXCEPTION_EXECUTE_HANDLER) { return 1.f; }
+    if (g_locoLock.test_and_set(std::memory_order_acquire)) return 1.f;   // busy: skip, never block the game
+    int hit = -1;
+    for (int i = 0; i < g_locoFsN; ++i) if (g_locoFs[i].fs == fs) { hit = g_locoFs[i].hit ? 1 : 0; break; }
+    if (hit < 0) {
+        hit = 0;
+        char txt[64];
+        if (FsTextRaw(fs, txt, sizeof(txt))) {
+            for (int i = 0; i < g_numLoco; ++i) if (_stricmp(txt, g_locoId[i]) == 0) { hit = 1; break; }
+        }
+        if (g_locoFsN < kLocoFsCache) g_locoFs[g_locoFsN++] = { fs, hit == 1 };
+    }
+    const float r = hit ? g_locoRate : 1.f;
+    g_locoLock.clear(std::memory_order_release);
+    return r;
+}
+
 bool Lookup(uintptr_t inst, float& r)
 {
     for (auto& s : g_slots) {
@@ -328,8 +370,13 @@ void __fastcall HookExec(void* node, uint8_t* ctx)
         npc = NpcClipRateFor(inst, ctx);
         if (npc != 1.f) g_npcHits.fetch_add(1, std::memory_order_relaxed);
     }
-    if (!charRate && clip == 1.f && npc == 1.f) { g_orig(node, ctx); return; }
-    r *= clip * npc;
+    float loco = 1.f;
+    if (inst && inst == g_locoInst.load(std::memory_order_relaxed)) {
+        loco = LocoRateFor(ctx);
+        if (loco != 1.f) g_locoHits.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (!charRate && clip == 1.f && npc == 1.f && loco == 1.f) { g_orig(node, ctx); return; }
+    r *= clip * npc * loco;
     float* p = PlayRateVar(ctx);
     if (!p) { g_orig(node, ctx); return; }
     const float saved = *p;
@@ -494,6 +541,40 @@ void SetNpcClipRates(const char* spec)
 }
 
 long NpcClipHits() { return g_npcHits.load(); }
+
+void SetLocoSkip(uintptr_t instance, const char* ids, float rate)
+{
+    if (!ids) ids = "";
+    if (instance == g_locoReqInst && rate == g_locoRate && std::strncmp(ids, g_locoSpec, sizeof(g_locoSpec) - 1) == 0) return;
+    g_locoReqInst = instance;
+    if (instance && ids[0] && g_state == 0) Install();
+    if (!g_gstTried) FindStringTable();
+    while (g_locoLock.test_and_set(std::memory_order_acquire)) {}
+    strncpy_s(g_locoSpec, ids, _TRUNCATE);
+    g_numLoco = 0;
+    g_locoFsN = 0;
+    g_locoRate = rate;
+    const char* p = g_locoSpec;
+    while (*p && g_numLoco < kLocoIds) {
+        const char* comma = std::strchr(p, ',');
+        const size_t n = comma ? static_cast<size_t>(comma - p) : std::strlen(p);
+        if (n > 0 && n < sizeof(g_locoId[0])) {
+            std::memcpy(g_locoId[g_numLoco], p, n);
+            g_locoId[g_numLoco][n] = 0;
+            ++g_numLoco;
+        }
+        if (!comma) break;
+        p = comma + 1;
+    }
+    g_locoLock.clear(std::memory_order_release);
+    const bool on = g_numLoco > 0 && rate > 0.f && rate != 1.f && g_state == 1;
+    g_locoInst.store(on ? instance : 0);
+    g_locoHits.store(0);
+    dag::log::Writef("RATE: locomotion transition skip on %p: %d clip ids at x%.2f%s", reinterpret_cast<void*>(instance),
+                     g_numLoco, rate, on ? "" : " (off)");
+}
+
+long LocoHits() { return g_locoHits.load(); }
 
 void Record(uintptr_t instance)
 {

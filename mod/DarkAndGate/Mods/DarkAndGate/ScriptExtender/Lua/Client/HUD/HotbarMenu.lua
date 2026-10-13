@@ -26,6 +26,7 @@ local SpellDefs = Ext.Require("Shared/SpellDefs.lua")
 local cfg       = Ext.Require("data/hud.lua")
 local dataSpells = Ext.Require("data/spells.lua")
 local WindowFlags = Ext.Require("Client/HUD/WindowFlags.lua")
+local PlayFlag  = Ext.Require("Client/PlayFlag.lua")
 
 local M = {}
 
@@ -71,8 +72,11 @@ local function scanSpells()
             pcall(function() for _, sd in ipairs(me.SpellBook.Spells) do add(sd.Id.OriginatorPrototype) end end)
         end
     end
-    -- data/spells.lua's slice spells are always offered (the M1b test set).
-    for id in pairs(dataSpells.spells) do add(id) end
+    -- data/spells.lua's slice spells are offered too (the M1b test set),
+    -- except in play mode (!dag_play): only the character's own spells.
+    if not PlayFlag.On() then
+        for id in pairs(dataSpells.spells) do add(id) end
+    end
     table.sort(out, function(a, b)
         local la, lb = a.def.level or 0, b.def.level or 0
         if la ~= lb then return la < lb end

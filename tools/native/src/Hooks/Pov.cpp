@@ -31,6 +31,7 @@
 #include "AnimRate.h"
 #include "GenomeCapture.h"
 #include "MoveSpeed.h"
+#include "MoveFeel.h"
 #include "RealJump.h"
 #include "CombatWasd.h"
 
@@ -182,6 +183,7 @@ struct LuaState {
     float     strafeSign = 1.f;
     float     landSpeed = 3.f;
     float     wallH = 1.3f;
+    bool      syncGuard = true;   // RealJump: skip the server-flag reset during a jump
     bool      menu = false;        // a BG3 panel is open (Lua, Client/HUD): mouse-look off, cursor free
     // Crouch = sneaking (Client/Crouch.lua): the head bone lowers by itself;
     // the eye-height calibration must not run while crouched.
@@ -202,6 +204,22 @@ struct LuaState {
     float     orbitTiltRate = 60.f;
     uintptr_t orbitVis = 0;        // the watched character's root Visual (0 = use orbitPos)
     float     orbitPos[3] = { 0, 0, 0 };   // Lua's position of that character
+    // Direct WASD movement (MoveFeel.cpp, Client/Movement/Movement.lua):
+    // move_mode 1 = direct, 0 = vanilla (BG3WASD); accel / decel seconds;
+    // move_turn 0 engine (BG3's steering, the default), -1 instant, > 0 deg/s; move_raw 1 = physical
+    // keys; move_hold 1 = input released (menus, dialogue, map, downed).
+    int       moveMode = 0;
+    float     moveAccel = 0.06f;
+    float     moveDecel = 0.04f;
+    float     moveTurn = 0.f;
+    bool      moveRaw = false;
+    bool      moveHold = false;
+    bool      moveMetrics = false;
+    // Locomotion Start / End / turn clips fast-forwarded in direct mode
+    // (AnimRate SetLocoSkip): the player's instance, ids, rate.
+    uintptr_t locoInst = 0;
+    char      locoSkip[2048] = "";
+    float     locoRate = 1.f;
     DWORD readTick  = 0;
 };
 
@@ -238,7 +256,7 @@ void PollLuaFile()
     }
     g_lastPollMs = now;
 
-    char buf[4096];
+    static char buf[8192];
     if (!ReadSmallFile(L"native-pov.txt", buf, sizeof(buf), &mt)) return;
     // Lua writes the line in one go and ends it with " t=<ms>"; a read that
     // caught a half-written file is retried next frame (mtime not taken).
@@ -308,6 +326,7 @@ void PollLuaFile()
     s.strafeSign = ValF(buf, "strafe_sign", 1.f);
     s.landSpeed = ValF(buf, "rj_land_speed", 3.f);
     s.wallH = ValF(buf, "rj_wall_h", 1.3f);
+    s.syncGuard = ValI(buf, "rj_sync_guard", 1) != 0;
     s.menu = ValI(buf, "menu", 0) != 0;
     s.crouch = ValI(buf, "crouch", 0) != 0;
     s.noCombatCam = ValI(buf, "nocombatcam", 1) != 0;
@@ -331,6 +350,21 @@ void PollLuaFile()
     s.orbitPos[2] = ValF(buf, "orbit_z", 0);
     if (const char* v = FindVal(buf, "visual")) {
         s.visual = static_cast<uintptr_t>(std::strtoull(v, nullptr, 16));
+    }
+    s.moveMode = ValI(buf, "move_mode", 0);
+    s.moveAccel = ValF(buf, "move_accel", 0.06f);
+    s.moveDecel = ValF(buf, "move_decel", 0.04f);
+    s.moveTurn = ValF(buf, "move_turn", 0.f);
+    s.moveRaw = ValI(buf, "move_raw", 0) != 0;
+    s.moveHold = ValI(buf, "move_hold", 0) != 0;
+    s.moveMetrics = ValI(buf, "move_metrics", 0) != 0;
+    if (const char* v = FindVal(buf, "loco_inst")) s.locoInst = static_cast<uintptr_t>(std::strtoull(v, nullptr, 16));
+    s.locoRate = ValF(buf, "loco_rate", 1.f);
+    if (const char* v = FindVal(buf, "loco_skip")) {
+        size_t n = 0;
+        while (v[n] && v[n] != ' ' && v[n] != '\n' && v[n] != '\r' && n + 1 < sizeof(s.locoSkip)) { s.locoSkip[n] = v[n]; ++n; }
+        s.locoSkip[n] = 0;
+        if (std::strcmp(s.locoSkip, "-") == 0) s.locoSkip[0] = 0;
     }
     s.readTick = now;
     g_lua = s;
@@ -560,12 +594,22 @@ struct JumpLiftStats {
     float maxMissing = 0, maxBodyErr = 0;
     float maxMeshRise = 0;      // how far the head's mesh really rose
     int   meshFrames = 0;       // frames the mesh rise could be read
+    float takeoffPre = 0;       // biggest per-frame head step in the 250 ms before take-off
+    float takeoffMax = 0;       // ... and in the first 300 ms of the jump
+    double takeoffAt = 0;       // ms into the jump of that step
 };
 // The head mesh's render-object height above the pivot at rest (EMA while
 // not jumping); during a jump, mesh rise = current offset - this.
 bool  g_meshOffOk = false;
 float g_meshOff = 0;
 JumpLiftStats g_jls;
+
+// The last frames' head steps (the CAM delta per frame, and when), so a jump
+// can report the biggest step just before its take-off.
+constexpr int kStepRing = 32;
+float g_stepD[kStepRing] = {};
+DWORD g_stepT[kStepRing] = {};
+int   g_stepHead = 0;
 
 // Camera steadiness: the eye's offset from the engine pivot (look-down
 // slide and jump lift removed), per frame. delta = |change| per frame,
@@ -916,11 +960,17 @@ void UpdateJump()
             g_jump.k = g_lua.jumpK < 1.0f ? 1.0f : g_lua.jumpK;
             { int a, b, c; dag::visuallift::TakeStats(a, b, c); dag::visuallift::TakeObjectStats(a, b, c); }  // reset per jump
             g_jls = JumpLiftStats{};
+            {
+                const DWORD nowT = GetTickCount();
+                for (int i = 0; i < kStepRing; ++i)
+                    if (g_stepT[i] && nowT - g_stepT[i] <= 250 && g_stepD[i] > g_jls.takeoffPre) g_jls.takeoffPre = g_stepD[i];
+            }
             g_jump.real = false;
             if (g_lua.jumpMode == 1) {
                 dag::realjump::SetStrafeSign(g_lua.strafeSign);
                 dag::realjump::SetLandSpeed(g_lua.landSpeed);
                 dag::realjump::SetWallHeight(g_lua.wallH);
+                dag::realjump::SetSyncGuard(g_lua.syncGuard);
                 g_jump.real = dag::realjump::Start(g_jump.durMs, g_jump.h, g_jump.k, nullptr, g_jump.seq);
             }
             dag::log::Writef("JUMP start seq=%d dur=%.0fms h=%.2f k=%.1f lift=%s",
@@ -950,6 +1000,9 @@ void UpdateJump()
                          g_jump.seq, srcName, g_lua.anchor ? "head" : "pivot", g_jls.frames, g_jls.boneFrames,
                          g_jls.bodyFrames, g_jls.fillFrames, g_jls.maxMissing, g_jls.maxBodyErr,
                          g_jls.maxMeshRise, g_jump.h, g_jls.meshFrames, dag::visuallift::Forced() ? 1 : 0);
+        dag::log::Writef("JUMP takeoff seq=%d head step max %.3fm in the 250 ms before, %.3fm in the first 300 ms "
+                         "(at +%.0f ms); move %s (running is about 0.01-0.03)",
+                         g_jump.seq, g_jls.takeoffPre, g_jls.takeoffMax, g_jls.takeoffAt, dag::movefeel::State());
         return;
     }
     const float u = static_cast<float>(ms / g_jump.durMs);
@@ -1162,7 +1215,9 @@ void WriteStatus()
     g_lastStatusMs = now;
     float ms0, mr0, mt0, mso, mro; long mc;
     dag::movespeed::Read(ms0, mr0, mt0, mso, mro, mc);
-    char line[1600];
+    char mf[160];
+    dag::movefeel::Status(mf, sizeof(mf));
+    char line[1800];
     const int len = std::snprintf(line, sizeof(line),
         "on=%d active=%d applied=%d src=%s rotOff=0x%X rotCal=%d sel=%d bone=%d%s mesh=%d pose%d layout%d %s "
         "eye=%.3f,%.3f,%.3f P=%.3f,%.3f,%.3f head=%.3f,%.3f,%.3f rot=%.3f,%.3f,%.3f "
@@ -1170,7 +1225,7 @@ void WriteStatus()
         "headName=%s headBone=%d headCal=%d eyeUpAuto=%.3f lift=%.3f liftMode=%s jumpSeq=%d animRate=%.2f rateHook=%s rateHits=%ld "
         "anchor=%s delta=%.4f deltaMax=%.4f jerk=%.4f smooth=%.2f "
         "move=%s walkX=%.2f runX=%.2f tmplStroll=%.2f tmplRun=%.2f walkT=%.3f outStroll=%.2f outRun=%.2f moveCalls=%ld "
-        "orbit=%d crouch=%d levelSeq=%d cwasd=%s foreignCam=%d t=%u\n",
+        "orbit=%d crouch=%d levelSeq=%d cwasd=%s foreignCam=%d %s locoHits=%ld t=%u\n",
         g_lua.on ? 1 : 0, g_lua.active ? 1 : 0, g_status.applied ? 1 : 0, g_status.src,
         g_rotOff, g_rotLogged ? 1 : 0, g_sel.valid ? 1 : 0, g_sel.bone,
         g_sel.fromSocket ? "(socket)" : "(top)", g_sel.meshIdx, g_sel.poseSlot + 1, g_sel.layout,
@@ -1187,7 +1242,7 @@ void WriteStatus()
         g_lua.anchor ? "head" : "pivot", g_cam.lastAvg, g_cam.lastMax, g_cam.lastJerk, g_lua.smooth,
         dag::movespeed::State(), g_lua.moveWalk, g_lua.moveRun, ms0, mr0, mt0, mso, mro, mc,
         g_lua.orbit ? 1 : 0, g_lua.crouch ? 1 : 0, g_lua.levelSeq,
-        dag::combatwasd::State(), g_foreign.on ? 1 : 0,
+        dag::combatwasd::State(), g_foreign.on ? 1 : 0, mf, dag::animrate::LocoHits(),
         (unsigned)now);
     WriteSmallFile(L"native-pov-status.txt", line, len);
 }
@@ -1223,6 +1278,7 @@ void OnFrame(void* gameplayCam)
         if (s_levelSeq != -1) {
             g_sel.valid = false; g_head = HeadSel{}; g_meshOffOk = false;
             dag::realjump::ForgetCharacter();
+            dag::movefeel::ForgetCharacter();
             dag::log::Writef("POV: level_seq %d -> head selection and WASD character reset", g_lua.levelSeq);
         }
         s_levelSeq = g_lua.levelSeq;
@@ -1273,6 +1329,28 @@ void OnFrame(void* gameplayCam)
     dag::animrate::SetClipRates(g_lua.clipInst, g_lua.clipRates);
     dag::animrate::SetNpcClipRates(g_lua.npcClips);
     dag::movespeed::Set(g_lua.moveWalk, g_lua.moveRun);
+    {
+        // Direct WASD movement: only while first person is live; otherwise
+        // (and in vanilla mode) BG3WASD's movement exactly as before.
+        dag::movefeel::Settings ms;
+        ms.direct = g_lua.moveMode == 1;
+        ms.accelS = g_lua.moveAccel;
+        ms.decelS = g_lua.moveDecel;
+        ms.turn = g_lua.moveTurn;
+        ms.rawInput = g_lua.moveRaw;
+        ms.strafeSign = g_lua.strafeSign;
+        // BG3's own axes already go quiet wherever vanilla WASD does (chat,
+        // dialogue, camera mode); move_hold is for anything beyond that.
+        ms.hold = g_lua.moveHold;
+        ms.metrics = g_lua.moveMetrics;
+        dag::movefeel::Configure(ms, g_lua.on && g_lua.active && !g_lua.orbit);
+        dag::movefeel::Frame();
+        const bool direct = std::strcmp(dag::movefeel::State(), "direct") == 0;
+        // Not during a jump: its take-off and landing blend exactly as the
+        // signed-off jump did (playtest 2: a twitch at every take-off).
+        const bool skip = direct && !g_jump.active;
+        dag::animrate::SetLocoSkip(skip ? g_lua.locoInst : 0, skip ? g_lua.locoSkip : "", g_lua.locoRate);
+    }
     dag::combatwasd::SetEnabled(g_lua.on && g_lua.combatWasd);
     if (!g_lua.on) g_status.applied = false;
     dag::watchdog::Stage("WriteStatus");
@@ -1493,6 +1571,7 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
     if (fh > 0.05f) { fx /= fh; fz /= fh; s_fx = fx; s_fz = fz; }
     else            { fx = s_fx; fz = s_fz; }
     dag::realjump::SetCameraForward(fx, fz);
+    dag::movefeel::SetCameraForward(fx, fz);
 
     // Looking down: slide the eye forward (up to downFwd metres when
     // looking straight down) so the view clears the neck/collar.
@@ -1640,6 +1719,11 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
             if (dl < 1.0f) {   // ignore teleports / anchor switches
                 g_cam.sumD += dl; ++g_cam.n;
                 if (dl > g_cam.maxD) g_cam.maxD = dl;
+                g_stepD[g_stepHead] = dl; g_stepT[g_stepHead] = nowMs; g_stepHead = (g_stepHead + 1) % kStepRing;
+                if (g_jump.active) {
+                    const double jms = MsSince(g_jump.t0);
+                    if (jms <= 300.0 && dl > g_jls.takeoffMax) { g_jls.takeoffMax = dl; g_jls.takeoffAt = jms; }
+                }
                 if (g_cam.have2) {
                     const float j[3] = { rel[0] - 2 * g_cam.r1[0] + g_cam.r2[0], rel[1] - 2 * g_cam.r1[1] + g_cam.r2[1],
                                          rel[2] - 2 * g_cam.r1[2] + g_cam.r2[2] };

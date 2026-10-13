@@ -118,6 +118,14 @@ local function tick()
     end
 end
 
+-- !dag_play: true when this changed it.
+function M.SetEnabled(v)
+    v = v and true or false
+    local changed = v ~= enabled
+    enabled = v
+    return changed
+end
+
 function M.Register()
     Ext.Events.Tick:Subscribe(function()
         local ok, err = pcall(tick)

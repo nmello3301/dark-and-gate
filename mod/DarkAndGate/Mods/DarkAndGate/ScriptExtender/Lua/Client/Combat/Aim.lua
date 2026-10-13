@@ -308,7 +308,7 @@ end
 -- ---------------------------------------------------------------------
 -- Characters (incremental scan)
 -- ---------------------------------------------------------------------
-local NEAR_M = 100.0          -- keep characters within this radius (spell aim reaches 100 m)
+local NEAR_M = 100.0          -- keep characters within this radius (spell aim reaches 70 m: data/spells.lua)
 local SLICE = 48              -- entities examined per tick
 local LIST_REFRESH_MS = 3000  -- re-fetch the entity list this often
 

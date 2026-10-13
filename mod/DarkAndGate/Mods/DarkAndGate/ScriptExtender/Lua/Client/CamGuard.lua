@@ -48,6 +48,8 @@ local function tick()
     end
 end
 
+function M.SetOn(v) on = v and true or false end   -- !dag_play
+
 function M.Register()
     Ext.Events.Tick:Subscribe(function()
         local ok, err = pcall(tick)

@@ -32,6 +32,7 @@ Estimate changes vs. 2026-10-07 originals:
   tactical loop; M3 is now mostly archetype tuning + Follow/Wait/Camp UX.
 - Everything after M3 unchanged.
 - **2026-10-12 check-in:** the player side of M1b took four days, much faster than estimated, because BG3's own systems (genome events, class casting sets, the falling state) carried it. What's left is real-time AI (step 1) and the projectile system (step 4). Both carry engine unknowns, so the 5–8 week M1b estimate stays for now.
+- **2026-10-12 (late):** real-time fights, bows, cast cameras and the test kit are in; the developer set the AI pace (4 s for everyone) and the spell ranges (70 m / 30 m). Next focus after this round: multiplayer, then game balancing.
 
 The biggest risk to these numbers is animation work in M1 and M2, not code.
 
@@ -281,7 +282,7 @@ Verified in-game:
 - [x] Bows and crossbows: 3 s draw with the bow raised and pulled during the charge, release on LMB up; crossbow R reload; Q swaps melee / ranged; goblin archers draw the same way.
 - [x] Chest loot window frees the cursor (F); potions on T / Y.
 - [x] WASD moves you in real-time fights at exploration speed (the DLL skips BG3's "no WASD in a combat" check); goblins run, not sprint.
-- [x] Enemy AI acts every ~2.5 s (was 6 s).
+- [x] Enemy AI acts every ~2.5 s (was 6 s). Superseded the same evening: a 4 s pace for everyone (below).
 - [x] Casting in a fight no longer moves the camera: Ray of Frost, Fireball, Thunderwave, Fog Cloud, Grease (CamGuard drops BG3's Projectile / Spell camera requests, the DLL holds first person on any foreign camera, visual clones aim 2 m past the aim point).
 
 Built, not verified yet:
@@ -290,15 +291,55 @@ Built, not verified yet:
 - [ ] No more `TurnOrder.lua:255 ... TurnOrderComponent::Groups` errors in the SE console.
 - [ ] Surfaces don't touch you mid-jump (`AirSurfaces:` lines; add any surface status logged as "kept").
 
+Built late on 2026-10-12, not verified yet (developer's settings; playtest steps 29–35):
+- [ ] **Pace 4 s** for every AI fighter, enemies, companions and NPC allies (about 3.7–4.4 s by initiative); an archer's 3 s draw or a cast no longer costs it a whole extra pace.
+- [ ] **Companions and allies fight:** Shadowheart never acted in the last `!dag_goblins` fight. Now one that Brawl finds nothing for attacks the nearest enemy with its weapon; `AI: … did nothing this pulse: <why>` and `AI: … has had no AI pulse …` lines say why one stands idle; `AI: fight roster: …` lists sides and paces.
+- [ ] **Ranges:** 70 m for shots and arrows (aim, flight, BG3's visible projectile), 30 m for area and multi-target spells (Sleep, Bless, Grease, Fireball: aimed farther, the spell lands on the ring 30 m out). NPCs keep BG3's ranges for how close they walk.
+- [ ] **`!dag_play`** (2026-10-13): the whole mod on with one command, remembered; first person by itself after loads and after character creation; your own spells on a fresh hotbar. Developer's run: a sorcerer from game start to the end of the Emerald Grove fight ([playtest/sorcerer-run.md](playtest/sorcerer-run.md)).
+- [ ] **`!dag_hp 50 [party]`** (2026-10-13): +50 % max HP (BG3's `IncreaseMaxHP(50%)` on a hidden status), for your character or the whole party, kept for every save.
+
+**Hide our HUD during cutscenes (developer, 2026-10-13)** — verified on the nautiloid 2026-10-13: all 8 of its dialogues / cutscenes were reported (`Scene:` lines) and played through, Myrnath's included. The grove's are still to see. Our first-person HUD (health / mana orbs, hotbar, crosshair, prompts, toasts) stayed on screen over the nautiloid's opening scene and **blocked clicking the dialogue**: the client's component check (Dialog / Cinematic / Cutscene) didn't see that scene. Built the same night, not verified: the server reports BG3's DialogStarted / DialogEnded to every client (`Server/Scene.lua`, `!dag_scene [off]`), and while one runs our HUD, input and first person stand aside. Check every cutscene / dialogue on the way to the grove; anything of ours still on screen during one is the follow-up (toasts, the overlay).
+
+F interaction fixes (2026-10-13, sorcerer run on the nautiloid; verified the same day, second nautiloid run: the developer's "Myrnath now works fine. Most interactions do too", and the log):
+- [x] **The vine (a ladder) no longer climbs up and down forever.** (Both vines: one F, one climb, the task ended; no "AGAIN on its own".) One F on the "Arterial Mesh" climbed it every 2.3–2.8 s for two minutes. BG3's Osiris use task (`Osi.Use`) doesn't count a player-style use as done and runs it again (Ghidra: `OsirisUseItemTask::Update`, [spikes/lookat.md](spikes/lookat.md)); the same bug pulled the Neural Apparatus lever twice. The task is now ended at the first `UseFinished` of what F used.
+- [x] **"[F]" only on what BG3 itself lets you use.** (Brain Jar and the rubble helper: none; chairs "Sit on"; the lever once per press.) Brain jars (the ones named "Mind Sanctuary" too) and an invisible helper on the rubble showed "[F] Use", and every use failed. Items now need one of BG3's world use actions (`data/interact.lua` `use_actions`); chairs say "Sit on". A decoration in front of something usable no longer hides it.
+- [x] **The brain (Myrnath, the man with the exposed brain in the lab) can be talked to.** His dialogue is a 3-speaker story entry that our talk check missed; talk now follows BG3's own "has dialog" flag (`GetHasOsirisDialog`).
+
+Downed, pace and head fixes (2026-10-13, second nautiloid run: the helm fight; built, not verified):
+- [ ] **You keep control of your own body when you go down.** BG3 handed control to Lae'zel the moment Tav went down; as the "controlled" character she got no AI, stood still and went down 15 s later. It is handed back now (`MakePlayerActive`, then the portrait re-select), so she keeps fighting.
+- [ ] **The game over waits for the bleed-out.** BG3's story ends the game once every party member is "defeated", and downed counts, so the second downing ended the game 15 s into Tav's 3-minute bleed-out. While someone is downed, "Downed" is in the story's own list of defeats that don't end the game; the story's check runs after each bleed-out death (the game over comes when nobody is left).
+- [ ] **Nobody attacks a downed character.** The imps kept shooting Tav's body for 3 minutes and Zhalk swung and cleaved at it. Brawl's target picks skip downed characters now, and a cast already aimed at one is dropped.
+- [ ] **Your head shows whenever the camera is out of your eyes:** the downed camera, dialogues and cutscenes, first person off. The restore looked at whoever had control (Lae'zel by then), so Tav stayed headless.
+- [ ] **Give up** on the downed screen when nobody in the party stands: a button (the cursor frees itself) or G, twice; BG3's game-over screen at once (every player has to give up in co-op). `!dag_downme all` downs the whole party to test it.
+- [ ] **The enemies' pace follows the difficulty:** Explorer 10 s, Balanced 6 s, Tactician 5 s, Honour 4 s per action; companions and allies stay at 4 s (`!dag_enemy_pace <s>|auto`).
+
+Direct WASD controller (2026-10-13, DECISIONS 2026-10-13: "Replace BG3WASD's movement with our own direct controller"; [spikes/move-feel.md](spikes/move-feel.md), playtest [playtest/move-feel.md](playtest/move-feel.md); built, not verified):
+- [ ] **Metrics:** `!dag_move_metrics on|off` times start (90 % speed), stop (time + slide), reverse and strafe changes from the physical keys, logs every server correction (MOVEFEEL lines in native.log), and measures the client / server drift (MoveMetrics lines in client.log). The vanilla (BG3WASD) baseline goes in the spike note.
+- [ ] **Instant feel in first person:** full speed within about 0.06 s, stopped within 0.04 s with no slide, W↔S and W→D at once, no turn-in-place pause; diagonals not faster. The direction is the physical W/A/S/D on our own camera (`move.input raw`); the body turns with BG3's own steering (`move.turn engine`; instant facing fought BG3's steering and flickered, playtests 1–2, DECISIONS 2026-10-13).
+- [ ] **No flicker:** walking and running in any direction keeps the model, camera and shadow steady (playtest 2: steady with `engine`); no twitch at the jump take-off, and every jump goes its full arc (playtest 3: 11 of 53 running jumps were cut off mid-air; build 4 holds the ground controller still under a jump and logs `RJUMP interrupted`).
+- [ ] **Everything else kept:** walls, slopes, stairs, doors, ledges and the real jump (take-off momentum, landing straight back into control); Shift walk / run, C crouch, casting ×0.7, bow draw, the speed knob; dialogue, menus, map, loot and downed release the input like before; Misty Step and other engine moves win.
+- [ ] **Sync:** 0 server corrections in 60 s of walking, drift under 0.1 m; enemies, hits and stealth see you where you are.
+- [ ] **Locomotion clips:** the Start / End*Foot / turn clips are found by name per character (`Client/Movement/LocoSkip.lua`) and fast-forwarded (×5) in direct mode, except during a jump and for the fall landings; the walk / run clips play at the speed's rate as before.
+- Knobs: `!dag_move_mode vanilla|direct`, `!dag_move_accel <s>`, `!dag_move_decel <s>`, `!dag_move_turn engine|instant|<deg/s>`, `!dag_move_input raw|game` (defaults first; `data/movement.lua` move, MCM "move_direct" / accel / decel).
+- **Standing on rocks: dropped** (DECISIONS 2026-10-13, known limitation in DESIGN "Campaign compatibility"). A foot box, step-up, hold-the-floor and knee-height walls were tried in builds 5–7 and removed: they made jumping worse. You walk at the height of BG3's walkable map ([spikes/ground-support.md](spikes/ground-support.md)).
+- [x] **The take-off doesn't flicker** (verified 2026-10-13, playtest 6: "dag_jump_sync_guard worked perfect to remove the flicker"): the server changes your character flag 0x20 about 60 ms after take-off (most likely the jump clip's `Osi.PlayAnimation`), and the engine's reset for that stopped all movement and reset the character light; the DLL skips that reset during a jump (`!dag_jump_sync_guard on|off`, `RJUMP sync` lines).
+- [ ] **Jumps go their full arc** (build 6: no `RJUMP exit` with the guard on; to confirm in play).
+- [ ] **Walking direction stays on the keys** after stepping on debris (playtest 6 report; build 7 logs `moving off the keys`).
+- [ ] Later: **enemies and high ground.** Give the enemy AI the height difference to a player standing above them (ledges, stairs, the real jump's apex), so archers and casters shoot and cast instead of trying to reach them (developer, playtest 5).
+
+Character creation crash (2026-10-13, sorcerer run): BG3 aborted in its own UI update (a pure virtual call) about 13 s into character creation, with nothing of ours running at that moment; the second try ran 5+ minutes there without a crash. Hardened (deployed 2026-10-13 with the scene fix, not verified): Brawl's HP rewrite is off at x1 (it rewrote every party member's Health, also the creation dummy's on each class / race change), Brawl's level start and `!dag_hp` skip character creation, and the hotbar stops reading the dummy's spells there.
+
 Next (developer's list, 2026-10-12):
 1. **Spell indicators:** better targeting indicators for spells in general (next session's main task).
 2. Verify the four items above.
 3. While BG3 holds a foreign camera, mouse-look freezes on your last direction (now rare); write the stored rotation back if it shows up.
 4. The server WASD fallback (`Client/Movement/CombatMove.lua`) hasn't been needed; keep it a few sessions, then decide. It maps speed modifiers to Walk / Run only.
 5. Bow draw time scaled by a stat (`Server/Combat/Bows.lua` DrawTime is the hook).
-6. Visual clones stop at 40 m: on a long sky shot BG3's visible projectile ends there; consider a longer cap for arrows.
+6. ~~Visual clones stop at 40 m~~ Settled: 70 m for shots and arrows, 30 m for area spells (above).
 7. native.log noise: Camera.cpp's legacy per-frame "Camera: cam=… NO MATCH" probe lines.
 8. `docs/se-api-notes.md` (SE v33): TurnOrder groups field name, removing `CombatTargetRequests.Requests` entries with `[i] = nil`, the camera GlobalSwitches don't stop BG3's in-fight spell camera.
+9. If a companion still stands idle: its `did nothing` / `no AI pulse` lines name the cause (Brawl's target filter, its spells, a stopped pulse); fix that in Brawl's picks, not only the fallback. The `!dag_god` status (built on BG3's INVULNERABLE) was on in the fight where Shadowheart stood idle: check one fight without it.
+10. **After this round (developer, 2026-10-12): multiplayer, then game balancing** (pace, ranges, damage, mana, AI aim).
 
 ### Open questions
 
@@ -337,6 +378,8 @@ Next (developer's list, 2026-10-12):
 - [ ] First two-instance multiplayer smoke test
 
 ## M3 — Companion AI
+
+Head start (2026-10-12, M1b): companions and NPC allies already fight on Brawl's AI at the shared 4 s pace, through our swing / shot rules, with a weapon-attack fallback and idle diagnostics (not verified yet; M1b session notes).
 
 - [ ] Follow / Wait / Camp modes, V key
 - [ ] Companions join fights and return to their previous mode afterwards

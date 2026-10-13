@@ -13,7 +13,10 @@
 -- Area (AreaRadius > 0, Zone cones, Wall spells): BG3's own area ring at the
 --   crosshair's world point, clamped to range, following it while armed;
 --   walls as a row of rings along the view, cones as rings on their edges.
---   Hidden on cast / cancel. LMB releases as before.
+--   Hidden on cast / cancel. LMB releases as before, and the spell lands
+--   where the ring is (M.AreaAim, Spells.Cast).
+-- Ranges are the spell's first-person range (SpellDefs range_m, data/spells.lua:
+-- 70 m shots, 30 m areas and multi-target spells like Sleep).
 
 local Log       = Ext.Require("Shared/Log.lua")
 local State     = Ext.Require("Client/Combat/State.lua")
@@ -43,7 +46,7 @@ local function classify(spell)
     local stype = tostring(st.SpellType or "")
     local area = num(st.AreaRadius, 0)
     local amount = num(st.AmountOfTargets, 1)
-    local c = { spell = spell, label = def.label or spell, range = num(st.TargetRadius, 18), picks = {}, counts = {} }
+    local c = { spell = spell, label = def.label or spell, range = def.range_m or num(st.TargetRadius, 18), picks = {}, counts = {} }
     if def.kind == "teleport" or def.kind == "self" then return nil end
     if stype == "Wall" then c.mode, c.shape, c.len, c.r = "area", "wall", num(st.MaxDistance, 9), math.max(0.5, num(st.SurfaceRadius, 1))
     elseif stype == "Zone" or stype == "Cone" then
@@ -117,14 +120,33 @@ function M.OnSameSlot()
     return fire("hotbar key again: early")
 end
 
-local function drawArea(r)
-    if not r then return end
+-- Where an area spell lands for LookAt result r: the crosshair's world point,
+-- pulled back to `range` along the view, dropped onto the ground under it.
+local function areaPoint(r, range)
     local eye, fwd = r.eye, r.fwd
-    local p, d = r.point, r.dist
-    if d > cur.range then p = { eye[1] + fwd[1] * cur.range, eye[2] + fwd[2] * cur.range, eye[3] + fwd[3] * cur.range } end
+    local p = r.point
+    if r.dist > range then p = { eye[1] + fwd[1] * range, eye[2] + fwd[2] * range, eye[3] + fwd[3] * range } end
     -- Snap to the ground under the point.
     local down = Aim.WorldRay({ p[1], p[2] + 0.5, p[3] }, { 0, -1, 0 }, 20)
     if down then p = { p[1], p[2] + 0.5 - down, p[3] } end
+    return p
+end
+
+-- The ring's point for an area spell with a circle (Fireball, Grease, Fog
+-- Cloud...) under the crosshair now, or nil for any other spell: the cast
+-- goes where the ring shows (Spells.Cast). Also returns the eye it was seen from.
+function M.AreaAim(spell)
+    local c = (cur and cur.spell == spell and cur.mode) and cur or classify(spell)
+    if not c or c.mode ~= "area" or c.shape ~= "circle" then return nil end
+    local r = LookAt.Get()
+    if not r or not r.point or not r.eye or not r.dist then return nil end
+    return areaPoint(r, c.range), r.eye
+end
+
+local function drawArea(r)
+    if not r then return end
+    local fwd = r.fwd
+    local p = areaPoint(r, cur.range)
     local fl = math.sqrt(fwd[1] * fwd[1] + fwd[3] * fwd[3])
     local hx, hz = fl > 1e-3 and fwd[1] / fl or 0, fl > 1e-3 and fwd[3] / fl or 1
     if cur.shape == "circle" then

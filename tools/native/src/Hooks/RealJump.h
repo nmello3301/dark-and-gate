@@ -47,7 +47,14 @@ bool Start(float durMs, float h, float k, const float camFwdXZ[2], int seq);
 // Camera forward (XZ, normalised) for WASD steering; call every frame.
 void SetCameraForward(float fx, float fz);
 
+// True while a real jump is in the air and steered by us; false (and
+// "RJUMP interrupted" logged once) if its falling state was taken off the
+// movement machine.
 bool Active();
+
+// Skip the engine's "server changed flag 0x20" stop-everything reset on our
+// character during a jump (and 0.6 s after). Default on.
+void SetSyncGuard(bool on);
 const char* State();
 
 // A level change or a teleport (Lua bumps level_seq): the remembered WASD

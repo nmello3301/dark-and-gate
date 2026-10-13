@@ -10,6 +10,7 @@
 -- damage dice, saves, statuses and hit VFX. Mana and cast time are unchanged.
 
 local bows = Ext.Require("data/bows.lua")
+local spellsData = Ext.Require("data/spells.lua")
 
 return {
     enabled = true,              -- false = old behaviour (BG3 casts the real spell at the point)
@@ -23,15 +24,22 @@ return {
     -- The visual clone is cast at a point visual_overshoot_m past the aim
     -- point, at most visual_far_m along the aim line (2026-10-12: was a fixed
     -- 150 m, often under the ground; in a fight BG3's spell camera went to
-    -- frame that point and Fireball blacked out).
-    visual_far_m  = 40,
+    -- frame that point and Fireball blacked out. Then 40 m; now the shot
+    -- range, so BG3's projectile is seen as far as a shot flies).
+    visual_far_m  = spellsData.shot_range_m or 70,
     visual_overshoot_m = 2.0,
     -- Our flight starts when BG3's projectile for the cast appears
     -- (OnCreate ServerProjectile, matched by caster); if none is seen
     -- within this long, it starts anyway (logged).
     launch_wait_s = 1.2,
-    -- A projectile with no hit is dropped after max_range_m.
-    max_range_m   = 120,
+    -- A projectile with no hit ends at its spell's range: max_range_m for
+    -- shots and arrows (data/spells.lua shot_range_m; developer 2026-10-12:
+    -- "70 m for spells and arrows as a limit"); an area spell (Fireball) at
+    -- its area range or just past the ring it was aimed at, plus
+    -- range_slack_m. The server also pulls a cast point farther than a
+    -- spell's range + range_slack_m back to it (Server/Combat/SpellCast.lua).
+    max_range_m   = spellsData.shot_range_m or 70,
+    range_slack_m = 3.0,
     -- Server sim step (s): each tick is split into steps of at most this.
     step_s        = 1 / 60,
     -- Characters are candidates when within this of the flight segment.
@@ -62,6 +70,10 @@ return {
             gravity = 0.0, drag = 0.0, radius_m = 0.30,
             impact_mode = "point",
             area_m = 4.0,   -- a player-controlled character inside gets the no-hit-reaction clone
+            -- Aimed past its range (the sky, far away), it bursts where its
+            -- flight ends (30 m: data/spells.lua area_range_m), like BG3's
+            -- Fireball at its target point, instead of vanishing.
+            burst_at_range = true,
         },
         -- Bows / crossbows: the player's (Server/Combat/Bows.lua) and NPC /
         -- companion shots (Server/Combat/NpcCombat.lua). impact_mode "weapon":

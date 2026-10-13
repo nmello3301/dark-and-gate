@@ -81,10 +81,20 @@ local S = {
     strafe_sign = 1,
     rj_land_speed = 3.0,
     rj_wall_h = 1.5,
+    rj_sync_guard = 1,   -- RealJump: skip the server-flag reset during a jump
     -- WASD speed multipliers for the DLL's ground-speed lever
     -- (Client/Movement/Movement.lua, docs/spikes/move-speed.md).
     move_walk = 1.0,
     move_run = 1.0,
+    -- Direct WASD controller (MoveFeel.cpp, Client/Movement/Movement.lua):
+    -- move_mode 1 = direct, 0 = vanilla; accel / decel seconds; move_turn -1
+    -- instant facing, 0 = BG3's steering, > 0 deg/s; move_raw 1 = physical
+    -- keys; move_hold 1 = input released; move_metrics 1 = MOVEFEEL lines.
+    move_mode = 0, move_accel = 0.06, move_decel = 0.04, move_turn = 0,
+    move_raw = 0, move_hold = 0, move_metrics = 0,
+    -- Locomotion Start / End / turn clips fast-forwarded in direct mode
+    -- (Client/Movement/LocoSkip.lua, AnimRate SetLocoSkip).
+    loco_inst = "0", loco_skip = "-", loco_rate = 1.0,
     -- Crouch = sneaking (Client/Crouch.lua): the DLL pauses its eye-height
     -- calibration while crouched (the head bone lowers by itself).
     crouch = 0,
@@ -121,7 +131,11 @@ local USE_BONE_ANCHOR = true
 local MESH_REFRESH_MS = 3000
 
 local pausedCache = { at = -1e9, v = false }
+local linkedState = nil   -- Client/Combat/State.lua (M.LinkState, below)
 local function isPausedUncached()
+    -- A dialogue / cutscene the server reported (Server/Scene.lua), or BG3's
+    -- game-over screen after giving up (Client/Downed.lua).
+    if linkedState and (linkedState.sceneOn or linkedState.gameOver) then return true end
     local ok, dlgs = pcall(Ext.Entity.GetAllEntitiesWithComponent, "Dialog")
     if ok and dlgs and #dlgs > 0 then return true end
     for _, c in ipairs({ "Cinematic", "Cutscene", "ClientMoveToCutscene" }) do
@@ -244,6 +258,19 @@ local function setHideHead(on)
     end
 end
 
+-- The head is hidden only while the camera is in your eyes (developer
+-- 2026-10-13: "if we are zoomed out of first person POV, the head renders
+-- again"): first person on, not the downed orbit, no dialogue or cutscene
+-- (BG3's own camera shows you then). Shared/NativeBridge.lua reads the flag
+-- and Spikes/Spike11_HeadHiding.lua hides or shows the head.
+local headHidden = false
+local function syncHead(want, why)
+    if want == headHidden then return end
+    headHidden = want
+    setHideHead(want)
+    Log.Write("FullPov: your head " .. (want and "hidden (first person)" or ("shown (" .. why .. ")")))
+end
+
 -- ---------------------------------------------------------------------
 -- Per-tick writer
 -- ---------------------------------------------------------------------
@@ -276,7 +303,12 @@ local function writeState()
     lastWrite = now
 
     local e = controlledEntity()
-    local active = (e ~= nil) and (not isPaused())
+    local paused = isPaused()
+    local active = (e ~= nil) and (not paused)
+    if e ~= nil or not S.on then
+        syncHead(S.on and S.orbit == 0 and not paused,
+            not S.on and "first person off" or (S.orbit ~= 0 and "downed camera") or "dialogue / cutscene")
+    end
     local x, y, z = 0, 0, 0
     if e then
         local tx, ty, tz = readTranslate(e)
@@ -300,10 +332,10 @@ local function writeState()
     if S.on and USE_BONE_ANCHOR then refreshCache(e, now) end
 
     local line = string.format(
-        "orbit=%d orbit_seq=%d orbit_dist=%.2f orbit_up=%.2f orbit_pmin=%.1f orbit_pmax=%.1f orbit_spin=%d orbit_tilt=%d orbit_rate=%.1f orbit_tilt_rate=%.1f orbit_vis=%s orbit_x=%.3f orbit_y=%.3f orbit_z=%.3f crouch=%d level_seq=%d on=%d active=%d menu=%d anim_inst=%s anim_rate=%.3f clip_inst=%s clip_rates=%s nclips=%s nocombatcam=%d combat_wasd=%d rec_inst=%s lift_objects=%d jump_mode=%d genome_capture=%d strafe_sign=%d rj_land_speed=%.2f rj_wall_h=%.2f head_smooth=%.2f move_walk=%.3f move_run=%.3f visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
+        "orbit=%d orbit_seq=%d orbit_dist=%.2f orbit_up=%.2f orbit_pmin=%.1f orbit_pmax=%.1f orbit_spin=%d orbit_tilt=%d orbit_rate=%.1f orbit_tilt_rate=%.1f orbit_vis=%s orbit_x=%.3f orbit_y=%.3f orbit_z=%.3f crouch=%d level_seq=%d on=%d active=%d menu=%d anim_inst=%s anim_rate=%.3f clip_inst=%s clip_rates=%s nclips=%s nocombatcam=%d combat_wasd=%d rec_inst=%s lift_objects=%d jump_mode=%d genome_capture=%d strafe_sign=%d rj_land_speed=%.2f rj_wall_h=%.2f rj_sync_guard=%d head_smooth=%.2f move_walk=%.3f move_run=%.3f move_mode=%d move_accel=%.3f move_decel=%.3f move_turn=%.1f move_raw=%d move_hold=%d move_metrics=%d loco_inst=%s loco_rate=%.2f loco_skip=%s visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
         S.orbit, S.orbit_seq, S.orbit_dist, S.orbit_up, S.orbit_pmin, S.orbit_pmax, S.orbit_spin, S.orbit_tilt, S.orbit_rate,
         S.orbit_tilt_rate, S.orbit_vis, S.orbit_x, S.orbit_y, S.orbit_z, S.crouch, S.level_seq,
-        S.on and 1 or 0, active and 1 or 0, S.menu and 1 or 0, S.anim_inst, S.anim_rate, S.clip_inst, S.clip_rates, S.nclips, S.nocombatcam, S.combat_wasd, S.rec_inst, S.lift_objects, S.jump_mode, S.genome_capture, S.strafe_sign, S.rj_land_speed, S.rj_wall_h, S.head_smooth, S.move_walk, S.move_run, (S.on and cache.visual) or "0", S.anchor, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
+        S.on and 1 or 0, active and 1 or 0, S.menu and 1 or 0, S.anim_inst, S.anim_rate, S.clip_inst, S.clip_rates, S.nclips, S.nocombatcam, S.combat_wasd, S.rec_inst, S.lift_objects, S.jump_mode, S.genome_capture, S.strafe_sign, S.rj_land_speed, S.rj_wall_h, S.rj_sync_guard, S.head_smooth, S.move_walk, S.move_run, S.move_mode, S.move_accel, S.move_decel, S.move_turn, S.move_raw, S.move_hold, S.move_metrics, S.loco_inst, S.loco_rate, S.loco_skip, (S.on and cache.visual) or "0", S.anchor, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
         S.jump_seq, math.floor(S.jump_ms + 0.5), S.jump_h, S.jump_k,
         S.dump, cache.sock or -1, cache.skel or 0, x, y, z,
         (S.on and #cache.meshes > 0) and table.concat(cache.meshes, ",") or "0",
@@ -326,15 +358,13 @@ end
 -- The injected reference is the exact same module table the Input / HUD /
 -- Debug modules see, so a write here is visible across combat Lua on
 -- the same frame.
-local linkedState = nil
 function M.LinkState(state) linkedState = state end
 
 local function setOn(on)
     S.on = on
     cache.at = -100000
-    setHideHead(on)
     lastWrite = 0
-    writeState()
+    writeState()   -- the head follows (syncHead)
     if linkedState then
         linkedState.povOn = on
         Log.Write("FullPov: State.povOn <- " .. tostring(on))
@@ -408,6 +438,11 @@ function M.SetRealJumpTuning(strafeSign, landSpeed, wallH)
     lastWrite = 0
     pcall(writeState)
 end
+function M.SetJumpSyncGuard(on)
+    S.rj_sync_guard = on and 1 or 0
+    lastWrite = 0
+    pcall(writeState)
+end
 function M.FlipStrafe()
     S.strafe_sign = -S.strafe_sign
     lastWrite = 0
@@ -474,6 +509,32 @@ function M.SetMove(walk, run)
     pcall(writeState)
 end
 
+-- Direct WASD controller settings for the DLL (Client/Movement/Movement.lua):
+-- { mode = 0|1, accel = s, decel = s, turn = -1|0|deg/s, raw = 0|1,
+--   hold = 0|1, metrics = 0|1 }; only the keys given change.
+function M.SetMoveFeel(t)
+    local changed = false
+    for k, v in pairs(t or {}) do
+        local key = "move_" .. k
+        if S[key] ~= nil and S[key] ~= v then S[key] = v; changed = true end
+    end
+    if changed then
+        lastWrite = 0
+        pcall(writeState)
+    end
+end
+
+-- Locomotion transition clips to fast-forward in direct mode
+-- (Client/Movement/LocoSkip.lua): hex instance, list of mapping ids, rate.
+function M.SetLocoSkip(inst, ids, rate)
+    local spec = (ids and #ids > 0) and table.concat(ids, ",") or "-"
+    inst, rate = inst or "0", rate or 1.0
+    if spec == S.loco_skip and inst == S.loco_inst and rate == S.loco_rate then return end
+    S.loco_inst, S.loco_skip, S.loco_rate = inst, spec, rate
+    lastWrite = 0
+    pcall(writeState)
+end
+
 -- One key=value from the DLL status line (nil if missing).
 function M.StatusValue(key)
     local ok, s = pcall(Ext.IO.LoadFile, STATUS_PATH)
@@ -518,8 +579,7 @@ function M.SetOrbit(on, opts)
     if v ~= S.orbit then
         S.orbit = v
         S.orbit_seq = S.orbit_seq + 1
-        setHideHead(not on and S.on)
-        Log.Write("FullPov: orbit camera " .. (on and "ON" or "OFF"))
+        Log.Write("FullPov: orbit camera " .. (on and "ON" or "OFF") .. " (your head " .. (on and "shows" or "hides again") .. ")")
     end
     for _, k in ipairs({ "dist", "up", "pmin", "pmax", "rate", "tilt_rate" }) do
         if opts[k] then S["orbit_" .. k] = opts[k] end
@@ -549,6 +609,7 @@ function M.Register()
     -- POV starts off every session; make sure a hide_head left on by a
     -- previous session doesn't fire before the character exists.
     setHideHead(false)
+    headHidden = false
     Ext.Events.Tick:Subscribe(function() pcall(writeState) end)
     -- Level loads (region change, fast travel to another region, save load).
     pcall(function()

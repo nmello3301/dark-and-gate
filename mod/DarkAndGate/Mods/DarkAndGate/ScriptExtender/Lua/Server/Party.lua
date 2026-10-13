@@ -13,6 +13,7 @@
 --   Party.UserFromPeer(peer)    net-message user id -> Osiris user id
 --                               ((peer & 0xffff0000) | 1, SE docs; Brawl uses it)
 --   Party.CharacterOfPeer(peer) the character a net message's sender controls
+--   Party.OnControl(fn)         fn(user, uuid, previous uuid) after each change
 --
 -- Control is tracked from Osiris GainedControl (Brawl does the same); before
 -- the first event the host character counts as controlled.
@@ -20,6 +21,7 @@
 local M = {}
 
 local controlled = {}   -- Osiris user id -> uuid
+local controlHooks = {} -- OnControl listeners (Server/Combat/Downed.lua)
 local memberCache = { at = -1e9, list = {}, set = {} }
 
 local function now() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
@@ -28,6 +30,18 @@ function M.Norm(g)
     if g == nil then return nil end
     g = tostring(g)
     return g:match("(%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x)$") or g
+end
+
+-- Character creation (a new game's first screen): our systems stay out of it
+-- (playtest 2026-10-13: BG3 crashed in character creation, a pure virtual
+-- call in its UI update).
+function M.InCharacterCreation()
+    local cc = false
+    pcall(function()
+        local lvl = Osi.GetRegion(Osi.GetHostCharacter())
+        cc = lvl ~= nil and lvl ~= "" and tonumber(Osi.IsCharacterCreationLevel(lvl)) == 1
+    end)
+    return cc
 end
 
 function M.UserFromPeer(peer)
@@ -98,11 +112,23 @@ function M.CharacterOfPeer(peer)
     return M.Controlled(M.UserFromPeer(peer))
 end
 
+function M.OnControl(fn) controlHooks[#controlHooks + 1] = fn end
+
 function M.Register()
     Ext.Osiris.RegisterListener("GainedControl", 1, "after", function(target)
         local uuid = M.Norm(target)
         local user = M.UserOf(uuid)
-        if user then controlled[user] = uuid end
+        if not user then return end
+        local prev = controlled[user]
+        if prev == nil then
+            -- No event yet this session: the host's user was on the host character.
+            local h = host()
+            if h and M.UserOf(h) == user then prev = h end
+        end
+        controlled[user] = uuid
+        if prev ~= uuid then
+            for _, fn in ipairs(controlHooks) do pcall(fn, user, uuid, prev) end
+        end
     end)
     Ext.Osiris.RegisterListener("CharacterJoinedParty", 1, "after", function() memberCache.at = -1e9 end)
     Ext.Osiris.RegisterListener("CharacterLeftParty", 1, "after", function() memberCache.at = -1e9 end)

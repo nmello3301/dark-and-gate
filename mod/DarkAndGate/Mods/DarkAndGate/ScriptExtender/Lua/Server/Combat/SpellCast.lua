@@ -18,6 +18,8 @@ local Projectiles = Ext.Require("Server/Combat/Projectiles.lua")
 local SpellDefs = Ext.Require("Shared/SpellDefs.lua")
 local CastRequest = Ext.Require("Server/Combat/CastRequest.lua")
 local spells = Ext.Require("data/spells.lua")
+local projData = Ext.Require("data/projectiles.lua")
+local SpellRange = Ext.Require("Shared/SpellRange.lua")
 
 local M = {}
 
@@ -79,6 +81,23 @@ end
 
 -- The player's arrows cast their visual clone the same way (Server/Combat/Bows.lua).
 M.CastAtPosition = castAtPosition
+
+-- A cast point can't be farther from the caster than the spell's range
+-- (Shared/SpellRange.lua: 70 m shots, 30 m areas) + range_slack_m: one
+-- beyond (lag, a modified client) is pulled back toward the caster.
+local function clampToRange(caster, spellId, parsed)
+    local p = parsed.hitPoint
+    local range = SpellRange.RangeOf(spellId)
+    if type(p) ~= "table" or not range then return end
+    local okP, x, _, z = pcall(Osi.GetPosition, caster)
+    if not okP or not tonumber(x) then return end
+    local dx, dz = (tonumber(p.x) or 0) - x, (tonumber(p.z) or 0) - z
+    local d = math.sqrt(dx * dx + dz * dz)
+    local maxD = range + (projData.range_slack_m or 3)
+    if d <= maxD then return end
+    p.x, p.z = x + dx * maxD / d, z + dz * maxD / d
+    Log.Write(string.format("SpellCast: %s point %.1f m away pulled back to %.0f m (its range %.0f m)", tostring(spellId), d, maxD, range))
+end
 
 -- Does the caster have this spell (its spell container = what BG3 offers on
 -- its own hotbar, or its spellbook)? Checked for spells bound from the menu.
@@ -196,6 +215,7 @@ function M.Register()
             -- Projectile spells (data/projectiles.lua): our own flight and
             -- hits; BG3 shows its projectile and applies the impact clone.
             local target = resolveTarget(caster, parsed)
+            clampToRange(caster, spellId, parsed)
             local okCast, how
             -- Targeted spells (client Targeting.lua): every picked character
             -- at once through the cast request queue; IgnoreTargetChecks so a

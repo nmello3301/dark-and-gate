@@ -99,8 +99,8 @@ local function updateAim(armedId, def)
     if t - lastAimAt < 200 then return end
     lastAimAt = t
     if armedId and def and def.unlimited_range then
-        -- The exact line the cast will use (Aim.SpellAim), any distance.
-        local a = Aim.SpellAim(spells.aim_far_m or 100)
+        -- The exact line the cast will use (Aim.SpellAim), up to the spell's range.
+        local a = Aim.SpellAim(def.range_m or spells.shot_range_m or 70)
         aimText = a and string.format("%s %.1f m", a.via, a.distance) or "no camera"
     elseif armedId and def and (def.kind == "point" or def.kind == "teleport") then
         local _, d, via = Aim.GroundPoint(def.range_m or 30)
@@ -160,6 +160,8 @@ local function render()
         trySet(u.line, "Label", label)
     end
 end
+
+function M.SetCrosshair(v) crossOn = v and true or false end   -- !dag_play
 
 function M.Register()
     Ext.RegisterNetListener(Net.Channels.ManaUpdate, function(_, payload)

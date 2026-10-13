@@ -34,6 +34,7 @@ local VanillaHud = Ext.Require("Client/HUD/VanillaHud.lua")
 local SpellDefs  = Ext.Require("Shared/SpellDefs.lua")
 local FullPov    = Ext.Require("FullPov.lua")
 local HotbarMenu = Ext.Require("Client/HUD/HotbarMenu.lua")
+local GiveUpButton = Ext.Require("Client/HUD/GiveUpButton.lua")
 local WindowFlags = Ext.Require("Client/HUD/WindowFlags.lua")
 
 local M = { menuOpen = false }
@@ -550,7 +551,8 @@ local function tick()
     -- menu_release_ms after our menu window is gone: the DLL's synthetic MMB
     -- press must not land on an ImGui window still under the cursor (SE would
     -- give it to ImGui and the camera would stay stuck until MMB twice).
-    local free = active and (menu or HotbarMenu.Pinned())
+    -- (and while the downed screen's Give up button shows: Client/Downed.lua)
+    local free = active and (menu or HotbarMenu.Pinned() or GiveUpButton.Shown())
     local t0 = now()
     -- Our input capture pauses while a BG3 panel is open and for the same
     -- release tail as mouse-look (Client/Combat/Input.lua; our own pinned
@@ -566,7 +568,8 @@ local function tick()
         if not M.menuOpen then
             M.menuOpen = true
             FullPov.SetMenuOpen(true)
-            Log.Write("Hud: " .. (menu and ("menu " .. tostring(menuName)) or "Prepare Hotbar menu") .. " open -> cursor free (mouse-look off)"
+            Log.Write("Hud: " .. (menu and ("menu " .. tostring(menuName)) or (GiveUpButton.Shown() and "Give up button" or "Prepare Hotbar menu"))
+                .. " open -> cursor free (mouse-look off)"
                 .. (menu and ", BG3 HUD back" or ""))
             M.probeAt, M.probeWhy = t0 + (cfg.cursor_probe_ms or 400), "menu open"
         end
@@ -607,6 +610,14 @@ end
 function M.SetBowDraw(frac) bowDraw = frac end
 function M.SetExternalMenu(name) externalMenu = name end
 function M.Mode() return mode end
+-- on | off | vanilla, like !dag_hud (!dag_play sets "on").
+function M.SetMode(m)
+    if m ~= "on" and m ~= "off" and m ~= "vanilla" then return end
+    if m == mode then return end
+    mode = m
+    if m ~= "on" then VanillaHud.Restore("SetMode " .. m) end
+    Log.Write("Hud: mode " .. mode)
+end
 function M.AtlasOk() return atlasOk end
 -- false = the art HUD can't be shown (atlas didn't bind, or its window
 -- couldn't be made click-through): the status line stands in.

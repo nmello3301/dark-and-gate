@@ -46,6 +46,7 @@ add_library(DarkAndGate SHARED
     src/Hooks/VisualLift.cpp
     src/Hooks/AnimRate.cpp
     src/Hooks/MoveSpeed.cpp
+    src/Hooks/MoveFeel.cpp
     src/Hooks/RealJump.cpp
     src/Hooks/CombatWasd.cpp
     src/Hooks/GenomeCapture.cpp

@@ -26,8 +26,8 @@ The mod is a Windows PC-only BG3 mod installed through BG3 Mod Manager; it needs
 | --- | --- | --- |
 | [Script Extender](https://github.com/Norbyte/bg3se) | Lua runtime, client/server split, net messages | No, required install |
 | Ch4nKyy's Mod Loader + Native Camera Tweaks | Loads our DLL; first-person camera placement | No, required install |
-| Dark and Gate native plugin | Camera follow + mouse-look, real jump, animation play rate | Yes (ours) |
-| WASD Character Movement | Direct movement (we drive its speed through our DLL) | No, required install |
+| Dark and Gate native plugin | Camera follow + mouse-look, real jump, direct WASD controller, animation play rate | Yes (ours) |
+| WASD Character Movement | Keyboard movement keys, walk / run toggle, camera rotation and its other features; in first person our DLL's direct controller does the moving (DECISIONS 2026-10-13; its own movement stays as the `vanilla` mode) | No, required install |
 | AnimationUnlocker | Custom attack animations | No, required install |
 | Mod Configuration Menu (MCM) | Settings and keybinds | No, required install |
 | [Brawl](https://github.com/tinybike/Brawl) | Real-time combat loop and AI | Forked: imported under GPL-3.0, credited |
@@ -73,7 +73,7 @@ The left mouse button does everything offensive: it swings the held weapon, or c
 **First-person camera and body.** Placing the camera at eye height on its own shows the inside of the character's head, and shrinking the character to hide it is not acceptable. The target is "true first person":
 
 - **Camera on the head bone.** It sits at the eyes, slightly forward, follows the head's position but not its animation wobble, and uses a wider field of view (about 90°, adjustable).
-- **Hide the head on your own screen only.** The local player's head, hair, beard and headwear are hidden on their own client. Body, arms, legs and weapon stay visible, so you see your hands and blade when you swing and your feet when you look down. Other players still see the full character.
+- **Hide the head on your own screen only.** The local player's head, hair, beard and headwear are hidden on their own client. Body, arms, legs and weapon stay visible, so you see your hands and blade when you swing and your feet when you look down. Other players still see the full character. The head is hidden only while the camera is in your eyes: the downed camera, dialogues and cutscenes, and first person off all show it again (DECISIONS 2026-10-13).
 - **Near-clip and weapon clipping.** The camera's near plane is tuned so close walls and your own weapon don't cut through the view.
 - **Fallback:** a floating arms-and-weapon view model, as in classic shooters. It is the most robust option but needs its own animation set, so it is the last resort.
 
@@ -139,7 +139,12 @@ Every spell is the unchanged BG3 spell, cast through script at the point or targ
 
 **Cast time (channelled).** Every spell has a cast time: 2.0 s base for now (`data/spells.lua`), later scaled by character traits. The prepare animation is stretched over it, then loops at READY. The server rejects a release before the cast time. While the cast time runs on the ground, movement is slowed to ×0.7; once READY, and in the air, it is full speed. Casting never roots the caster. **A hit while channelling does not interrupt the cast**: no cancel and no timer reset.
 
-**Range.** Shooting spells (projectiles) have no practical maximum range: the aim reaches 100 m along the crosshair, and their `TargetRadius` is raised so BG3 never refuses or walks the caster into range. Other spells keep BG3's ranges; the reticle turns red when the point is out of range, and casting is blocked.
+**Range** (DECISIONS 2026-10-12). Two first-person ranges replace BG3's (mostly 18 m):
+- **70 m:** spells that fly at or hit one target (Fire Bolt, Ray of Frost, Guiding Bolt, Magic Missile, Sacred Flame, Hold Person, Healing Word) and arrows / bolts. A shot that hits nothing ends at 70 m.
+- **30 m:** spells with an area or several picked targets (Fireball, Grease, Fog Cloud, Sleep, Bless, walls). An area spell aimed farther lands where its ring shows: 30 m out, on the ground. Fireball aimed at the sky bursts at the end of its flight.
+- Touch spells (BG3 range 3 m or less), teleports (Misty Step), cones and lines from the caster, and shouts keep BG3's data.
+
+Each spell's `TargetRadius` is raised to its range at stats load (never lowered), so BG3 never refuses or walks the caster into range; the server pulls a cast point beyond the range back to it. NPC and companion AI still walk to BG3's own range before they cast. The reticle turns red when the point is out of range, and casting is blocked.
 
 **Projectile system** (shared by spells, arrows and thrown weapons; [design/projectiles.md](design/projectiles.md)).
 - **Flight:** ours and server-authoritative, with speed, gravity, drag and a sphere radius per projectile.
@@ -304,11 +309,11 @@ Full rules: [design/combat-rules.md](design/combat-rules.md) and [design/interac
 - **Enemy AI uses our rules.** Pathfinding and choices are Brawl's / BG3's. Melee goes through our swing (same weapon data, committed direction, arc, wall stop, shield). Archers and casters go through our projectiles, with human-like aim: reaction delay, error cone, misjudged lead (`data/ai.lua`). Other spells take our cast time; area spells commit their point when the cast starts.
 - **Getting hit.** The player has no hit reaction; enemies keep BG3's and die at 0 HP. A hit doesn't interrupt a cast.
 - **Shields are passive.** About 40 % comes off any hit that lands on the shield disc.
-- **Downed.** At 0 HP the camera orbits the body (spectate with Space) for a **3 min bleed-out**, paused while someone revives. Revive = **hold F 3 s within 1.5 m**: up at 1 HP; only letting go of F or another action cancels it. Companions revive first (except in camp). Death is undone only the vanilla ways.
+- **Downed.** At 0 HP the camera orbits the body (spectate with Space) for a **3 min bleed-out**, paused while someone revives. Revive = **hold F 3 s within 1.5 m**: up at 1 HP; only letting go of F or another action cancels it. Companions revive first (except in camp). Death is undone only the vanilla ways. Nobody attacks a downed character (hits can't kill one), you stay in control of your own body (BG3 would hand control to a companion, who would then stop fighting), and BG3's game over waits until the last downed party member has bled out instead of coming the moment everyone is down. When nobody in the party is left standing, the downed screen offers **Give up** (a button, or G; twice to confirm): BG3's game-over screen comes up at once, and with other players once every player has given up (DECISIONS 2026-10-13).
 - **C = crouch = BG3's sneak.** Crouched speed is 60 %, and the vision cones are hidden in first person. Standing in an enemy's cone = detected. Crouched in a cone = d20 + Stealth vs passive Perception once per enemy per 6 s; failing pulls its group into the fight.
 - **F interacts** with what the crosshair is on (talk, loot, doors, levers, pick up, climb), exactly like a click; only interactive things are highlighted. A downed ally in range wins: hold F to revive. BG3's panels (dialogue, loot, trade, inventory, map) free the mouse and pause our input.
 - **V** cycles companions between Follow, Wait and Go to camp. **M** opens BG3's map; fast travel works, and first person comes back after it.
-- **Targeted spells:** LMB picks characters under the crosshair (line of sight, BG3's range). The spell fires at the max count once READY; the key again fires early; RMB cancels. **Area spells** show BG3's own ring at the crosshair point, clamped to range, from arming to cast or cancel.
+- **Targeted spells:** LMB picks characters under the crosshair (line of sight, within the spell's range: 30 m for several targets like Sleep or Bless, 70 m for one). The spell fires at the max count once READY; the key again fires early; RMB cancels. **Area spells** show BG3's own ring at the crosshair point, clamped to range, from arming to cast or cancel.
 
 ## Impact feedback and HUD
 
@@ -342,6 +347,8 @@ Hits should feel as heavy as Blade & Sorcery through layered animation, effects 
 ## Companions and AI
 
 Outside combat, the player chooses whether each companion follows or stays at camp. In a fight, companions run the same real-time AI as enemies, on the player's side. One AI drives both sides, so it is built once.
+
+**Pace** (DECISIONS 2026-10-12, 2026-10-13). Companions and NPC allies start an action every **4 s**. Enemies' pace follows BG3's difficulty: **Explorer 10 s, Balanced 6 s, Tactician 5 s, Honour 4 s** (a custom difficulty counts as its Enemy AI setting); enemy and ally stats scale with difficulty later. A high initiative roll makes a fighter's pace a little faster, a low one a little slower (about ±10 %). An action that runs longer, such as a bow draw or a cast, is followed by the next as soon as it ends. NPC allies fight on the player's side like companions. A companion or ally the AI finds nothing for attacks the nearest enemy with its weapon instead of standing idle.
 
 **States.** Camp ↔ Follow (party menu); Follow ↔ Wait (V key); Follow or Wait → In combat when a fight starts, and back to the previous mode when it ends; In combat → Downed at 0 HP → back to In combat when revived. Camp companions skip fights.
 
@@ -405,6 +412,7 @@ Most campaign fights should work in real time. Scripted set pieces will break, s
 - **Encounter overrides:** a data file lists encounters that start turn-based automatically, or that need custom handling. It grows with each act's playtest pass.
 - **Manual toggle:** one key switches the current fight to native turn-based combat and back, for anything the overrides miss.
 - **Stealth, surfaces and environment:** sneaking, fire, grease, water and pushing off ledges keep working, because they are native systems.
+- **Terrain (known limitation):** you walk at the height of BG3's walkable map, not on the visible rocks and debris. Where a rock sits on walkable ground you can walk partly into it, and a jump that lands on a rock top doesn't keep you up there (you drop back to the map's height, waist-deep in the rock). Standing on what a jump reaches was tried and dropped on 2026-10-13: it made jumping worse ([spikes/ground-support.md](spikes/ground-support.md), DECISIONS 2026-10-13).
 - **Camp and resting:** unchanged, except that mana refills on long rest.
 - **Saving:** saving mid-fight is allowed. Combat state that cannot be restored ends the fight cleanly on load. Brawl advises against saving mid-fight in real time, so this needs testing.
 - **Uninstalling:** a menu command restores native combat state before the final save.
@@ -415,7 +423,7 @@ The mod is mostly Script Extender Lua, split into client and server modules, wit
 - the camera commit, mouse-look and head-bone anchor;
 - the real jump (steering BG3's falling state);
 - the per-character animation play rate;
-- WASD speed;
+- WASD movement: the speed lever, and the direct controller (in first person: full speed within about 0.06 s, a stop within 0.04 s with no slide, reversals and strafe changes at once, no turn-in-place pause; the body turns with BG3's own steering; on BG3's own controller-mode path, so walls, the nav grid and the server sync stay the engine's; [spikes/move-feel.md](spikes/move-feel.md));
 - static-analysis-guided probes, such as the genome event capture and the animation recorder.
 
 It is built from `tools/native` with `scripts/pov-build-deploy.ps1`.
@@ -483,7 +491,7 @@ If M1 fails its gate, the fallback is the native-plugin hit check before any con
 **Open questions.**
 
 - [x] Fork Brawl (GPL-3.0) or start fresh? **Forked** (DECISIONS 2026-10-08).
-- [x] Use an existing WASD movement mod or write our own? **WASD Character Movement**, with our DLL driving its speed (DECISIONS 2026-10-09).
+- [x] Use an existing WASD movement mod or write our own? **WASD Character Movement**, with our DLL driving its speed (DECISIONS 2026-10-09); since 2026-10-13 **our own direct controller** moves the character in first person, and BG3WASD stays for everything else it does (`vanilla` mode keeps its movement as a fallback).
 - [ ] Offer a single-player tactical pause?
 - [ ] Keep spell preparation, or let casters put any known spell on the hotbar?
 - [ ] Final mana numbers after the M1 playtest

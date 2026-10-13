@@ -33,6 +33,20 @@
 -- everything with !dag_ai off. While a swing / shot / cast runs the
 -- character is busy: Brawl's pulse skips it (AI.act wrapper).
 --
+-- The pace (Server/Combat/Pace.lua: your side 4 s, developer 2026-10-12;
+-- enemies by BG3's difficulty, Explorer 10 s to Honour 4 s, 2026-10-13): an
+-- action starts at most once a pace. A pulse that
+-- comes while the last action still runs (a bow's 3 s draw, a cast), or
+-- less than a pace after it started, waits, and the fighter acts again the
+-- moment both are over instead of a whole pace later.
+-- Nobody attacks a downed character (data/ai.lua skip_downed_targets; DAG
+-- patches in Brawl's Pick.getWeightedTargets and Utils.isValidHostileTarget).
+-- Your side (companions and NPC allies "play for the players side"):
+-- when Brawl's AI finds nothing for one to do, it attacks the nearest enemy
+-- with its weapon (data/ai.lua side); why one did nothing is logged; one
+-- whose AI pulse stopped in a fight is logged with its state and restarted.
+-- A fight roster (who is on which side, at what pace) is logged 2.5 s in.
+--
 --   !dag_ai on|off   !dag_ai_aim <deg>   !dag_ai_react <ms>   !dag_ai_debug on|off
 --   (server console, or the client console: Shared/ConsoleForward.lua)
 
@@ -51,6 +65,7 @@ local Bows        = Ext.Require("Server/Combat/Bows.lua")
 local bowsCfg     = Ext.Require("data/bows.lua")
 local hitboxData  = Ext.Require("data/hitbox.lua")
 local cfg         = Ext.Require("data/ai.lua")
+local rtCfg       = Ext.Require("data/realtime.lua")
 local WEAPONS     = { longsword = Ext.Require("data/weapons/longsword.lua") }
 
 local M = {}
@@ -68,6 +83,14 @@ local enemyCache = {}   -- "a|b" -> { v, at }
 local weaponCache = {}  -- "uuid|melee" -> { info, at }
 local kinds = {}        -- spell -> kind
 local reviveHandler = nil
+local started = {}      -- uuid -> ms its last action started (the pace)
+local retry = {}        -- uuid -> true while an "act again" timer is pending
+local pulseSeen = {}    -- uuid -> ms of its last AI pulse (the stall watch)
+local stalled = {}      -- uuid -> true once its stall was logged this fight
+local idleWhy = {}      -- uuid -> { why, at }: the last "did nothing" logged
+local sides = {}        -- uuid -> { v, at }
+local watch = { at = -1e9, fightAt = nil }
+local watchSide         -- the stall watch (below, with the sides); the tick calls it
 
 local function now() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
 local function noop() end
@@ -604,6 +627,12 @@ local function step(a, t)
         if a.state == "wait" and t >= a.castAt then
             a.state = "done"
             if not canAct(a.attacker) then busy[a.attacker] = t; pcall(a.onFailed or noop, "can't act"); return end
+            if DAG_SkipDownedTargets and not a.isFriendly and a.target ~= a.attacker and Damage.IsDowned(a.target) then
+                busy[a.attacker] = t
+                log(string.format("AI: %s's %s is dropped: %s went down during the cast time", name(a.attacker), a.spell, name(a.target)))
+                pcall(a.onFailed or noop, "target down")
+                return
+            end
             log(string.format("AI: %s's cast time is over, BG3 casts %s on %s", name(a.attacker), a.spell, name(a.target)))
             origUse(a.attacker, a.target, a.spell, a.isFriendly, a.onSubmitted or noop,
                 function(...) busy[a.attacker] = now() + (cfg.busy_pad_ms or 300); pcall(a.onCompleted or noop, ...) end,
@@ -614,6 +643,7 @@ end
 
 local function tick()
     trackVelocities()
+    watchSide(now())
     if #actions == 0 then return end
     local t = now()
     local keep = {}
@@ -627,6 +657,201 @@ local function tick()
         if a.state ~= "done" then keep[#keep + 1] = a end
     end
     actions = keep
+end
+
+-- ---------------------------------------------------------------------
+-- Sides and the pace
+-- ---------------------------------------------------------------------
+-- "companion" (a party member on Brawl's AI), "ally" (an NPC on the party's
+-- side), "enemy" or "neutral", seen from the host.
+local function sideOf(u)
+    if Party.IsMember(u) then return "companion" end
+    local c = sides[u]
+    local t = now()
+    if c and t - c.at < 10000 then return c.v end
+    local v = "neutral"
+    pcall(function()
+        local host = Osi.GetHostCharacter()
+        if tonumber(Osi.IsAlly(host, u)) == 1 then v = "ally"
+        elseif tonumber(Osi.IsEnemy(host, u)) == 1 then v = "enemy" end
+    end)
+    sides[u] = { v = v, at = t }
+    return v
+end
+local function onPlayersSide(u) local s = sideOf(u); return s == "companion" or s == "ally" end
+
+local function isHelper(raw)
+    local ok, v = pcall(function() return Utils.isCombatHelper(raw) end)
+    return ok and v == true
+end
+
+local function controlled(raw)
+    local ok, v = pcall(function() return BrawlState.isPlayerControllingDirectly(raw) end)
+    return ok and v == true
+end
+
+-- Brawl's per-fighter interval: the pace, scaled a little by initiative.
+local function paceOf(b)
+    return tonumber(b and b.actionInterval) or (tonumber(rtCfg.action_interval_s) or 4) * 1000
+end
+
+-- RealTime.pulseAction's checks: would Brawl's own pulse let it act now?
+local function pulseWouldRun(b)
+    if not b or not b.uuid or not Brawl.Enabled() then return false end
+    local raw = b.uuid
+    local ok, yes = pcall(function()
+        local S = BrawlState.Session
+        if not (S.PulseActionTimers and S.PulseActionTimers[raw]) then return false end
+        if b.isPaused or S.IsInDialog then return false end
+        if b.suppressPulseEventUuid and S.ActiveMovements and S.ActiveMovements[b.suppressPulseEventUuid] then return false end
+        if controlled(raw) and not BrawlState.Settings.FullAuto then return false end
+        if not Utils.canAct(raw) then return false end
+        if tonumber(Osi.IsPlayer(raw)) == 0 and tonumber(Osi.IsInCombat(raw)) == 0 then return false end
+        return true
+    end)
+    return ok and yes == true
+end
+
+-- Act again as soon as `due` has passed (one pending timer per fighter; the
+-- AI.act wrapper checks the pace again when it fires).
+local function actLater(u, raw, due)
+    if retry[u] then return end
+    retry[u] = true
+    local P = cfg.pace or {}
+    Ext.Timer.WaitFor(math.max(0, due - now()) + (P.retry_pad_ms or 50), function()
+        retry[u] = nil
+        local b = nil
+        pcall(function() b = Roster.getBrawlerByUuid(raw) end)
+        if pulseWouldRun(b) then
+            dbg(string.format("AI: %s acts again (its last action is over)", name(u)))
+            AI.act(b)
+        end
+    end)
+end
+
+-- The nearest living enemy of u in sight, within maxM.
+local function nearestEnemy(u, maxM)
+    local best, bestD = nil, nil
+    local okB, list = pcall(function() return Roster.getBrawlers() end)
+    if not okB or type(list) ~= "table" then return nil end
+    for raw in pairs(list) do
+        local t = Party.Norm(raw)
+        if t and t ~= u and not isHelper(raw) and alive(t) and isEnemy(u, t) then
+            local okD, d = pcall(Osi.GetDistanceTo, u, t)
+            d = okD and tonumber(d) or nil
+            if d and d <= maxM and (not bestD or d < bestD) then
+                local okS, sees = pcall(Osi.CanSee, u, t)
+                if okS and tonumber(sees) == 1 then best, bestD = t, d end
+            end
+        end
+    end
+    return best, bestD
+end
+
+-- Your side never stands idle: Brawl found nothing for this companion /
+-- ally, so it attacks the nearest enemy with its weapon (our swing / shot).
+local function sideAttack(brawler, u, why, onSubmitted, onCompleted, onFailed)
+    local S = cfg.side or {}
+    if S.fallback == false then return false end
+    local target, d = nearestEnemy(u, S.fallback_range_m or 25)
+    if not target then return false end
+    local ranged = tostring(brawler.archetype or ""):find("ranged") ~= nil and Bows.Family(u) ~= nil and d > (S.melee_m or 3)
+    local spell = ranged and ARROW_SPELL or "Target_MainHandAttack"
+    brawler.targetUuid = target
+    log(string.format("AI: %s (%s) found nothing to do (%s) -> attacks %s with its %s (%.1f m)", name(u), sideOf(u), why,
+        name(target), ranged and "ranged weapon" or "weapon", d))
+    local ok, err = pcall(Movement.moveIntoPositionForSpell, brawler.uuid, target, spell, false, function()
+        Actions.useSpellOnTarget(brawler.uuid, target, spell, false, onSubmitted, onCompleted, onFailed)
+    end, onFailed)
+    if not ok then
+        log("AI: " .. name(u) .. "'s weapon attack failed to start: " .. tostring(err))
+        return false
+    end
+    return true
+end
+
+local FALLBACK_ON = {
+    ["no hostile actions found"] = true, ["too many exclusions"] = true, ["can't find target"] = true,
+    ["no prepared spells"] = true, ["no friendly actions available"] = true,
+    ["no direct heals found (self)"] = true, ["no direct heals found (other)"] = true,
+}
+
+-- Brawl's AI gave up on a companion / ally this pulse.
+local function sideIdle(brawler, u, why, onSubmitted, onCompleted, onFailed)
+    why = tostring(why or "?")
+    if FALLBACK_ON[why] and sideAttack(brawler, u, why, onSubmitted, onCompleted, onFailed) then return end
+    local w = idleWhy[u]
+    local t = now()
+    if not w or w.why ~= why or t - w.at > ((cfg.side and cfg.side.log_every_s) or 15) * 1000 then
+        idleWhy[u] = { why = why, at = t }
+        log(string.format("AI: %s (%s) did nothing this pulse: %s", name(u), sideOf(u), why))
+    end
+    return onFailed(why)
+end
+
+-- One line of the state Brawl's pulse looks at (the stall log).
+local function pulseState(raw, b)
+    local parts = {}
+    pcall(function()
+        local S = BrawlState.Session
+        parts[#parts + 1] = "pulse timer " .. ((S.PulseActionTimers and S.PulseActionTimers[raw]) and "on" or "OFF")
+        parts[#parts + 1] = "can act " .. (Utils.canAct(raw) and "yes" or "NO")
+        if b.isPaused then parts[#parts + 1] = "PAUSED" end
+        if S.IsInDialog then parts[#parts + 1] = "IN DIALOG" end
+        if controlled(raw) then parts[#parts + 1] = "controlled by a player" end
+        parts[#parts + 1] = "in combat " .. tostring(Osi.IsInCombat(raw))
+    end)
+    return table.concat(parts, ", ")
+end
+
+local function roster()
+    local okB, list = pcall(function() return Roster.getBrawlers() end)
+    if not okB or type(list) ~= "table" then return end
+    local parts = {}
+    for raw, b in pairs(list) do
+        if not isHelper(raw) then
+            local u = Party.Norm(raw)
+            if controlled(raw) then parts[#parts + 1] = name(u) .. " (you)"
+            else parts[#parts + 1] = string.format("%s (%s, every %.1f s)", name(u), sideOf(u), paceOf(b) / 1000) end
+        end
+    end
+    log("AI: fight roster: " .. (#parts > 0 and table.concat(parts, ", ") or "nobody yet"))
+end
+
+-- Companions / allies whose AI pulse stopped in a fight: logged once with
+-- the state, and the pulse restarted when Brawl would run it.
+function watchSide(t)
+    if t - watch.at < 1000 then return end
+    watch.at = t
+    if not Brawl.Enabled() or not Brawl.InFight() then
+        if watch.fightAt then watch.fightAt, stalled, pulseSeen = nil, {}, {} end
+        return
+    end
+    watch.fightAt = watch.fightAt or t
+    local okB, list = pcall(function() return Roster.getBrawlers() end)
+    if not okB or type(list) ~= "table" then return end
+    local S = cfg.side or {}
+    for raw, b in pairs(list) do
+        local u = Party.Norm(raw)
+        if u and not isHelper(raw) and not controlled(raw) and onPlayersSide(u) then
+            local last = pulseSeen[u] or watch.fightAt
+            local limit = math.max((S.stall_paces or 3) * paceOf(b), (S.stall_min_s or 10) * 1000)
+            if t - last > limit and not stalled[u] then
+                stalled[u] = true
+                local restart = ""
+                local okT = pcall(function()
+                    local Ss = BrawlState.Session
+                    if not (Ss.PulseActionTimers and Ss.PulseActionTimers[raw]) and not b.isPaused and not Ss.IsInDialog
+                        and not Pause.isPartyInFTB() and Utils.canAct(raw) then
+                        RT.Timers.startPulseAction(b, 0)
+                        restart = " -> pulse restarted"
+                    end
+                end)
+                log(string.format("AI: %s (%s) has had no AI pulse for %.0f s (%s)%s", name(u), sideOf(u), (t - last) / 1000,
+                    pulseState(raw, b), okT and restart or " (restart check failed)"))
+            end
+        end
+    end
 end
 
 -- ---------------------------------------------------------------------
@@ -658,6 +883,7 @@ local function wire()
     Actions.useSpellOnTarget = function(attacker, target, spell, isFriendly, onSubmitted, onCompleted, onFailed)
         onSubmitted, onCompleted, onFailed = onSubmitted or noop, onCompleted or noop, onFailed or noop
         attacker, target = Party.Norm(attacker), Party.Norm(target)
+        if cfg.enabled ~= false and attacker then started[attacker] = now() end   -- the pace
         if cfg.enabled == false or not attacker or not target or attacker == target then
             return origUse(attacker, target, spell, isFriendly, onSubmitted, onCompleted, onFailed)
         end
@@ -673,10 +899,27 @@ local function wire()
     end
     local origAct = AI.act
     AI.act = function(brawler, bonusActionOnly, onSubmitted, onCompleted, onFailed)
+        onSubmitted, onCompleted, onFailed = onSubmitted or noop, onCompleted or noop, onFailed or noop
         if cfg.enabled ~= false and brawler and brawler.uuid then
-            local b = busy[Party.Norm(brawler.uuid)]
-            if b and now() < b then return (onFailed or noop)("busy: our swing / shot / cast is running") end
-            if reviveHandler and reviveHandler.Act and reviveHandler.Act(brawler) then return (onCompleted or noop)("revive") end
+            local u = Party.Norm(brawler.uuid)
+            local t = now()
+            if stalled[u] then stalled[u] = nil; log("AI: " .. name(u) .. " gets AI pulses again") end
+            pulseSeen[u] = t
+            -- The pace: its last action still running, or started less than a
+            -- pace ago, holds this pulse; it acts again once both are over.
+            local b = busy[u]
+            local due = math.max(b or 0, (started[u] or -1e9) + paceOf(brawler) - ((cfg.pace and cfg.pace.slack_ms) or 250))
+            if t < due then
+                if not bonusActionOnly then actLater(u, brawler.uuid, due) end
+                return onFailed((b and t < b) and "busy: our swing / shot / cast is running" or "pace: its last action started less than a pace ago")
+            end
+            if reviveHandler and reviveHandler.Act and reviveHandler.Act(brawler) then return onCompleted("revive") end
+            -- Your side: why Brawl gave up is logged, and it attacks with its
+            -- weapon instead of standing idle.
+            if not bonusActionOnly and onPlayersSide(u) then
+                local giveUp = onFailed
+                onFailed = function(why) return sideIdle(brawler, u, why, onSubmitted, onCompleted, giveUp) end
+            end
         end
         return origAct(brawler, bonusActionOnly, onSubmitted, onCompleted, onFailed)
     end
@@ -686,6 +929,8 @@ end
 function M.Register()
     Projectiles.SetWeaponHandler(arrowHit)
     wire()
+    DAG_SkipDownedTargets = cfg.skip_downed_targets ~= false   -- Brawl's Pick / Utils (DAG patches)
+    Brawl.Hook("CombatStarted", function() Ext.Timer.WaitFor(2500, roster) end)
     Ext.Events.Tick:Subscribe(TickBudget.Wrap("NpcCombat", tick))
     ConsoleForward.Server("dag_ai", function(_, a)
         if a == "on" or a == "off" then cfg.enabled = (a == "on") end
@@ -708,9 +953,12 @@ function M.Register()
         debugOn = (a ~= "off" and a ~= "0")
         Log.Write("AI: debug lines " .. (debugOn and "ON" or "OFF"))
     end)
-    Log.Write(string.format("AI: registered (aim error %.1f deg, reaction %d+%d ms, lead skill %.2f, melee %s, cast time %.1f s)",
-        cfg.ranged.aim_error_deg, cfg.ranged.reaction_ms, cfg.ranged.reaction_jitter_ms, cfg.ranged.lead_skill, cfg.melee.weapon,
-        cfg.cast_time_s))
+    Log.Write(string.format("AI: registered (your side's pace %.1f s, enemies' by BG3's difficulty; %s; aim error %.1f deg, reaction %d+%d ms, lead skill %.2f, melee %s, cast time %.1f s; your side %s)",
+        tonumber(rtCfg.action_interval_s) or 4, DAG_SkipDownedTargets and "downed characters are no targets" or "downed characters are targets",
+        cfg.ranged.aim_error_deg, cfg.ranged.reaction_ms, cfg.ranged.reaction_jitter_ms,
+        cfg.ranged.lead_skill, cfg.melee.weapon, cfg.cast_time_s,
+        (cfg.side and cfg.side.fallback == false) and "on Brawl only" or string.format("falls back to weapon attacks within %d m",
+            (cfg.side and cfg.side.fallback_range_m) or 25)))
 end
 
 return M

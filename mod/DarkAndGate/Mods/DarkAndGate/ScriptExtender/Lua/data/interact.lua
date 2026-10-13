@@ -13,6 +13,8 @@
 --   classify_ttl_s   the server's answer "what is this" is kept this long
 --   max_m            the crosshair's world point / character ray length
 --   marker           draw "[F]" on the object and BG3's highlight circle under it
+--   use_actions      BG3 use actions that give an item "[F] Use" (below)
+--   use_verbs        the prompt verb for a use action ("Sit on" a chair)
 return {
     reach_m        = 4.0,
     server_reach_m = 6.0,
@@ -34,4 +36,16 @@ return {
         climb  = "Climb",
         locked = "Open (locked)",
     },
+    -- BG3 use actions (ActionDataType) that make an item "[F] Use": what a
+    -- click does with it in the world. Inventory-only ones (Equip, Consume,
+    -- Throw, LearnSpell, SpellBook, Combine, Recipe, Lockpick, DisarmTrap,
+    -- StoryUseInInventory) are left out; Door and Ladder have their own kinds.
+    -- An item with none of these, and no door, ladder, container or pickup,
+    -- gets no [F] (playtest 2026-10-13: the nautiloid's brain jars and an
+    -- invisible helper item showed "[F] Use").
+    use_actions = { "StoryUse", "Sit", "Lie", "Stand", "OpenClose", "Teleport", "UseSpell", "PlaySound",
+                    "CreateSurface", "CreatePuddle", "SpawnCharacter", "ShowStoryElementUI", "Destroy",
+                    "Book", "Insert", "Constrain" },
+    -- The prompt verb for a use action (else verbs.use).
+    use_verbs = { Sit = "Sit on", Lie = "Lie on", Book = "Read" },
 }

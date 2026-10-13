@@ -66,8 +66,15 @@ local function modalOpen()
     return modal
 end
 
+-- A dialogue / cutscene the server reported (Server/Scene.lua): our HUD and
+-- input stand aside (playtest 2026-10-13: the HUD blocked the opening scene).
+M.sceneOn = false
+-- The party gave up and BG3's game-over screen is up (Client/Downed.lua):
+-- the same, until the next load resets the Lua state.
+M.gameOver = false
+
 function M.IsCombatActive()
-    if not M.povOn then return false end
+    if not M.povOn or M.sceneOn or M.gameOver then return false end
     return not modalOpen()
 end
 

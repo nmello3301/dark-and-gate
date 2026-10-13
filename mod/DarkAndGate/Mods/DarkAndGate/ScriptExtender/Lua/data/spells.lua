@@ -28,13 +28,28 @@ return {
     -- "casting"). Once the spell is ready to release: full speed.
     casting_speed_mult = 0.7,
 
-    -- Shooting spells (unlimited_range = true) fly toward the crosshair at
-    -- any distance: the aim point is up to aim_far_m away along the view,
-    -- and the spell's own TargetRadius stat is raised to stat_range_m at
-    -- stats load (Shared/SpellRange.lua) so BG3 doesn't refuse or walk
-    -- you into range. BG3's 18 m felt wrong in first person.
-    aim_far_m    = 100,
-    stat_range_m = 100,
+    -- Spell ranges in first person (developer 2026-10-12, DECISIONS; BG3's
+    -- 18 m felt wrong in first person). Each spell gets the range of its
+    -- class (Shared/SpellRange.lua):
+    --   shot_range_m   it flies at, or hits, one target: Fire Bolt, Ray of
+    --                  Frost, Guiding Bolt, Magic Missile, Sacred Flame, Hold
+    --                  Person, Healing Word... and arrows / bolts
+    --                  (Client/Combat/Bow.lua, data/projectiles.lua)
+    --   area_range_m   it covers an area or several picked targets: Fireball,
+    --                  Grease, Fog Cloud, Sleep, Bless, walls...
+    --   touch_max_m    a spell whose BG3 range is this or less (touch, melee
+    --                  spells) keeps it
+    -- The spell's TargetRadius stat is raised to its class range at stats
+    -- load, so BG3 casts it that far instead of refusing or walking you into
+    -- range; a range is never lowered. Teleports (Misty Step), cones / zones
+    -- from the caster and shouts keep BG3's data. NPCs and companions still
+    -- walk to BG3's own range before they cast (Server/BrawlAdapter.lua).
+    -- Shooting spells (unlimited_range = true, our projectile flight) fly
+    -- along the crosshair line up to their range; an area spell lands where
+    -- its ring shows (Client/Combat/Targeting.lua), at most area_range_m away.
+    shot_range_m = 70,
+    area_range_m = 30,
+    touch_max_m  = 3,
 
     -- Spell animations (Client/Combat/SpellAnims.lua): each spell's own
     -- SpellAnimation slots (0 prepare, 4 loop, 2 cast, 3 recover). A slot
@@ -97,8 +112,7 @@ return {
             level      = 0,
             cost       = 0,
             cooldown_ms = 400,
-            range_m    = 36,
-            label      = "Fire Bolt",
+            label      = "Fire Bolt",       -- range: shot_range_m
             icon       = nil,
         },
         Projectile_Fireball = {
@@ -107,8 +121,7 @@ return {
             level      = 3,
             cost       = 32,
             cooldown_ms = 1500,
-            range_m    = 36,
-            label      = "Fireball",
+            label      = "Fireball",        -- range: area_range_m
         },
         Target_MistyStep = {
             kind       = "teleport",   -- stub: cast via UseSpell on self for now

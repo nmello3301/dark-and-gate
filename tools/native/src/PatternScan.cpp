@@ -183,6 +183,34 @@ uint8_t* AllocNearRWX(void* nearAddr, size_t size)
 
 }  // namespace
 
+uint8_t* AllocNear(void* nearAddr, size_t size)
+{
+    return AllocNearRWX(nearAddr, size);
+}
+
+bool PatchCode(uint8_t* at, const uint8_t* bytes, size_t n)
+{
+    if (!at || !bytes || n == 0 || n > 8) return false;
+    uint8_t* blk = reinterpret_cast<uint8_t*>(reinterpret_cast<uintptr_t>(at) & ~uintptr_t(7));
+    const size_t off = static_cast<size_t>(at - blk);
+    DWORD old = 0;
+    if (!VirtualProtect(blk, 16, PAGE_EXECUTE_READWRITE, &old)) return false;
+    if (off + n <= 8) {
+        // One aligned 8-byte store: a thread running that code sees the old
+        // or the new instruction, never half of each.
+        uint64_t cur = 0;
+        std::memcpy(&cur, blk, 8);
+        std::memcpy(reinterpret_cast<uint8_t*>(&cur) + off, bytes, n);
+        _InterlockedExchange64(reinterpret_cast<volatile long long*>(blk), static_cast<long long>(cur));
+    } else {
+        std::memcpy(at, bytes, n);
+    }
+    DWORD tmp = 0;
+    VirtualProtect(blk, 16, old, &tmp);
+    FlushInstructionCache(GetCurrentProcess(), blk, 16);
+    return true;
+}
+
 uint8_t* InstallFarCall5(uint8_t* callSite, void* newTarget)
 {
     if (!callSite || callSite[0] != 0xE8) return nullptr;

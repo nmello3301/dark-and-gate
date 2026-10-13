@@ -5,16 +5,30 @@
 --   enabled             false = BG3's vanilla turn-based fights (also !dag_rt off|on)
 --   round_s             one BG3 turn in seconds. Statuses, recharges and
 --                       concentration tick once per round (DECISIONS 2026-10-12).
---   action_interval_s   Brawl's AI acts every this many seconds per character,
---                       faster for a high initiative roll, never under 1 s
---                       (TurnOrder.calculateActionInterval). 2026-10-12: 6 s
---                       felt turn-based ("enemies attack every 6 seconds"),
---                       now 2.5 s; !dag_ai_interval <s> (from the next fight).
+--   action_interval_s   your side's combat pace: your companions and NPC allies
+--                       start an action every this many seconds
+--                       (TurnOrder.calculateActionInterval), never under 1 s.
+--                       An action that runs longer (a bow's 3 s draw, a cast)
+--                       is followed by the next as soon as it ends, not a whole
+--                       pace later (Server/Combat/NpcCombat.lua). 2026-10-12:
+--                       6 s felt turn-based, then 2.5 s; the developer set 4 s.
+--                       !dag_ai_interval <s> (from the next fight).
+--   enemy_pace_s        the enemies' pace by BG3's difficulty (developer
+--                       2026-10-13: the difficulty scales the enemies' combat
+--                       pace; enemy and ally stats come later). A custom
+--                       difficulty counts as its AI lethality setting
+--                       (Server/Combat/Pace.lua). !dag_enemy_pace <s>|auto.
+--   initiative_spread   a high initiative roll makes a fighter's pace a little
+--                       faster, a low one slower: Brawl's rescaling factor
+--                       (it shipped 0.3: about -20 %..+15 % for usual rolls;
+--                       0.1 keeps a 4 s pace within about 3.7..4.4 s).
 --   move_gait           how every fighter moves in a real-time fight: the
 --                       exploration run ("Run"), not Brawl's distance-based
 --                       Sprint (developer: "the same as out of combat move speed").
 --   companion_ai        companions fight on Brawl's AI (the character you
---                       control never does).
+--                       control never does). When Brawl finds nothing for a
+--                       companion or an NPC ally to do, it attacks the nearest
+--                       enemy with its weapon (data/ai.lua side).
 --   companion_tactics   "Balanced" | "Offense" | "Defense" (Brawl's Pick.lua).
 --   defensive_tactics_max_distance   how far "Defense" companions leave the party, m.
 --   companion_ai_max_spell_level     highest spell level companions cast on their
@@ -31,7 +45,9 @@
 return {
     enabled = true,
     round_s = 6.0,
-    action_interval_s = 2.5,
+    action_interval_s = 4.0,
+    enemy_pace_s = { explorer = 10.0, balanced = 6.0, tactician = 5.0, honour = 4.0 },
+    initiative_spread = 0.1,
     move_gait = "Run",
     companion_ai = true,
     companion_tactics = "Balanced",

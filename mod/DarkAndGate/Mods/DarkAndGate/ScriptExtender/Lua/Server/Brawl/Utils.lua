@@ -257,7 +257,8 @@ local function getSpellRange(spellName)
     if M.Utils.isZoneSpell(spellName) then
         return spell.Range
     elseif spell.TargetRadius ~= "" then
-        return spell.TargetRadius
+        -- DAG: BG3's own range, not our first-person one (Shared/SpellRange.lua)
+        return (DAG_SpellRangeVanilla and DAG_SpellRangeVanilla(spellName)) or spell.TargetRadius
     elseif spell.AreaRadius ~= "" then
         return spell.AreaRadius
     else
@@ -698,6 +699,9 @@ local function isValidHostileTarget(uuid, targetUuid)
     if not M.Utils.isVisible(uuid, targetUuid) then
         return false
     elseif not M.Utils.isAliveAndCanFight(targetUuid) and not M.Utils.isDowned(targetUuid) then
+        return false
+    -- DAG: a downed character is no target (hits can't kill one: our bleed-out, Server/Combat/Downed.lua)
+    elseif DAG_SkipDownedTargets and M.Utils.isDowned(targetUuid) then
         return false
     else
         local entity = Ext.Entity.Get(targetUuid)

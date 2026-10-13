@@ -18,6 +18,9 @@
 --                                BG3's damage, Server/Combat/Damage.lua stops
 --                                ours). No argument toggles it for you; party =
 --                                every party member; off = everyone.
+--   !dag_learn <spell>           your character learns a BG3 spell (Osiris
+--                                AddSpell), e.g. Target_MistyStep for the
+--                                movement playtest's teleport step.
 -- Spawning follows the recipe Brawl's encounters use (reference/Brawl,
 -- Server/Encounters/Spawn.lua and Init.lua: CreateAt, temporary hostility
 -- to the party, EnterCombat or joining the running fight, the "Evil NPC"
@@ -423,6 +426,18 @@ local function god(arg)
     godReport(peer, arg ~= "" and arg or "(toggle)")
 end
 
+local function learn(spell)
+    local u, _, peer = caller()
+    if not u or not spell or spell == "" then
+        Log.Write("TestKit: !dag_learn <spell>: " .. (u and "no spell named" or "no character"))
+        return
+    end
+    local ok, err = pcall(Osi.AddSpell, u, spell)
+    local text = ok and ("Learned " .. spell) or ("Couldn't learn " .. spell .. ": " .. tostring(err))
+    Log.Write(string.format("TestKit: !dag_learn %s -> %s (%s)", spell, ok and "ok" or tostring(err), name(u)))
+    toast(peer, text, 3)
+end
+
 -- ---------------------------------------------------------------------
 -- Register
 -- ---------------------------------------------------------------------
@@ -430,6 +445,7 @@ function M.Register()
     ConsoleForward.Server("dag_chest", function() spawnChest() end)
     ConsoleForward.Server("dag_goblins", function(_, ...) goblins({ ... }) end)
     ConsoleForward.Server("dag_god", function(_, a) god(a) end)
+    ConsoleForward.Server("dag_learn", function(_, a) learn(a) end)
     pcall(function()
         Ext.Osiris.RegisterListener("LevelGameplayStarted", 2, "after", function()
             spawned = {}
@@ -440,7 +456,7 @@ function M.Register()
         local to = tostring(e.ToState)
         if to == "UnloadLevel" or to == "UnloadSession" then spawned = {} end
     end)
-    Log.Write("TestKit: registered (!dag_chest, !dag_goblins [kind [n]...] [idle] | clear | list, !dag_god [on|off|party|status])")
+    Log.Write("TestKit: registered (!dag_chest, !dag_goblins [kind [n]...] [idle] | clear | list, !dag_god [on|off|party|status], !dag_learn <spell>)")
 end
 
 return M

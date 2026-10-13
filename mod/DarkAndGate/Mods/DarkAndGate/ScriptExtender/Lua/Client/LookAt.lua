@@ -25,8 +25,9 @@
 --      spatial grid, Ext.Entity.GetEntitiesAroundPosition, or a sliced scan
 --      of every item): the one closest to the crosshair inside cone_deg, in
 --      line of sight.
--- The server classifies it (Server/Combat/Interact.lua: talk, loot, door,
--- open, pickup, use, climb or none) and only "something" is highlighted.
+-- The server classifies each (Server/Combat/Interact.lua: talk, loot, door,
+-- open, pickup, use, climb or none); the first that is "something" is
+-- highlighted, so a decoration in front doesn't hide what's next to it.
 --
 --   !dag_lookat            one line: world point, character, object, and the
 --                          engine's own hover (picking helper) to compare
@@ -242,24 +243,40 @@ end
 -- ---------------------------------------------------------------------
 -- Update
 -- ---------------------------------------------------------------------
+-- Candidates best first: the ray's entity, the living character on the line
+-- (first when nearer), then the nearby scan. One the server calls "none" no
+-- longer hides the next (playtest 2026-10-13: decorations and an invisible
+-- helper item in front of interactive things); one still being asked about
+-- holds the answer back.
 local function findObject(eye, fwd, r)
     local reach = cfg.reach_m or 4
-    local cand, how, cd = nil, nil, nil
+    local cands = {}
     local u, d = rayEntity(eye, fwd, reach)
-    if u and u ~= Aim.SelfUuid() then cand, how, cd = u, "ray", d end
-    if r.character and r.character.dist <= reach and (not cd or r.character.dist < cd - 0.2) then
-        cand, how, cd = r.character.uuid, "cylinder", r.character.dist
+    if u and u ~= Aim.SelfUuid() then cands[1] = { uuid = u, how = "ray", dist = d } end
+    if r.character and r.character.dist <= reach and not (cands[1] and cands[1].uuid == r.character.uuid) then
+        local c = { uuid = r.character.uuid, how = "cylinder", dist = r.character.dist }
+        if not cands[1] or not cands[1].dist or c.dist < cands[1].dist - 0.2 then table.insert(cands, 1, c)
+        else cands[#cands + 1] = c end
     end
-    if not cand then
-        cand, cd = coneScan(eye, fwd, reach)
-        how = cand and "scan" or nil
+    local scanned, i = false, 1
+    while true do
+        local c = cands[i]
+        if not c and not scanned then
+            scanned = true
+            local s, sd = coneScan(eye, fwd, reach)
+            local dup = false
+            for _, o in ipairs(cands) do if o.uuid == s then dup = true end end
+            if s and not dup then cands[i] = { uuid = s, how = "scan", dist = sd }; c = cands[i] end
+        end
+        if not c then return nil end
+        local inf = M.Info(c.uuid)
+        if not inf then return { uuid = c.uuid, dist = c.dist, how = c.how, pending = true } end
+        if inf.kind ~= "none" then
+            return { uuid = c.uuid, dist = c.dist, how = c.how, kind = inf.kind, verb = inf.verb, name = inf.name,
+                     ent = M.Entity(c.uuid), point = add(eye, fwd, c.dist or 1) }
+        end
+        i = i + 1
     end
-    if not cand then return nil end
-    local i = M.Info(cand)
-    if not i then return { uuid = cand, dist = cd, how = how, pending = true } end
-    if i.kind == "none" then return nil end
-    return { uuid = cand, dist = cd, how = how, kind = i.kind, verb = i.verb, name = i.name, ent = M.Entity(cand),
-             point = add(eye, fwd, cd or 1) }
 end
 
 local function update()
