@@ -53,11 +53,14 @@ The left mouse button does everything offensive: it swings the held weapon, or c
 | Right click | Spell channelling: cancel it · otherwise block with shield or weapon · Offhand attack when dual-wielding |
 | 1 2 3 4 5 6 7 8 9 0 | Use hotbar slot (see Hotbar section); the channelled spell's own key again cancels it |
 | Mouse wheel (spell readied) | Change the cast level (upcasting) |
-| R / T | Drink the best health potion / mana potion |
-| F | Swap melee and ranged weapon sets |
-| E | Interact, talk, loot, help a downed ally |
+| T / Y | Drink the best health potion / mana potion (DECISIONS 2026-10-12) |
+| R | Reload the crossbow |
+| F | Interact, talk, loot (tap); hold to revive a downed ally (DECISIONS 2026-10-12) |
+| Q | Swap melee and ranged weapon sets (DECISIONS 2026-10-12) |
 | Space | Jump |
-| Ctrl | Sneak |
+| C | Crouch = sneak (DECISIONS 2026-10-12) |
+| V | Companion mode: Follow / Wait / Go to camp |
+| M | BG3's map (fast travel works normally) |
 | V | Companions: toggle Follow and Wait (out of combat) |
 | Esc | Game menu |
 
@@ -113,7 +116,7 @@ Each weapon family has its own chain of three swings, and the blade's path throu
 **Extra Attack and dual wielding.** Extra Attack becomes +20% swing speed per tier instead of extra hits. Dual-wielders attack with the offhand on right click and lose blocking.
 
 **Ranged weapons** (on the shared projectile system below).
-- **Bows:** hold left click to draw (draw time per bow × stat modifiers), release to fire at the crosshair. Damage and arrow speed scale with the draw; there is no shot below about 30 %. Full draw holds forever, with no sway or fatigue. Movement is about 60 % speed while drawing. A bow draw ring around the crosshair shows the draw.
+- **Bows:** hold left click to draw (**3 s base draw for every bow**, a stat will scale it later; DECISIONS 2026-10-12), release to fire along the crosshair; the arrow drops. Damage and arrow speed scale with the draw; there is no shot below about 30 %. Full draw holds forever, with no sway or fatigue. Movement is about 60 % speed while drawing. A bow draw ring around the crosshair shows the draw. BG3's own draw animation is stretched to the draw time. Enemy and companion archers draw the same way and aim for the drop.
 - **Crossbows:** click to fire, then a reload time. The bolt is flatter and faster.
 - **Thrown weapons:** the same system, with a slower throw and a higher arc. Thrown weapons and grenades go on the hotbar.
 - Arrows stick into walls and targets.

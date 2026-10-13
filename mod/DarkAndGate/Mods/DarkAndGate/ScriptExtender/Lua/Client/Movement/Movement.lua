@@ -175,6 +175,11 @@ local function tick()
     end
 end
 
+-- "walk" | "run" | "idle" | "unknown": the gait measured last (CombatMove).
+function M.Gait() return S.gait end
+-- The effective walk / run multipliers (modifiers included).
+function M.Mults() return S.walk, S.run end
+
 local function status()
     local w, r, names = effective(player())
     nat.at = -1e9

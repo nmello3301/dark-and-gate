@@ -10,7 +10,9 @@
 --   3 recover   (..._Bard_Damage_01_Recover)
 --   4 loop      (..._Bard_01_Loop, the held prepare)
 --   6 cancel    (sent with the cancel event; genome capture 2026-10-10)
---   1, 5, 7, 8 empty on the spells checked
+--   1 antic     (weapon attacks: the pull before the release, e.g. a bow's
+--               full draw; empty on the spells checked)
+--   5, 7, 8 empty on the spells checked
 -- The ids are animation MAPPING ids: each character resolves them through
 -- its own AnimationSets (rig, weapon stance), so the same ids serve custom
 -- characters. A slot the character can't resolve falls back to the
@@ -25,8 +27,8 @@ local spells = Ext.Require("data/spells.lua")
 
 local M = {}
 
-M.SLOTS = { prepare = 0, cast = 2, recover = 3, loop = 4 }
-local PHASES = { "prepare", "loop", "cast", "recover" }
+M.SLOTS = { prepare = 0, antic = 1, cast = 2, recover = 3, loop = 4 }
+local PHASES = { "prepare", "loop", "cast", "recover", "antic" }
 
 local function isGuid(x)
     return type(x) == "string" and x:match("^%x+%-%x+%-%x+%-%x+%-%x+$") ~= nil

@@ -112,6 +112,7 @@ local function start(player, target, kind)
 end
 
 local logged = {}
+local watching = {}   -- container uuid -> { peer } while its loot window is open
 function M.Register()
     Ext.RegisterNetListener(Net.Channels.InteractRequest, function(_, payload, peer)
         local ok, p = pcall(Ext.Json.Parse, payload)
@@ -128,6 +129,13 @@ function M.Register()
                 okS, how = false, string.format("too far (%.1f m)", d)
             else
                 okS, how = start(player, target, kind)
+                -- A chest / corpse opens BG3's loot window: the client frees the
+                -- cursor until it closes (Osiris Closed, Esc, or walking away).
+                if okS and (kind == "open" or kind == "loot") then
+                    watching[target] = { peer = peer }
+                    pcall(function() Ext.Net.PostMessageToUser(peer, Net.Channels.ContainerUI,
+                        Ext.Json.Stringify({ open = true, target = target, name = name })) end)
+                end
             end
             Log.Write(string.format("Interact: %s -> [F] %s %s (%s, %s m): %s", displayName(player) or tostring(player), cfg.verbs[kind] or kind,
                 tostring(name), tostring(target), d and string.format("%.1f", d) or "?", how))
@@ -149,6 +157,15 @@ function M.Register()
     end)
     Ext.Osiris.RegisterListener("EntityEvent", 2, "after", function(obj, ev)
         if ev == "DAG_Interact" or ev == "DAG_Pickup" then done(obj) end
+    end)
+    Ext.Osiris.RegisterListener("Closed", 1, "after", function(item)
+        local u = Party.Norm(item)
+        local w = watching[u]
+        if not w then return end
+        watching[u] = nil
+        pcall(function() Ext.Net.PostMessageToUser(w.peer, Net.Channels.ContainerUI,
+            Ext.Json.Stringify({ open = false, target = u, why = "closed" })) end)
+        Log.Write(string.format("Interact: %s closed -> first person back", tostring(displayName(u) or u)))
     end)
     Ext.RegisterNetListener(Net.Channels.InteractClassify, function(_, payload, peer)
         local ok, p = pcall(Ext.Json.Parse, payload)

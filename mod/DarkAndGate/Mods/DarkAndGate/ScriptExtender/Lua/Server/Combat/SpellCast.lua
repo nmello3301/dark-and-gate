@@ -77,6 +77,9 @@ local function castAtTarget(caster, spellId, target)
     })
 end
 
+-- The player's arrows cast their visual clone the same way (Server/Combat/Bows.lua).
+M.CastAtPosition = castAtPosition
+
 -- Does the caster have this spell (its spell container = what BG3 offers on
 -- its own hotbar, or its spellbook)? Checked for spells bound from the menu.
 local function knows(caster, spellId)

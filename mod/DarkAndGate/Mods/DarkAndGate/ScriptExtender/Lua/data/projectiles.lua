@@ -9,6 +9,8 @@
 -- on the character, or CreateExplosionAtPosition at the point), so BG3 keeps
 -- damage dice, saves, statuses and hit VFX. Mana and cast time are unchanged.
 
+local bows = Ext.Require("data/bows.lua")
+
 return {
     enabled = true,              -- false = old behaviour (BG3 casts the real spell at the point)
 
@@ -18,9 +20,12 @@ return {
     origin = "eye",
     origin_fwd_m  = 0.6,
     origin_down_m = 0.25,
-    -- The visual clone is cast at a point this far along the aim line, so
-    -- BG3's projectile never lands before our hit.
-    visual_far_m  = 150,
+    -- The visual clone is cast at a point visual_overshoot_m past the aim
+    -- point, at most visual_far_m along the aim line (2026-10-12: was a fixed
+    -- 150 m, often under the ground; in a fight BG3's spell camera went to
+    -- frame that point and Fireball blacked out).
+    visual_far_m  = 40,
+    visual_overshoot_m = 2.0,
     -- Our flight starts when BG3's projectile for the cast appears
     -- (OnCreate ServerProjectile, matched by caster); if none is seen
     -- within this long, it starts anyway (logged).
@@ -58,17 +63,21 @@ return {
             impact_mode = "point",
             area_m = 4.0,   -- a player-controlled character inside gets the no-hit-reaction clone
         },
-        -- Bows / crossbows (NPC and companion shots, Server/Combat/NpcCombat.lua;
-        -- the player's bows come with Pass A's bow work). impact_mode "weapon":
+        -- Bows / crossbows: the player's (Server/Combat/Bows.lua) and NPC /
+        -- companion shots (Server/Combat/NpcCombat.lua). impact_mode "weapon":
         -- the visual clone (DAG_V_Projectile_MainHandAttack, the weapon's own
         -- arrow) flies, our hit deals the ranged weapon's dice + DEX on our
-        -- damage path. Straight flight for now (gravity 0). launch_wait_s: the
-        -- draw animation comes before BG3's arrow appears.
+        -- damage path. Arrows drop (data/bows.lua gravity); each shot brings
+        -- its speed (bow family x draw). The visual clone has no draw or pull
+        -- clips (the draw is ours, before the release), so BG3's arrow comes
+        -- with the release clip; launch_wait_s is the longest we wait for it
+        -- (2026-10-12: 1.2 -> 0.4 s; BG3's arrow was never matched and every
+        -- shot left 1.2 s after the release).
         Projectile_MainHandAttack = {
-            speed_mps = "template", fallback_speed_mps = 40,
-            gravity = 0.0, drag = 0.0, radius_m = 0.08,
+            speed_mps = 60, fallback_speed_mps = 60,
+            gravity = bows.gravity_mps2, drag = 0.0, radius_m = 0.05,
             impact_mode = "weapon",
-            launch_wait_s = 2.0,
+            launch_wait_s = 0.4,
         },
     },
 

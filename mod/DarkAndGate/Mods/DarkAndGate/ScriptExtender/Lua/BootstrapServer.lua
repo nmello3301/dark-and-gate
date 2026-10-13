@@ -66,6 +66,18 @@ local Companions = Ext.Require("Server/Companions.lua")
 Companions.Register()
 Downed.SetModeSource(Companions.Mode)
 Ext.Require("Server/Travel.lua").Register()
+-- Bows and crossbows (the player's draws and shots; NpcCombat uses it for
+-- NPC archers), and the test kit: !dag_chest, !dag_goblins, !dag_god.
+Ext.Require("Server/Combat/Bows.lua").Register()
+-- WASD in real-time fights when BG3's own WASD can't move you: the server
+-- walks you toward the WASD direction (Server/Combat/CombatMove.lua).
+Ext.Require("Server/Combat/CombatMove.lua").Register()
+-- A real-time fight ends when no enemy in it is within 30 m of the party
+-- (Server/Combat/FightEnd.lua).
+Ext.Require("Server/Combat/FightEnd.lua").Register()
+-- Ground surfaces don't touch a first-person jumper in the air.
+Ext.Require("Server/Combat/AirSurfaces.lua").Register()
+Ext.Require("Server/Combat/TestKit.lua").Register()
 
 -- Animation browser + gallery (server side: preview copies).
 local AnimLib = Ext.Require("Server/AnimLib.lua")

@@ -176,6 +176,9 @@ HUD, using the developer's art ([design/hud.md](design/hud.md)):
   The vanilla HUD is hidden in POV and restored outside it, and in dialogue, menus and cutscenes. Commands: `!dag_hud on|off|vanilla`.
 - [ ] Spell cast bar (blue): fills over the cast time, shows READY when the loop starts, drains on cancel.
 - [ ] Bow draw bar (an amber arc around the crosshair): draw %, a 30 % marker and a full-draw tick (wired to the bows when they land).
+- [ ] **Bows (2026-10-12, built, not verified):** Q swaps melee / ranged; hold LMB = 3 s draw with BG3's draw clip stretched (`Client/Combat/Bow.lua`), release = arrow with drop through the projectile system (`Server/Combat/Bows.lua`, `data/bows.lua`); no shot below 30 %, damage and speed by draw; RMB cancels; 60 % speed while drawing; the ring fills. Crossbows: click + reload.
+- [ ] **NPC archers draw too** (3 s, the clip stretched on every client through the DLL's new multi-character clip rates `nclips`), facing the target, aiming at the release for lead + drop + error (`Server/Combat/NpcCombat.lua`).
+- [ ] **Test kit:** `!dag_chest` (every weapon type + shield + special arrows), `!dag_goblins [kind [n]...] [idle] | clear | list` (default scimitar, greataxe, archer, caster), `!dag_god [on|off|party|status]` (`Server/Combat/TestKit.lua`, `data/testkit.lua`).
 - [ ] **Prepare Hotbar menu** (our own; DECISIONS 2026-10-12): opens beside BG3's I / Tab panels in first person, H pins it; bind any of the character's spells to 1..0, saved per character; the server checks the caster has the spell.
 - [ ] BG3 panels usable in first person: Tab (party view) and I (inventory) open their panels; the cursor is free while a panel is open; BG3's HUD comes back with it.
 
@@ -270,6 +273,32 @@ Rework notes, one per disabled rule (full table in [rework-list.md](rework-list.
 **Gate 1.**
 - [ ] The Emerald Grove gate fight is playable start to finish in DEV-SAVE.
 - [ ] **Gate 1: combat feels tight.** Playtest notes written; go / no-go recorded in `DECISIONS.md`.
+
+### Session 2026-10-12 (evening): real-time fight fixes
+
+Verified in-game:
+- [x] Test kit: `!dag_chest` (one of every weapon + arrows), `!dag_goblins` (melee, brute, archer, caster), `!dag_god`.
+- [x] Bows and crossbows: 3 s draw with the bow raised and pulled during the charge, release on LMB up; crossbow R reload; Q swaps melee / ranged; goblin archers draw the same way.
+- [x] Chest loot window frees the cursor (F); potions on T / Y.
+- [x] WASD moves you in real-time fights at exploration speed (the DLL skips BG3's "no WASD in a combat" check); goblins run, not sprint.
+- [x] Enemy AI acts every ~2.5 s (was 6 s).
+- [x] Casting in a fight no longer moves the camera: Ray of Frost, Fireball, Thunderwave, Fog Cloud, Grease (CamGuard drops BG3's Projectile / Spell camera requests, the DLL holds first person on any foreign camera, visual clones aim 2 m past the aim point).
+
+Built, not verified yet:
+- [ ] A fight ends when no enemy has been within 30 m for 4 s (combat music stops); `!dag_goblins` moves goblins with no path to you next to you.
+- [ ] Misty Step: one first-person settle instead of a burst of ~200.
+- [ ] No more `TurnOrder.lua:255 ... TurnOrderComponent::Groups` errors in the SE console.
+- [ ] Surfaces don't touch you mid-jump (`AirSurfaces:` lines; add any surface status logged as "kept").
+
+Next (developer's list, 2026-10-12):
+1. **Spell indicators:** better targeting indicators for spells in general (next session's main task).
+2. Verify the four items above.
+3. While BG3 holds a foreign camera, mouse-look freezes on your last direction (now rare); write the stored rotation back if it shows up.
+4. The server WASD fallback (`Client/Movement/CombatMove.lua`) hasn't been needed; keep it a few sessions, then decide. It maps speed modifiers to Walk / Run only.
+5. Bow draw time scaled by a stat (`Server/Combat/Bows.lua` DrawTime is the hook).
+6. Visual clones stop at 40 m: on a long sky shot BG3's visible projectile ends there; consider a longer cap for arrows.
+7. native.log noise: Camera.cpp's legacy per-frame "Camera: cam=… NO MATCH" probe lines.
+8. `docs/se-api-notes.md` (SE v33): TurnOrder groups field name, removing `CombatTargetRequests.Requests` entries with `[i] = nil`, the camera GlobalSwitches don't stop BG3's in-fight spell camera.
 
 ### Open questions
 

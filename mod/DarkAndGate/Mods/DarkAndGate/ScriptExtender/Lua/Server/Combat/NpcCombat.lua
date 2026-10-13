@@ -18,6 +18,11 @@
 --   / projectile spell       error cone and a misjudged lead on moving targets
 --                            (arrows: weapon dice at our hit; spells: their
 --                            impact clone)
+--   bow attack            -> the draw first (data/bows.lua draw_s, like the
+--                            player; every client plays BG3's draw clip on the
+--                            archer, stretched to it: Server/Combat/Bows.lua
+--                            Anim), facing the target; aimed at the release
+--                            with lead and the arrow's drop, then the error
 --   area / cone spell     -> the target point (with the same aim error) is
 --                            committed when the cast starts; BG3 casts there
 --                            after our cast time, so you can step out of it
@@ -42,6 +47,8 @@ local Shields     = Ext.Require("Server/Combat/Shields.lua")
 local Projectiles = Ext.Require("Server/Combat/Projectiles.lua")
 local CastRequest = Ext.Require("Server/Combat/CastRequest.lua")
 local Brawl       = Ext.Require("Server/BrawlAdapter.lua")
+local Bows        = Ext.Require("Server/Combat/Bows.lua")
+local bowsCfg     = Ext.Require("data/bows.lua")
 local hitboxData  = Ext.Require("data/hitbox.lua")
 local cfg         = Ext.Require("data/ai.lua")
 local WEAPONS     = { longsword = Ext.Require("data/weapons/longsword.lua") }
@@ -263,7 +270,9 @@ end
 
 -- The aim point on `target` when the shot lands: its cylinder at aim_height,
 -- led by its velocity x (reaction + flight time) x lead_skill x jitter.
-local function aimAt(attacker, target, speed, reactMs)
+-- With gravity (arrows) the launch direction is the ballistic one that
+-- drops onto that point; the aim error goes on top.
+local function aimAt(attacker, target, speed, reactMs, gravity)
     local eye, tf = eyeOf(attacker), feet(target)
     if not eye or not tf then return nil end
     local R = cfg.ranged
@@ -275,8 +284,14 @@ local function aimAt(attacker, target, speed, reactMs)
     local skill = (R.lead_skill or 0.6) * rand(lj[1], lj[2])
     local tLead = reactMs / 1000 + dist / math.max(1, speed or 30)
     p = add(p, v, tLead * skill)
-    local dir, err = perturb(norm(sub(p, eye)), R.aim_error_deg)
-    return { eye = eye, dir = dir, dist = dist, speed = len(v), skill = skill, lead = len(v) * tLead * skill, err = err, point = p }
+    local base, arc = norm(sub(p, eye)), nil
+    if gravity and gravity > 0 then
+        local bd, ang, far = Projectiles.Ballistic(eye, p, speed or 30, gravity)
+        if bd then base, arc = bd, ang
+        elseif far then base, arc = far, 45 end   -- out of reach: the longest shot
+    end
+    local dir, err = perturb(base, R.aim_error_deg)
+    return { eye = eye, dir = dir, dist = dist, speed = len(v), skill = skill, lead = len(v) * tLead * skill, err = err, point = p, arc = arc }
 end
 
 -- ---------------------------------------------------------------------
@@ -407,7 +422,8 @@ end
 local function fireShot(a)
     if not canAct(a.attacker) then a.state, a.why = "done", "can't act any more"; return end
     local eye = eyeOf(a.attacker) or a.aim.eye
-    local ok, why = Projectiles.Launch(a.attacker, a.proj, { eye = eye, dir = a.aim.dir, targetUuid = a.target, npc = true },
+    local ok, why = Projectiles.Launch(a.attacker, a.proj, { eye = eye, dir = a.aim.dir, targetUuid = a.target, npc = true,
+        speed = a.shot and a.shot.speed, gravity = a.shot and a.shot.gravity, dmgMult = a.shot and a.shot.dmgMult },
         function(c, id, p) return CastRequest.AtPosition(c, id, p) end)
     if ok then
         if a.kind == "projectile" and Party.IsMember(a.attacker) == false then
@@ -421,23 +437,31 @@ local function fireShot(a)
 end
 
 local function shotAim(a, t)
-    local speed = Projectiles.Speed(a.proj) or 30
+    -- Weapon shots: the bow / crossbow's speed and the arrow's drop.
+    if a.kind == "ranged" then a.shot = Bows.Shot(a.attacker, 1) end
+    local speed = a.shot and a.shot.speed or Projectiles.Speed(a.proj) or 30
     local react = (cfg.ranged.reaction_ms or 350) + math.random(0, cfg.ranged.reaction_jitter_ms or 0)
-    a.aim = aimAt(a.attacker, a.target, speed, react)
+    a.aim = aimAt(a.attacker, a.target, speed, react, a.shot and a.shot.gravity or 0)
     if not a.aim then a.state, a.why = "done", "no positions"; return end
     a.aimedAt = t
     a.fireAt = t + react
     a.state = "aim"
     busy[a.attacker] = a.fireAt + 1500 + (cfg.busy_pad_ms or 300)
     pcall(function() Osi.SteerTo(a.attacker, a.target, 0) end)
-    log(string.format("AI: %s aims %s at %s: %.1f m, target moving %.1f m/s, lead %.2f m (skill x%.2f), error %.1f deg, fires in %d ms",
-        name(a.attacker), a.proj, name(a.target), a.aim.dist, a.aim.speed, a.aim.lead, a.aim.skill, a.aim.err, react))
+    log(string.format("AI: %s aims %s at %s: %.1f m, target moving %.1f m/s, lead %.2f m (skill x%.2f), error %.1f deg%s, fires in %d ms",
+        name(a.attacker), a.proj, name(a.target), a.aim.dist, a.aim.speed, a.aim.lead, a.aim.skill, a.aim.err,
+        a.aim.arc and string.format(", %.1f deg up for the drop", a.aim.arc) or "", react))
 end
 
 local function ranged(attacker, target, spell, kind, onSubmitted, onCompleted, onFailed)
     local t = now()
     local a = { kind = kind, attacker = attacker, target = target, spell = spell, proj = kind == "ranged" and ARROW_SPELL or spell,
         onCompleted = onCompleted, onFailed = onFailed, state = "wait", hits = {} }
+    -- A bow draws first (crossbows shoot as before, after the reaction delay).
+    if kind == "ranged" then
+        local fam = Bows.Family(attacker)
+        if fam and fam.kind == "bow" then a.bow = fam end
+    end
     -- A projectile spell is channelled first (our cast time), then aimed.
     a.aimAt = t + (kind == "projectile" and (cfg.cast_time_s or 0) * 1000 or 0)
     busy[attacker] = a.aimAt + 3000
@@ -488,6 +512,62 @@ local function finish(a, ok, why)
     if ok then pcall(a.onCompleted or noop, a.spell) else pcall(a.onFailed or noop, why or "failed") end
 end
 
+local function afterFire(a, t)
+    if a.fallback then
+        a.state = "done"
+        busy[a.attacker] = t + 8000
+        origUse(a.attacker, a.target, a.spell, false, noop, function(...) busy[a.attacker] = now(); pcall(a.onCompleted or noop, ...) end,
+            function(...) busy[a.attacker] = now(); pcall(a.onFailed or noop, ...) end)
+    elseif a.state ~= "done" then
+        a.state, a.doneAt = "flying", t + 600
+    end
+end
+
+-- Bow: the draw (BG3's clip on every client, Bows.Anim), facing the target.
+local function drawStart(a, t)
+    a.drawS = Bows.DrawTime(a.attacker)
+    a.releaseAt = t + a.drawS * 1000
+    a.faceAt = 0
+    a.state = "draw"
+    busy[a.attacker] = a.releaseAt + 1500 + (cfg.busy_pad_ms or 300)
+    pcall(function() if tonumber(Osi.IsWeaponUnsheathed(a.attacker)) ~= 1 then Osi.SetWeaponUnsheathed(a.attacker, 1, 1) end end)
+    Bows.Anim(a.attacker, "draw", a.drawS)
+    log(string.format("AI: %s draws its %s at %s (%.1f s draw, aims at the release)", name(a.attacker), a.bow.family, name(a.target), a.drawS))
+end
+
+local function drawTick(a, t)
+    if not canAct(a.attacker) then
+        Bows.Anim(a.attacker, "cancel", 0)
+        log("AI: " .. name(a.attacker) .. "'s draw interrupted (can't act)")
+        finish(a, false, "can't act")
+        return
+    end
+    if t >= a.faceAt then
+        a.faceAt = t + ((bowsCfg.npc and bowsCfg.npc.face_every_ms) or 400)
+        pcall(function() Osi.SteerTo(a.attacker, a.target, 0) end)
+    end
+    if t < a.releaseAt then return end
+    if not alive(a.target) then
+        Bows.Anim(a.attacker, "cancel", 0)
+        log("AI: " .. name(a.attacker) .. " lowers its bow (" .. name(a.target) .. " is down)")
+        finish(a, false, "target down")
+        return
+    end
+    a.shot = Bows.Shot(a.attacker, 1)
+    a.aim = aimAt(a.attacker, a.target, a.shot.speed, 0, a.shot.gravity)
+    if not a.aim then
+        Bows.Anim(a.attacker, "cancel", 0)
+        finish(a, false, "no positions")
+        return
+    end
+    a.aimedAt = t
+    log(string.format("AI: %s releases at %s: %.1f m, target moving %.1f m/s, lead %.2f m (skill x%.2f), %.1f deg up for the drop, error %.1f deg",
+        name(a.attacker), name(a.target), a.aim.dist, a.aim.speed, a.aim.lead, a.aim.skill, a.aim.arc or 0, a.aim.err))
+    fireShot(a)
+    Bows.Anim(a.attacker, "release", 0)
+    afterFire(a, t)
+end
+
 local function step(a, t)
     if a.kind == "melee" then
         if a.state == "react" and t >= a.startAt then
@@ -502,18 +582,12 @@ local function step(a, t)
     elseif a.kind == "ranged" or a.kind == "projectile" then
         if a.state == "wait" and t >= a.aimAt then
             if not canAct(a.attacker) then finish(a, false, "can't act"); return end
-            shotAim(a, t)
+            if a.bow then drawStart(a, t) else shotAim(a, t) end
         end
+        if a.state == "draw" then drawTick(a, t) end
         if a.state == "aim" and t >= a.fireAt then
             fireShot(a)
-            if a.fallback then
-                a.state = "done"
-                busy[a.attacker] = t + 8000
-                origUse(a.attacker, a.target, a.spell, false, noop, function(...) busy[a.attacker] = now(); pcall(a.onCompleted or noop, ...) end,
-                    function(...) busy[a.attacker] = now(); pcall(a.onFailed or noop, ...) end)
-            elseif a.state ~= "done" then
-                a.state, a.doneAt = "flying", t + 600
-            end
+            afterFire(a, t)
         end
         if a.state == "flying" and t >= a.doneAt then finish(a, true) end
     elseif a.kind == "area" then
@@ -562,13 +636,16 @@ end
 local function arrowHit(p, target, pos, zone, shielded)
     if not alive(target) then return "target already down" end
     local dmg, w = weaponDamage(p.caster, true)
+    -- The draw (Server/Combat/Bows.lua Shot): x1 at full draw.
+    if p.dmgMult and p.dmgMult ~= 1 then dmg = math.max(1, math.floor(dmg * p.dmgMult + 0.5)) end
     local base = dmg
     local mult = Hitbox.ZoneMult(zone or "torso")
     dmg = math.max(1, math.floor(dmg * mult + 0.5))
     local zoned = dmg
     if shielded then dmg = Shields.Reduce(dmg) end
     local dealt = Damage.Apply(target, dmg, w.type, p.caster, "arrow")
-    return string.format("%d %s to %s (%s %s%+d = %d, %s x%.1f%s)", dealt, w.type, name(target), w.name, w.dice, w.mod, base, zone or "torso",
+    return string.format("%d %s to %s (%s %s%+d = %d%s, %s x%.1f%s)", dealt, w.type, name(target), w.name, w.dice, w.mod, base,
+        (p.dmgMult and p.dmgMult ~= 1) and string.format(" after the draw's x%.2f", p.dmgMult) or "", zone or "torso",
         mult, shielded and string.format(", SHIELD %d -> %d", zoned, dmg) or "")
 end
 

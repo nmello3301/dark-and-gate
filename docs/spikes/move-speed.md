@@ -107,6 +107,14 @@ Lever **#1** is in `tools/native/src/Hooks/MoveSpeed.cpp`: the call at the templ
 
 Lua (`Client/Movement/Movement.lua`) sends the effective multipliers (`move_walk`, `move_run` in `native-pov.txt`). The DLL's status line reports `move=`, `tmplStroll=`, `tmplRun=`, `walkT=`, `outStroll=`, `outRun=`, `moveCalls=`. Locomotion sync sets the character's play rate to the current gait's multiplier through the PlayAnimation-node hook; `rateHits=` on the status line shows whether locomotion clips go through that hook at all.
 
+## 7. WASD in a fight (2026-10-12, static RE)
+
+Playtest: in a real-time fight WASD did nothing (clicks walked, jumps moved: the jump is our own MSFalling). BG3WASD's auto-toggle is off in the developer's config, so the input reached the engine; the engine refused it.
+
+- `0x14425ec30` ("should WASD run?", polled every frame by the WASD update `0x14425f2c0`, which only continues when it says yes) reads, for the controlled character, `0x140783e80(world, entity)`: a 0x28-byte component whose first field is an entity handle, the combat participant (`CombatHandle` first). **If that handle is not null it returns false** (`jnz` at `0x14425eeb2`, pattern `4D 85 E4 74 ?? 48 B9 00 00 00 00 00 00 C0 FF 49 39 0C 24 0F 85 ?? ?? ?? ?? 49 BC 00 00 00 00 00 00 C0 FF 48 85 DB`, unique, jnz at +0x13). Right after it, a second component (`0x140b23d90`) with two flags (`0x140a923b0`, `0x140f0ec30`) also returns false: read as force turn-based (Brawl's pause), left alone.
+- Then the controller-mode byte (the check BG3WASD NOPs), the KB-only path (a per-player entity map and `0x1442592c0`), and finally the start (`0x141cab8e0`), which refuses when `CanMove.Flags & 1` is clear (`0x141c6dab0`) and resolves the speed (`0x141bf6ac0`: template speeds, SpeedLimit clamp, `+0x148` multiplier; nothing combat-specific).
+- **Built:** `tools/native/src/Hooks/CombatWasd.cpp` NOPs that one `jnz` while first person is on (Lua `combat_wasd`), restoring it otherwise; one interlocked 8-byte store. Unverified in-game: whether CanMove stays set in Brawl's fights and whether the server accepts client WASD moves in a combat (the real jump's client falls were accepted). `Client/Movement/CombatMove.lua` falls back to server moves if WASD still doesn't move you.
+
 ## 5. Open questions (in-game)
 
 1. Do levers #1/#3 actually change ground speed? Specifically, does the `+0x44` consumer or the integrator clamp to Run, Sprint or `CanMove.SpeedLimit` (in combat, encumbered)? Test with factor 1.5 and 2.0 and log Δpos/dt.

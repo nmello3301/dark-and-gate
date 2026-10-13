@@ -60,6 +60,15 @@ local S = {
     -- Per-clip play rates (AnimRate SetClipRates): "id:rate,id:rate" or "-".
     clip_inst = "0",
     clip_rates = "-",
+    -- Per-clip play rates on other characters (AnimRate SetNpcClipRates,
+    -- Client/Combat/Bow.lua: NPC / co-op archers' draws): "INST:ID:RATE|..." or "-".
+    nclips = "-",
+    -- 1 = the DLL clears the camera's combat mode flag while first person is on
+    -- (BG3's combat camera would follow casters and give WASD to the camera).
+    nocombatcam = 1,
+    -- 1 = the DLL skips BG3's "no WASD while in a combat" check while first
+    -- person is on (CombatWasd.cpp); !dag_combat_wasd on|off.
+    combat_wasd = 1,
     -- Jump: also lift the meshes' render objects (what is drawn), not only
     -- the root Visual. !dag_lift_objects off for A/B.
     lift_objects = 1,
@@ -275,8 +284,11 @@ local function writeState()
     end
     -- A same-level teleport (waypoint, portal) changes no game state: a jump
     -- of more than TELEPORT_M between two writes counts as one.
+    -- (lastPos first: Settle writes the state again, which used to see the same
+    -- jump and recurse ~200 times on a Misty Step, playtest 2026-10-12.)
     if e and settle.lastPos and not settle.loading then
         local dx, dy, dz = x - settle.lastPos[1], y - settle.lastPos[2], z - settle.lastPos[3]
+        settle.lastPos = { x, y, z }
         if dx * dx + dy * dy + dz * dz > TELEPORT_M * TELEPORT_M then M.Settle("teleport", SETTLE_TP_MS) end
     end
     if e then settle.lastPos = { x, y, z } end
@@ -288,10 +300,10 @@ local function writeState()
     if S.on and USE_BONE_ANCHOR then refreshCache(e, now) end
 
     local line = string.format(
-        "orbit=%d orbit_seq=%d orbit_dist=%.2f orbit_up=%.2f orbit_pmin=%.1f orbit_pmax=%.1f orbit_spin=%d orbit_tilt=%d orbit_rate=%.1f orbit_tilt_rate=%.1f orbit_vis=%s orbit_x=%.3f orbit_y=%.3f orbit_z=%.3f crouch=%d level_seq=%d on=%d active=%d menu=%d anim_inst=%s anim_rate=%.3f clip_inst=%s clip_rates=%s rec_inst=%s lift_objects=%d jump_mode=%d genome_capture=%d strafe_sign=%d rj_land_speed=%.2f rj_wall_h=%.2f head_smooth=%.2f move_walk=%.3f move_run=%.3f visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
+        "orbit=%d orbit_seq=%d orbit_dist=%.2f orbit_up=%.2f orbit_pmin=%.1f orbit_pmax=%.1f orbit_spin=%d orbit_tilt=%d orbit_rate=%.1f orbit_tilt_rate=%.1f orbit_vis=%s orbit_x=%.3f orbit_y=%.3f orbit_z=%.3f crouch=%d level_seq=%d on=%d active=%d menu=%d anim_inst=%s anim_rate=%.3f clip_inst=%s clip_rates=%s nclips=%s nocombatcam=%d combat_wasd=%d rec_inst=%s lift_objects=%d jump_mode=%d genome_capture=%d strafe_sign=%d rj_land_speed=%.2f rj_wall_h=%.2f head_smooth=%.2f move_walk=%.3f move_run=%.3f visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
         S.orbit, S.orbit_seq, S.orbit_dist, S.orbit_up, S.orbit_pmin, S.orbit_pmax, S.orbit_spin, S.orbit_tilt, S.orbit_rate,
         S.orbit_tilt_rate, S.orbit_vis, S.orbit_x, S.orbit_y, S.orbit_z, S.crouch, S.level_seq,
-        S.on and 1 or 0, active and 1 or 0, S.menu and 1 or 0, S.anim_inst, S.anim_rate, S.clip_inst, S.clip_rates, S.rec_inst, S.lift_objects, S.jump_mode, S.genome_capture, S.strafe_sign, S.rj_land_speed, S.rj_wall_h, S.head_smooth, S.move_walk, S.move_run, (S.on and cache.visual) or "0", S.anchor, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
+        S.on and 1 or 0, active and 1 or 0, S.menu and 1 or 0, S.anim_inst, S.anim_rate, S.clip_inst, S.clip_rates, S.nclips, S.nocombatcam, S.combat_wasd, S.rec_inst, S.lift_objects, S.jump_mode, S.genome_capture, S.strafe_sign, S.rj_land_speed, S.rj_wall_h, S.head_smooth, S.move_walk, S.move_run, (S.on and cache.visual) or "0", S.anchor, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
         S.jump_seq, math.floor(S.jump_ms + 0.5), S.jump_h, S.jump_k,
         S.dump, cache.sock or -1, cache.skel or 0, x, y, z,
         (S.on and #cache.meshes > 0) and table.concat(cache.meshes, ",") or "0",
@@ -414,6 +426,37 @@ function M.SetClipRates(inst, rates)
     lastWrite = 0
     pcall(writeState)
 end
+
+-- Per-clip play rates on several characters: list of { inst = hex, id = mapping id,
+-- rate }; at most 16 entries reach the DLL. nil / {} = none.
+function M.SetNpcClipRates(list)
+    local parts = {}
+    for _, e in ipairs(list or {}) do
+        if e.inst and e.id and tonumber(e.rate) and #parts < 16 then
+            parts[#parts + 1] = string.format("%s:%s:%.3f", e.inst, e.id, e.rate)
+        end
+    end
+    table.sort(parts)
+    local spec = #parts > 0 and table.concat(parts, "|") or "-"
+    if spec == S.nclips then return end
+    S.nclips = spec
+    lastWrite = 0
+    pcall(writeState)
+end
+
+function M.SetNoCombatCam(on)
+    S.nocombatcam = on and 1 or 0
+    lastWrite = 0
+    pcall(writeState)
+end
+function M.NoCombatCam() return S.nocombatcam == 1 end
+
+function M.SetCombatWasd(on)
+    S.combat_wasd = on and 1 or 0
+    lastWrite = 0
+    pcall(writeState)
+end
+function M.CombatWasd() return S.combat_wasd == 1 end
 
 -- Animation recorder (hex instance address or nil = off).
 function M.SetRecInst(inst)

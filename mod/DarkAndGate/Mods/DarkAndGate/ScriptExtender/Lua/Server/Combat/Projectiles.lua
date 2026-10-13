@@ -32,6 +32,10 @@
 --   * A player-controlled target gets the DAG_IP_ impact clone (same spell,
 --     HitAnimationType None: no hit reaction), also when one stands inside a
 --     point impact's area.
+-- Bows (2026-10-12, data/bows.lua): a launch can carry its own speed_mps,
+-- gravity, launch_wait_s and dmgMult / draw (claim fields); arrows drop.
+-- Ballistic(origin, point, speed, g) is the launch direction that lands on
+-- point (NPC archers aim with it).
 
 local Log       = Ext.Require("Shared/Log.lua")
 local Net       = Ext.Require("Shared/Net.lua")
@@ -164,6 +168,24 @@ function M.Speed(spell)
     return (speed and speed > 0) and speed or (def.fallback_speed_mps or 25)
 end
 
+-- The low-arc launch direction from `o` that passes through `p` at `speed`
+-- under gravity `g`. Returns dir, angle (deg); nil when `p` is out of reach
+-- (then the 45 degree shot toward it is returned as the third value).
+function M.Ballistic(o, p, speed, g)
+    local d = sub(p, o)
+    local dh = math.sqrt(d[1] * d[1] + d[3] * d[3])
+    if dh < 1e-3 or not g or g <= 0 then return norm(d), nil end
+    local v2 = speed * speed
+    local disc = v2 * v2 - g * (g * dh * dh + 2 * d[2] * v2)
+    local hx, hz = d[1] / dh, d[3] / dh
+    if disc < 0 then
+        local c = math.sqrt(0.5)
+        return nil, nil, { hx * c, c, hz * c }
+    end
+    local th = math.atan((v2 - math.sqrt(disc)) / (g * dh))
+    return { hx * math.cos(th), math.sin(th), hz * math.cos(th) }, math.deg(th)
+end
+
 function M.Launch(caster, spell, claim, castAt)
     local def = data.spells[spell]
     if data.enabled == false or not def then return false, "not a projectile spell" end
@@ -186,18 +208,30 @@ function M.Launch(caster, spell, claim, castAt)
     -- still converges on what the player aimed at.
     if claim.hitPoint then dir = norm(sub(v3(claim.hitPoint), origin)) end
     local tsp = templateSpeed(spell)
-    local speed = (def.speed_mps == "template" and tsp.speed) or tonumber(def.speed_mps) or def.fallback_speed_mps or 25
+    local speed = tonumber(claim.speed) or (def.speed_mps == "template" and tsp.speed) or tonumber(def.speed_mps) or def.fallback_speed_mps or 25
     if speed <= 0 then speed = def.fallback_speed_mps or 25 end
+    local gravity = tonumber(claim.gravity) or def.gravity or 0
 
-    local far = add(origin, dir, data.visual_far_m or 150)
+    -- The visual clone flies to just past what you aimed at, at most
+    -- visual_far_m (playtest 2026-10-12: a clone target 150 m out, often under
+    -- the ground, sent BG3's in-fight spell camera halfway there at the cast:
+    -- Fireball blacked out in fights).
+    local farD = data.visual_far_m or 40
+    if claim.hitPoint then
+        local h = sub(v3(claim.hitPoint), origin)
+        farD = math.min(farD, math.sqrt(h[1] * h[1] + h[2] * h[2] + h[3] * h[3]) + (data.visual_overshoot_m or 2))
+    end
+    local far = add(origin, dir, farD)
     local okV = castAt(caster, PSpells.VisualId(spell), { x = far[1], y = far[2], z = far[3] })
     local id = nextId; nextId = nextId + 1
     pending[caster] = {
-        id = id, caster = caster, spell = spell, def = def, origin = origin, dir = dir, speed = speed,
+        id = id, caster = caster, spell = spell, def = def, origin = origin, dir = dir, speed = speed, gravity = gravity,
         accel = tsp.accel or 0, at = now(), target = claim.targetUuid, visualCast = okV, npc = claim.npc,
+        dmgMult = tonumber(claim.dmgMult), draw = tonumber(claim.draw), launchWait = tonumber(claim.launch_wait_s),
     }
-    Log.Write(string.format("PROJ #%d launch %s: origin %s dir (%.3f,%.3f,%.3f) speed %.1f m/s accel %.1f r %.2f m, visual clone %s %s",
-        id, spell, fmt(origin), dir[1], dir[2], dir[3], speed, tsp.accel or 0, def.radius_m or 0.15,
+    Log.Write(string.format("PROJ #%d launch %s: origin %s dir (%.3f,%.3f,%.3f) speed %.1f m/s accel %.1f gravity %.2f r %.2f m%s, visual clone %s %s",
+        id, spell, fmt(origin), dir[1], dir[2], dir[3], speed, tsp.accel or 0, gravity, def.radius_m or 0.15,
+        claim.draw and string.format(", draw %.0f %% (damage x%.2f)", claim.draw * 100, tonumber(claim.dmgMult) or 1) or "",
         PSpells.VisualId(spell), okV and ("cast at " .. fmt(far)) or "FAILED to cast"))
     return true
 end
@@ -213,7 +247,7 @@ local function start(p, projEnt, why)
     active[p.id] = p
     broadcast(Net.Channels.ProjectileLaunch, {
         id = p.id, caster = p.caster, spell = p.spell, origin = p.origin, vel = p.vel,
-        gravity = p.def.gravity or 0, drag = p.def.drag or 0, accel = p.accel or 0,
+        gravity = p.gravity or p.def.gravity or 0, drag = p.def.drag or 0, accel = p.accel or 0,
         radius = p.def.radius_m or 0.15, maxT = (data.max_range_m or 120) / math.max(1, p.speed),
     })
     Log.Write(string.format("PROJ #%d flight starts (%s)%s", p.id, why,
@@ -470,7 +504,7 @@ local function impact(p, pos, targetUuid, what, cyl, shielded)
 end
 
 local function stepOne(p, dt)
-    local g = p.def.gravity or 0
+    local g = p.gravity or p.def.gravity or 0
     local drag = p.def.drag or 0
     local a = p.pos
     local v = p.vel
@@ -503,7 +537,7 @@ local function tick()
     if not okP and not M.pollErrLogged then M.pollErrLogged = true; Log.Write("Projectiles: poll error " .. tostring(errP)) end
     local t = now()
     for caster, p in pairs(pending) do
-        local wait = p.def.launch_wait_s or data.launch_wait_s or 1.2
+        local wait = p.launchWait or p.def.launch_wait_s or data.launch_wait_s or 1.2
         if t - p.at > wait * 1000 then
             start(p, nil, string.format("no BG3 projectile seen within %.1f s", wait))
         end

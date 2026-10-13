@@ -32,6 +32,7 @@
 #include "GenomeCapture.h"
 #include "MoveSpeed.h"
 #include "RealJump.h"
+#include "CombatWasd.h"
 
 namespace dag::pov {
 
@@ -162,6 +163,16 @@ struct LuaState {
     uintptr_t recInst  = 0;    // instance to record animations of (AnimRate.cpp)
     uintptr_t clipInst = 0;    // per-clip rates target (AnimRate SetClipRates)
     char      clipRates[400] = "";
+    // Per-clip rates on other characters (AnimRate SetNpcClipRates, bows):
+    // "INST:ID:RATE|..." or empty.
+    char      npcClips[1024] = "";
+    // Clear the camera's combat mode flag while first person commits
+    // (Lua nocombatcam; BG3's combat camera follows casters, BG3WASD gives
+    // WASD to the camera in combat).
+    bool      noCombatCam = true;
+    // Skip BG3's "no WASD while in a combat" check (CombatWasd.cpp) while
+    // first person is on (Lua combat_wasd; our fights are real time).
+    bool      combatWasd = true;
     float     smooth   = 0.f;  // head-bone smoothing 0..0.9 (0 = raw pose)
     float     moveWalk = 1.f;  // WASD speed multipliers (MoveSpeed.cpp)
     float     moveRun  = 1.f;
@@ -277,6 +288,12 @@ void PollLuaFile()
         s.clipRates[n] = 0;
         if (std::strcmp(s.clipRates, "-") == 0) s.clipRates[0] = 0;
     }
+    if (const char* v = FindVal(buf, "nclips")) {
+        size_t n = 0;
+        while (v[n] && v[n] != ' ' && v[n] != '\n' && v[n] != '\r' && n + 1 < sizeof(s.npcClips)) { s.npcClips[n] = v[n]; ++n; }
+        s.npcClips[n] = 0;
+        if (std::strcmp(s.npcClips, "-") == 0) s.npcClips[0] = 0;
+    }
     if (const char* v = FindVal(buf, "rec_inst")) {
         s.recInst = static_cast<uintptr_t>(std::strtoull(v, nullptr, 16));
     }
@@ -293,6 +310,8 @@ void PollLuaFile()
     s.wallH = ValF(buf, "rj_wall_h", 1.3f);
     s.menu = ValI(buf, "menu", 0) != 0;
     s.crouch = ValI(buf, "crouch", 0) != 0;
+    s.noCombatCam = ValI(buf, "nocombatcam", 1) != 0;
+    s.combatWasd = ValI(buf, "combat_wasd", 1) != 0;
     s.levelSeq = ValI(buf, "level_seq", g_lua.levelSeq);
     s.orbit = ValI(buf, "orbit", 0) != 0;
     s.orbitSeq = ValI(buf, "orbit_seq", 0);
@@ -1077,6 +1096,27 @@ void UpdateMouselookState()
 // ---------------------------------------------------------------------
 void*    g_gameplayCam = nullptr;
 uint32_t g_rotOff      = 0x70;
+
+// BG3 sometimes renders through a camera whose pivot is not on the
+// character: during your own projectile cast it swaps in a camera that
+// rides the projectile (playtest 2026-10-12: pivot 75 m away on the clone's
+// flight line, under the ground -> black screen, and the view turned with
+// it). A camera whose pivot is more than kForeignM from the character (Lua's
+// root) is "foreign": first person keeps the head (checked against the
+// character, not that pivot) and the last view direction of a camera that
+// was on you, until the pivot comes back.
+void* g_mainScene = nullptr;   // the render view the gameplay camera commits to
+constexpr float kForeignM = 4.0f;
+constexpr float kForeignUpM = 12.0f;
+constexpr float kPivotAboveFeet = 1.9f;   // the gameplay pivot's height over the feet (PhaseProbe)
+struct Foreign {
+    bool  on = false;
+    void* cam = nullptr;
+    float goodRot[3] = { 0.f, 0.f, 1.f };
+    bool  goodRotOk = false;
+    int   frames = 0;
+    int   logs = 0;
+} g_foreign;
 int      g_rotVotes70  = 0;
 int      g_rotVotes74  = 0;
 bool     g_rotLogged   = false;
@@ -1130,7 +1170,7 @@ void WriteStatus()
         "headName=%s headBone=%d headCal=%d eyeUpAuto=%.3f lift=%.3f liftMode=%s jumpSeq=%d animRate=%.2f rateHook=%s rateHits=%ld "
         "anchor=%s delta=%.4f deltaMax=%.4f jerk=%.4f smooth=%.2f "
         "move=%s walkX=%.2f runX=%.2f tmplStroll=%.2f tmplRun=%.2f walkT=%.3f outStroll=%.2f outRun=%.2f moveCalls=%ld "
-        "orbit=%d crouch=%d levelSeq=%d t=%u\n",
+        "orbit=%d crouch=%d levelSeq=%d cwasd=%s foreignCam=%d t=%u\n",
         g_lua.on ? 1 : 0, g_lua.active ? 1 : 0, g_status.applied ? 1 : 0, g_status.src,
         g_rotOff, g_rotLogged ? 1 : 0, g_sel.valid ? 1 : 0, g_sel.bone,
         g_sel.fromSocket ? "(socket)" : "(top)", g_sel.meshIdx, g_sel.poseSlot + 1, g_sel.layout,
@@ -1147,6 +1187,7 @@ void WriteStatus()
         g_lua.anchor ? "head" : "pivot", g_cam.lastAvg, g_cam.lastMax, g_cam.lastJerk, g_lua.smooth,
         dag::movespeed::State(), g_lua.moveWalk, g_lua.moveRun, ms0, mr0, mt0, mso, mro, mc,
         g_lua.orbit ? 1 : 0, g_lua.crouch ? 1 : 0, g_lua.levelSeq,
+        dag::combatwasd::State(), g_foreign.on ? 1 : 0,
         (unsigned)now);
     WriteSmallFile(L"native-pov-status.txt", line, len);
 }
@@ -1160,6 +1201,11 @@ void OnFrame(void* gameplayCam)
 {
     dag::watchdog::Frame();
     dag::watchdog::Stage("OnFrame");
+    static int s_camSwaps = 0;
+    if (gameplayCam && g_gameplayCam && gameplayCam != g_gameplayCam && s_camSwaps < 40) {
+        ++s_camSwaps;
+        dag::log::Writef("POV: BG3's gameplay camera object %p -> %p (%d)", g_gameplayCam, gameplayCam, s_camSwaps);
+    }
     g_gameplayCam = gameplayCam;
     PollLuaFile();
     TryInstallFilter();
@@ -1225,7 +1271,9 @@ void OnFrame(void* gameplayCam)
     dag::animrate::Record(g_lua.recInst);
     dag::genomecapture::SetCapture(g_lua.genomeCapture != 0);
     dag::animrate::SetClipRates(g_lua.clipInst, g_lua.clipRates);
+    dag::animrate::SetNpcClipRates(g_lua.npcClips);
     dag::movespeed::Set(g_lua.moveWalk, g_lua.moveRun);
+    dag::combatwasd::SetEnabled(g_lua.on && g_lua.combatWasd);
     if (!g_lua.on) g_status.applied = false;
     dag::watchdog::Stage("WriteStatus");
     WriteStatus();
@@ -1237,9 +1285,28 @@ namespace {
 // The commit itself: every field the engine might build its view from gets
 // the same look-at point P, the original commit runs with our eye, and the
 // fields are restored afterwards (only if still ours).
+// cameraModeFlags (u32 at +0xA8, the layout BG3WASD's Structs/Camera.hpp
+// documents; cameraPos at +0xC4 matches ours): bit 0 = combat. In a
+// real-time fight it makes BG3 swing the view to casters and BG3WASD hands
+// WASD to the camera, so first person clears it on every commit.
+void ClearCombatMode(uint8_t* cam)
+{
+    static bool logged = false;
+    uint32_t flags = 0;
+    if (!dag::safemem::ReadBytes(cam + 0xA8, &flags, sizeof(flags))) return;
+    if (!(flags & 1u)) return;
+    flags &= ~1u;
+    SafeWrite(cam + 0xA8, &flags, sizeof(flags));
+    if (!logged) {
+        logged = true;
+        dag::log::Writef("POV: camera combat mode cleared on %p (no combat camera; WASD stays character movement)", static_cast<void*>(cam));
+    }
+}
+
 void CommitWith(void* self, void* slotToken, float* outPos, uint8_t* cam, CommitFn original,
                 const float eye[3], const float P[3])
 {
+    if (g_lua.noCombatCam) ClearCombatMode(cam);
     static const uint32_t kFields[] = { 0x18, 0x24, 0x3C, 0x48, 0xC4 };
     constexpr int kN = static_cast<int>(sizeof(kFields) / sizeof(kFields[0]));
     float saved[kN][3];
@@ -1341,7 +1408,12 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
 {
     if (!original || !newPos || !outPos) return false;
     uint8_t* cam = reinterpret_cast<uint8_t*>(outPos) - 0x48;
-    if (!g_gameplayCam || cam != g_gameplayCam) return false;
+    // Another camera committed on the main view while first person runs:
+    // BG3's attack / spell cameras in a fight (playtest 2026-10-12: Ray of
+    // Frost zoomed to the target, Fireball went black) are not always the
+    // gameplay camera slot. They get the first-person view too (as foreign).
+    const bool slotCam = g_gameplayCam && cam == g_gameplayCam;
+    if (!slotCam && (!g_lua.on || !g_lua.active || g_lua.orbit || !g_mainScene || self != g_mainScene)) return false;
 
     // Learn the rotation offset from the engine's own eye while it is
     // still the engine's (POV off, zoomed out).
@@ -1353,10 +1425,62 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
     }
 
     float rot[3];
-    if (!ReadVec(cam, g_rotOff, rot)) return false;
-    const float rl = Len3(rot);
-    if (rl < 0.5f || rl > 1.5f) return false;
-    rot[0] /= rl; rot[1] /= rl; rot[2] /= rl;
+    bool badRot = !ReadVec(cam, g_rotOff, rot);
+    const float rl = badRot ? 0.f : Len3(rot);
+    if (rl < 0.5f || rl > 1.5f) badRot = true;
+    if (badRot) {
+        if (!g_foreign.goodRotOk) return false;
+        std::memcpy(rot, g_foreign.goodRot, sizeof(rot));
+    } else {
+        rot[0] /= rl; rot[1] /= rl; rot[2] /= rl;
+    }
+
+    float pivot[3];
+    bool pivotOk = ReadVec(cam, 0x24, pivot);
+    // The gameplay camera always has a camera position; BG3's attack and
+    // projectile cameras had none (0,0,0) in the playtest log.
+    float camPos[3] = { 1.f, 1.f, 1.f };
+    const bool noPos = ReadVec(cam, 0xC4, camPos) && camPos[0] == 0.f && camPos[1] == 0.f && camPos[2] == 0.f;
+
+    // Foreign camera (see Foreign above): its pivot is far from the character.
+    const bool rootOk = Finite3(g_lua.root) && (g_lua.root[0] != 0.f || g_lua.root[2] != 0.f);
+    bool foreign = false;
+    float farM = 0.f;
+    if (pivotOk && rootOk && !g_lua.orbit) {   // the downed orbit may watch someone else
+        const float dx = pivot[0] - g_lua.root[0], dz = pivot[2] - g_lua.root[2];
+        const float dy = pivot[1] - (g_lua.root[1] + kPivotAboveFeet);
+        farM = std::sqrt(dx * dx + dz * dz);
+        foreign = farM > kForeignM || std::fabs(dy) > kForeignUpM;   // tall test jumps stay ours
+        if (foreign && farM < std::fabs(dy)) farM = std::fabs(dy);
+    }
+    if (!g_lua.orbit && (noPos || badRot)) foreign = true;
+    if (slotCam && !foreign) g_mainScene = self;
+    if (foreign != g_foreign.on || (foreign && cam != g_foreign.cam)) {
+        if (g_foreign.logs < 60) {
+            ++g_foreign.logs;
+            if (foreign)
+                dag::log::Writef("POV: camera %p (%s) pivot (%.1f,%.1f,%.1f) %.1f m from you%s%s -> first person keeps your head and your last view direction%s",
+                                 static_cast<void*>(cam), slotCam ? "gameplay slot" : "other camera on the main view",
+                                 pivot[0], pivot[1], pivot[2], farM, noPos ? ", no camera position" : "",
+                                 badRot ? ", no rotation" : "", g_foreign.goodRotOk ? "" : " (none yet: its own)");
+            else
+                dag::log::Writef("POV: camera %p is on you again after %d frame(s)", static_cast<void*>(cam), g_foreign.frames);
+        }
+        g_foreign.on = foreign;
+        g_foreign.cam = cam;
+        g_foreign.frames = 0;
+    }
+    if (foreign) {
+        ++g_foreign.frames;
+        if (g_foreign.goodRotOk) std::memcpy(rot, g_foreign.goodRot, sizeof(rot));
+        // Every check below compares against this point: the character's
+        // own (Lua root, raised to where the gameplay pivot sits).
+        pivot[0] = g_lua.root[0]; pivot[1] = g_lua.root[1] + kPivotAboveFeet; pivot[2] = g_lua.root[2];
+        pivotOk = true;
+    } else {
+        std::memcpy(g_foreign.goodRot, rot, sizeof(rot));
+        g_foreign.goodRotOk = true;
+    }
 
     if (g_lua.orbit) return OrbitCommit(self, slotToken, outPos, cam, original, rot);
 
@@ -1381,9 +1505,6 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
     const char* src = "pivot";
     bool have = false;
 
-    float pivot[3];
-    const bool pivotOk = ReadVec(cam, 0x24, pivot);
-
     // The body lift (VisualLift) moves the mesh, so a head bone read from
     // it already carries the lift; the pivot (TransformComponent) never does.
     const bool bodyLift = dag::visuallift::BodyLiftActive();
@@ -1399,7 +1520,7 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
         } else if (!g_head.calibrated) {
             // Learn the eye height above the head bone from the signed-off
             // pivot eye, at rest (no jump), then switch to the bone.
-            if (pivotOk && !g_jump.active && !g_lua.crouch) {
+            if (pivotOk && !foreign && !g_jump.active && !g_lua.crouch) {
                 const float bodyY = head[1] - (bodyLift ? lift : 0.f);
                 g_head.calSum += static_cast<double>(pivot[1] + g_lua.pivotUp - bodyY);
                 if (++g_head.calN >= 30) {

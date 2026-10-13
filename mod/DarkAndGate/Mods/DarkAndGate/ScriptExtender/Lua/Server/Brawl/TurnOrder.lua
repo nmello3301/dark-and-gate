@@ -1,4 +1,25 @@
 local debugPrint = Utils.debugPrint
+
+-- DAG: SE v33's turn order component has no Groups / Groups2 ("Property does
+-- not exist: eoc::combat::TurnOrderComponent::Groups", playtest 2026-10-12);
+-- the names this build uses are looked up once (CurrentGroups / NextRoundGroups
+-- in SE's headers, Groups / Participants in older ones).
+local GROUP_KEYS = { cur = { "CurrentGroups", "Groups", "Participants" }, nxt = { "NextRoundGroups", "Groups2", "Participants2" } }
+local groupKey, groupKeyLogged = {}, false
+local function toKey(to, which)
+    if groupKey[which] then return groupKey[which] end
+    for _, k in ipairs(GROUP_KEYS[which]) do
+        local ok, v = pcall(function() return to[k] end)
+        if ok and v ~= nil then groupKey[which] = k; return k end
+    end
+    if not groupKeyLogged then
+        groupKeyLogged = true
+        Ext.Utils.Print("DAG Brawl TurnOrder: no group list on the turn order component (tried " .. table.concat(GROUP_KEYS[which], ", ") .. ")")
+    end
+    return nil
+end
+local function getGroups(to, which) local k = to and toKey(to, which); return k and to[k] or nil end
+local function setGroups(to, which, v) local k = to and toKey(to, which); if k then to[k] = v end end
 local debugDump = Utils.debugDump
 
 local function getInitiativeRoll(uuid)
@@ -194,9 +215,9 @@ end
 
 local function showTurnOrderGroups()
     local combatEntity = Utils.getCombatEntity()
-    if combatEntity and combatEntity.TurnOrder and combatEntity.TurnOrder.Groups then
+    if combatEntity and combatEntity.TurnOrder and getGroups(combatEntity.TurnOrder, "cur") then
         print("currentCombatRound =", getCurrentCombatRound())
-        for i, group in ipairs(combatEntity.TurnOrder.Groups) do
+        for i, group in ipairs(getGroups(combatEntity.TurnOrder, "cur")) do
             print(formatGroupStr(i, group))
         end
     end
@@ -204,9 +225,9 @@ end
 
 local function showTurnOrderGroups2()
     local combatEntity = Utils.getCombatEntity()
-    if combatEntity and combatEntity.TurnOrder and combatEntity.TurnOrder.Groups2 then
+    if combatEntity and combatEntity.TurnOrder and getGroups(combatEntity.TurnOrder, "nxt") then
         print("currentCombatRound =", getCurrentCombatRound())
-        for i, group in ipairs(combatEntity.TurnOrder.Groups2) do
+        for i, group in ipairs(getGroups(combatEntity.TurnOrder, "nxt")) do
             print(formatGroupStr(i, group))
         end
     end
@@ -252,8 +273,8 @@ end
 
 local function reorderByInitiativeRoll(doNotReplicate)
     local combatEntity = Utils.getCombatEntity()
-    if combatEntity and combatEntity.TurnOrder and combatEntity.TurnOrder.Groups then
-        local groups = combatEntity.TurnOrder.Groups
+    if combatEntity and combatEntity.TurnOrder and getGroups(combatEntity.TurnOrder, "cur") then
+        local groups = getGroups(combatEntity.TurnOrder, "cur")
         local newInitiativeRolls = getNewInitiativeRolls(groups)
         local reorderedGroups = {}
         -- Numeric for (not ipairs) because newInitiativeRolls may be sparse
@@ -276,7 +297,7 @@ local function reorderByInitiativeRoll(doNotReplicate)
             end
         end
         table.sort(reorderedGroups, function (a, b) return a.Initiative > b.Initiative end)
-        combatEntity.TurnOrder.Groups = reorderedGroups
+        setGroups(combatEntity.TurnOrder, "cur", reorderedGroups)
         if not doNotReplicate then
             combatEntity:Replicate("TurnOrder")
         end
@@ -388,11 +409,11 @@ end
 
 local function setTurnActive(uuid)
     local combatEntity = Utils.getCombatEntity()
-    if combatEntity and combatEntity.TurnOrder and combatEntity.TurnOrder.Groups then
+    if combatEntity and combatEntity.TurnOrder and getGroups(combatEntity.TurnOrder, "cur") then
         local groupSpecial = nil
         local groupsPlayers = {}
         local groupsEnemies = {}
-        for _, group in ipairs(combatEntity.TurnOrder.Groups) do
+        for _, group in ipairs(getGroups(combatEntity.TurnOrder, "cur")) do
             if isInGroup(group, uuid) then
                 groupSpecial = group
             else
@@ -405,13 +426,13 @@ local function setTurnActive(uuid)
             end
         end
         if groupSpecial then
-            combatEntity.TurnOrder.Groups[1] = groupSpecial
+            getGroups(combatEntity.TurnOrder, "cur")[1] = groupSpecial
             local numPlayerGroups = #groupsPlayers
             for i = 1, numPlayerGroups do
-                combatEntity.TurnOrder.Groups[1 + i] = groupsPlayers[i]
+                getGroups(combatEntity.TurnOrder, "cur")[1 + i] = groupsPlayers[i]
             end
             for i = 1, #groupsEnemies do
-                combatEntity.TurnOrder.Groups[1 + i + numPlayerGroups] = groupsEnemies[i]
+                getGroups(combatEntity.TurnOrder, "cur")[1 + i + numPlayerGroups] = groupsEnemies[i]
             end
             combatEntity:Replicate("TurnOrder")
         end
@@ -423,11 +444,11 @@ end
 -- helper is spawned so the topbar re-sorts.
 local function setPlayerTurnsActive()
     local combatEntity = Utils.getCombatEntity()
-    if not (combatEntity and combatEntity.TurnOrder and combatEntity.TurnOrder.Groups) then
+    if not (combatEntity and combatEntity.TurnOrder and getGroups(combatEntity.TurnOrder, "cur")) then
         return
     end
     local round, team
-    for _, group in ipairs(combatEntity.TurnOrder.Groups) do
+    for _, group in ipairs(getGroups(combatEntity.TurnOrder, "cur")) do
         if group.IsPlayer then
             round = group.Round
             team = group.Team
@@ -482,7 +503,7 @@ local function setPlayerTurnsActive()
     end
     -- Whole-table assignment: replaces Groups with EXACTLY the player single-member groups, no enemies, no duplicate ghost entries.
     -- (Per-index writes leave behind duplicate-player ghosts in the slots originally held by enemies - see prior memory.)
-    combatEntity.TurnOrder.Groups = groupsPlayers
+    setGroups(combatEntity.TurnOrder, "cur", groupsPlayers)
     local uuid = combatEntity.CombatState.MyGuid
     if BrawlState.Session.TurnOrderListener[uuid] then
         Ext.Entity.Unsubscribe(BrawlState.Session.TurnOrderListener[uuid])
@@ -511,15 +532,15 @@ local function dumpTurnOrderState(label)
         print("[ROUND_DEBUG] no combat entity / no TurnOrder")
         return
     end
-    if combatEntity.TurnOrder.Groups then
+    if getGroups(combatEntity.TurnOrder, "cur") then
         print("[ROUND_DEBUG] -- Groups --")
-        for i, group in ipairs(combatEntity.TurnOrder.Groups) do
+        for i, group in ipairs(getGroups(combatEntity.TurnOrder, "cur")) do
             print("[ROUND_DEBUG] " .. formatGroupStr(i, group))
         end
     end
-    if combatEntity.TurnOrder.Groups2 then
+    if getGroups(combatEntity.TurnOrder, "nxt") then
         print("[ROUND_DEBUG] -- Groups2 --")
-        for i, group in ipairs(combatEntity.TurnOrder.Groups2) do
+        for i, group in ipairs(getGroups(combatEntity.TurnOrder, "nxt")) do
             print("[ROUND_DEBUG] " .. formatGroupStr(i, group))
         end
     end

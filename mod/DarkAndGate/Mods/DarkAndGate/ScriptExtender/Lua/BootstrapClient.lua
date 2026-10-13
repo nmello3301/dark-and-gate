@@ -83,9 +83,14 @@ Ext.Require("Client/HUD/HotbarMenu.lua").Register()
 -- Projectile system v1: the clones' stats + the client-side visual probe.
 Ext.Require("Shared/ProjectileSpells.lua").Register("Client")
 Ext.Require("Client/Combat/ProjectileView.lua").Register()
+-- Bows and crossbows: LMB draws / releases with the ranged set out, Q
+-- switches melee / ranged, other characters' draws (Client/Combat/Bow.lua).
+Ext.Require("Client/Combat/Bow.lua").Register()
 -- Real-time fights, client side: keep control on our character at Brawl's
 -- round turnovers, BG3's dynamic combat camera off.
 Ext.Require("Client/BrawlClient.lua").Register()
+-- BG3's Projectile / Spell combat camera requests dropped in first person.
+Ext.Require("Client/CamGuard.lua").Register()
 -- Real-time combat pass (2026-10-12): what the crosshair is on (F, targeted
 -- spells, area indicators), on-screen prompts, the per-tick watchdog, and
 -- the server's knobs typed in this console (Shared/ConsoleForward.lua).
@@ -101,10 +106,20 @@ Ext.Require("Client/Crouch.lua").Register()
 -- V companion modes + server toasts; first person after teleports.
 Ext.Require("Client/Companions.lua").Register()
 Ext.Require("Client/Travel.lua").Register()
-Ext.Require("Shared/ConsoleForward.lua").Forward({
+local ConsoleForward = Ext.Require("Shared/ConsoleForward.lua")
+ConsoleForward.Forward({
     "dag_ai", "dag_ai_aim", "dag_ai_react", "dag_ai_debug", "dag_shield_pct", "dag_shield_debug",
     "dag_bleedout", "dag_revive_time", "dag_downme", "dag_stealth", "dag_stealth_debug",
+    -- Test kit (Server/Combat/TestKit.lua) and the bow's draw time.
+    "dag_chest", "dag_goblins", "dag_god", "dag_bow_draw",
 })
+-- Forwarded commands carry the camera's forward ("ahead of you" spawns).
+local AimForCtx = Ext.Require("Client/Combat/Aim.lua")
+ConsoleForward.SetContext(function()
+    local _, f = AimForCtx.ReadInvView()
+    if f then return { fwd = { f[1], f[2], f[3] } } end
+    return nil
+end)
 
 -- First-person movement: floaty Space jump (visual lift in the DLL,
 -- BG3's jump clips played in phases). See Client/Movement/Jump.lua.
@@ -114,6 +129,9 @@ JumpAnims.Register()
 Jump.Register()
 -- WASD speed knob + locomotion rate sync (native lever, MoveSpeed.cpp).
 Ext.Require("Client/Movement/Movement.lua").Register()
+-- WASD in real-time fights: BG3's own through the DLL, the server as the
+-- fallback (Client/Movement/CombatMove.lua).
+Ext.Require("Client/Movement/CombatMove.lua").Register()
 -- The real jump's height, reported to the server (hitbox + projectile hits).
 Ext.Require("Client/Movement/JumpReport.lua").Register()
 

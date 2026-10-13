@@ -135,6 +135,39 @@ return {
         speed_mult = 0.6,
         hide_cones = true,
     },
+    -- WASD in real-time fights (DECISIONS 2026-10-12). BG3 refuses WASD while
+    -- a character is in a combat; the DLL skips that check while first person
+    -- is on (CombatWasd.cpp), so fights move like exploration. Fallback
+    -- (Client/Movement/CombatMove.lua): WASD held for fallback_after_s with
+    -- the speed under still_mps -> the server walks you instead.
+    --   mode            "auto" | "server" (always the fallback) | "off"
+    --   native_mps      at this speed BG3's own WASD is moving you: no fallback
+    --   ahead_m         the server's move target, this far along the WASD direction
+    --   refresh_s       re-aim it this often while held (at once on a turn_deg turn)
+    --   walk_below_mult a run slowed under this multiplier (bow draw, casting) walks
+    --   default_walk    BG3WASD's walk (true) or run before we have seen you move
+    --   strafe_sign     A / D side (the DLL's real-jump sign, checked in-game)
+    combat_move = {
+        mode             = "auto",
+        fallback_after_s = 0.35,
+        still_mps        = 0.25,
+        native_mps       = 0.8,
+        ahead_m          = 4.0,
+        valid_radius_m   = 1.5,
+        refresh_s        = 0.6,
+        turn_deg         = 12,
+        walk_below_mult  = 0.8,
+        default_walk     = true,
+        strafe_sign      = -1,
+    },
+    -- Ground surfaces don't touch you in the air (Server/Combat/AirSurfaces.lua,
+    -- DECISIONS 2026-10-12): these statuses landing mid-jump are removed at
+    -- once. Others that land mid-air are logged once by name (log_others).
+    air_surfaces = {
+        statuses = { "PRONE", "BURNING", "WET", "ACID", "FROZEN", "WEB", "ENSNARED", "DIFFICULT_TERRAIN",
+                     "SURFACE_GREASE", "GREASED", "SLIPPED", "BURNING_HOLY", "POISONED_SURFACE" },
+        log_others = true,
+    },
     air_action = {
         swing_s      = 0.9,
         cast_s       = 1.2,

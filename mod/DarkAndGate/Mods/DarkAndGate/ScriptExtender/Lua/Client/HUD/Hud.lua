@@ -44,6 +44,9 @@ local atlasOk = nil            -- nil = not checked yet
 local clickThrough = nil       -- false = the window would take the mouse: never shown
 local stats = { xpCur = 0, xpNext = 0, level = 0, hpPotions = 0, manaPotions = 0 }
 local bowDraw = nil            -- nil = hidden, else 0..1
+-- A BG3 window our widget list can't see (a chest's loot window, opened with
+-- F: Client/Interact.lua): counts as an open menu until cleared.
+local externalMenu = nil
 local bowDemo = nil
 local lastFill, lastText = -1e9, -1e9
 local shownState = nil
@@ -539,6 +542,7 @@ local function tick()
     local active = State.IsCombatActive()
     local menu, menuName = false, nil
     if active then menu, menuName = VanillaHud.MenuOpen() end
+    if active and not menu and externalMenu then menu, menuName = true, externalMenu end
     -- Our Prepare Hotbar menu: beside BG3's I / Tab panels, or pinned (H).
     pcall(HotbarMenu.Update, active, menu and menuName or nil)
     -- A BG3 panel (or our pinned menu) is open: the cursor is freed
@@ -601,6 +605,7 @@ end
 -- ---------------------------------------------------------------------
 -- Bow draw ring: frac 0..1 while drawing, nil to hide (Part C bows).
 function M.SetBowDraw(frac) bowDraw = frac end
+function M.SetExternalMenu(name) externalMenu = name end
 function M.Mode() return mode end
 function M.AtlasOk() return atlasOk end
 -- false = the art HUD can't be shown (atlas didn't bind, or its window

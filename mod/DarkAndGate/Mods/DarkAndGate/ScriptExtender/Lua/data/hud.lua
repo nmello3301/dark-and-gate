@@ -32,7 +32,7 @@ return {
     no_mana_tint = { 0.40, 0.40, 0.55, 1.0 },
 
     -- Potion keys (developer, 2026-10-12): R = health, T = mana.
-    potion_keys  = { health = "R", mana = "T" },
+    potion_keys  = { health = "T", mana = "Y" },   -- R reloads crossbows (2026-10-12)
     no_potion_tint = { 0.35, 0.35, 0.35, 0.8 },
 
     -- Orbs: the meniscus line drawn at the liquid's edge.

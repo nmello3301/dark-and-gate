@@ -19,6 +19,7 @@
 #include "Hooks/Mouselook.h"
 #include "Hooks/MoveSpeed.h"
 #include "Hooks/RealJump.h"
+#include "Hooks/CombatWasd.h"
 #include "Watchdog.h"
 #include "Log.h"
 
@@ -95,6 +96,9 @@ BOOL APIENTRY DllMain(HMODULE /*module*/, DWORD reason, LPVOID /*reserved*/)
         // load, before the game's threads run that code.
         dag::movespeed::Install();
         dag::realjump::Install();
+        // WASD in real-time fights: BG3's WASD gate refuses a character in a
+        // combat; first person skips that check (CombatWasd.h).
+        dag::combatwasd::Install();
         // Spell animation event capture (docs/spikes/genome-capture.md);
         // patched now, logs only while native-pov.txt genome_capture=1.
         dag::genomecapture::Install();

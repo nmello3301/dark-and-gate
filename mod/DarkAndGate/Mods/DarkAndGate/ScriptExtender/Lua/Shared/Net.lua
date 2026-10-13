@@ -133,6 +133,32 @@ Net.Channels = {
     -- Teleport / fast travel: server -> the owning client, re-settle first
     -- person (FullPov). { why }
     PovSettle         = "DAG_PovSettle",
+
+    -- Bows (Client/Combat/Bow.lua, Server/Combat/Bows.lua, data/bows.lua).
+    -- Client -> server: BowDraw { on = true } (LMB down: the draw starts) /
+    --                   { on = false, why } (cancelled)
+    --                   BowRelease { eye, dir, hitPoint, targetUuid?, draw = 0..1 }
+    --                   WeaponSetToggle {} (Q: BG3's own key press didn't switch it)
+    -- Server -> client(s): RangedState { uuid, set = "Melee"|"Ranged", kind =
+    --                   "bow"|"crossbow"|nil, family, drawS, reloadS } (the owner)
+    --                   BowAnim { uuid, phase = "draw"|"release"|"cancel", drawS }
+    --                   (everyone: play / end the draw on that character)
+    BowDraw           = "DAG_BowDraw",
+    BowRelease        = "DAG_BowRelease",
+    WeaponSetToggle   = "DAG_WeaponSetToggle",
+    RangedState       = "DAG_RangedState",
+    BowAnim           = "DAG_BowAnim",
+    -- Server -> the client that pressed F: a chest / corpse loot window opened
+    -- or closed (Osiris Closed). { open, target, name?, why? }
+    ContainerUI       = "DAG_ContainerUI",
+    -- WASD in fights, server fallback (Client/Movement/CombatMove.lua ->
+    -- Server/Combat/CombatMove.lua). Client -> server: CombatMove
+    -- { on, dx, dz, gait = "Walk"|"Run", why }; server -> that client:
+    -- CombatMoveState { refused?, why } (refused = not in a fight); to every
+    -- client: CombatMoveState { fight = true|false } when a real-time fight
+    -- starts / ends.
+    CombatMove        = "DAG_CombatMove",
+    CombatMoveState   = "DAG_CombatMoveState",
 }
 
 -- Every channel both sides care about. Both server and client must register
@@ -176,6 +202,14 @@ Net.AllChannels = {
     Net.Channels.CrouchState,
     Net.Channels.CompanionMode,
     Net.Channels.PovSettle,
+    Net.Channels.BowDraw,
+    Net.Channels.BowRelease,
+    Net.Channels.WeaponSetToggle,
+    Net.Channels.RangedState,
+    Net.Channels.BowAnim,
+    Net.Channels.ContainerUI,
+    Net.Channels.CombatMove,
+    Net.Channels.CombatMoveState,
 }
 
 return Net

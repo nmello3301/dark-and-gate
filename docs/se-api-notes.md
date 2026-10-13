@@ -157,3 +157,9 @@ BG3 scans `Data\Mods\` for mods without a pak).
 
 - `Ext.Utils.Print(...)` goes to the SE debug console (when `CreateConsole: true` in `ScriptExtenderSettings.json`) and to the SE runtime log (when `EnableLogging: true` and `LogRuntime: true`). Default SE settings in release builds have `CreateConsole: false`; we rely on an explicit settings file.
 - SE runtime log location (verified 2026-10-07): `%LOCALAPPDATA%\Larian Studios\Baldur's Gate 3\Script Extender Logs\Extender Runtime <timestamp>.log` — note the trailing *` Logs`* on the folder, which is a sibling of the SE data folder, not inside it.
+
+## SE v33
+
+### Physics ray names the entity it hit (client)
+
+- A client world ray's hit carries the entity: `hit.Shape.PhysicsObject.Entity` was non-nil in the 2026-10-12 playtest log (`LookAt: the physics ray names entities (hit.Shape.PhysicsObject.Entity) -> used for F`), so `Client/LookAt.lua` names what the crosshair is on from the ray itself.

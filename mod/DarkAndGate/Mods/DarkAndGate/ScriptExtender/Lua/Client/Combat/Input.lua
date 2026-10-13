@@ -17,6 +17,9 @@
 --   Pressing the same number again -> disarm.
 --   Pressing a different number -> re-arm.
 --   Esc is NOT used (BG3 opens its own menu).
+-- Bows (2026-10-12, Client/Combat/Bow.lua): with the ranged weapon set out,
+--   LMB down draws, LMB up releases (crossbow: LMB shoots); RMB cancels a
+--   draw. Q switches melee / ranged.
 --
 -- UI mode: when mouse-look is OFF (MMB toggled it off, cursor visible),
 -- LMB / RMB pass straight through to the vanilla game so the normal UI,
@@ -45,6 +48,7 @@ local HotbarMenu = Ext.Require("Client/HUD/HotbarMenu.lua")
 local hudCfg    = Ext.Require("data/hud.lua")
 local Interact  = Ext.Require("Client/Interact.lua")
 local Targeting = Ext.Require("Client/Combat/Targeting.lua")
+local Bow       = Ext.Require("Client/Combat/Bow.lua")
 
 local M = {}
 
@@ -135,10 +139,16 @@ local function onMouse(event)
                     Interact.CancelRevive("cast")
                     if not Spells.Cast(armed) then Prepare.Stop("cast aborted") end
                 end
+            elseif Bow.Mode() then
+                Interact.CancelRevive("bow")
+                Bow.OnPress()
             else
                 Interact.CancelRevive("swing")
                 Swing.OnLMB()
             end
+        else
+            -- A bow draw in progress is released (no-op otherwise).
+            Bow.OnRelease()
         end
         prevent(event)
     else
@@ -149,6 +159,8 @@ local function onMouse(event)
                 State.armedAt = nil
                 ClientNet.Send(Net.Channels.SpellArm, { spell = nil })
                 Prepare.Stop("cancel-rmb")
+            elseif Bow.Drawing() then
+                Bow.Cancel("RMB")
             else
                 State.blocking = true
                 Log.Write("Combat: block ON (stub, no DR applied)")
@@ -208,6 +220,8 @@ local function onKey(event)
     end
 
     if not State.IsCombatActive() then return end
+    -- Esc closes BG3's loot window too (Client/Interact.lua freed the cursor for it).
+    if evt == "KeyUp" and key:upper():find("ESC", 1, true) then Interact.OnEscape() end
     -- A BG3 panel is open: every key is the UI's (Space takes all in a loot
     -- window, 1-0 / R / T don't fire ours...). DECISIONS 2026-10-12.
     if State.uiPaused then return end
@@ -217,6 +231,9 @@ local function onKey(event)
         if State.downedKey and State.downedKey(key, evt == "KeyDown", event.Repeat) then prevent(event) end
         return
     end
+
+    -- Q's weapon-set switch: that one F press is BG3's own toggle (Bow.lua).
+    if Bow.PassKey(key, evt) then return end
 
     -- F: tap = interact, hold = revive a downed ally (Client/Interact.lua).
     if key == Interact.KEY then
@@ -240,7 +257,7 @@ local function onKey(event)
         return
     end
 
-    -- Potions (data/hud.lua potion_keys, default R = health, T = mana).
+    -- Potions (data/hud.lua potion_keys, default T = health, Y = mana; R reloads crossbows).
     local potion = (key == hudCfg.potion_keys.health and "health") or (key == hudCfg.potion_keys.mana and "mana") or nil
     if potion then
         if evt == "KeyDown" and not event.Repeat then Interact.CancelRevive("potion"); Hud.UsePotion(potion) end
@@ -277,6 +294,10 @@ local function guarded(name, fn)
 end
 
 function M.Register()
+    -- Q: melee <-> ranged weapon set (Client/Combat/Bow.lua).
+    M.AddKey(Bow.TOGGLE_KEY, Bow.ToggleSet)
+    -- R: reload the crossbow (Client/Combat/Bow.lua).
+    M.AddKey(Bow.RELOAD_KEY, Bow.Reload)
     Ext.Events.MouseButtonInput:Subscribe(guarded("mouse", onMouse))
     Ext.Events.KeyInput:Subscribe(guarded("key", onKey))
     Ext.RegisterConsoleCommand("dag_input_log", function(_, arg)

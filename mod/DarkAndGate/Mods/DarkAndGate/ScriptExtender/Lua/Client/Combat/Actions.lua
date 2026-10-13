@@ -108,6 +108,11 @@ end
 
 function M.Busy() return busy() end
 function M.Running(label) return running[label] ~= nil end
+-- A timed action (swing, cast) runs; holds (bow draw, spell prepare) don't count.
+function M.TimedBusy()
+    for _, a in pairs(running) do if a.untilAt then return true end end
+    return false
+end
 
 function M.Describe()
     local parts = {}

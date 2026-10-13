@@ -19,6 +19,8 @@
 -- Every state change is logged and broadcast (DownedState) for the client
 -- (Client/Downed.lua: orbit camera, banner, revive bar).
 --   !dag_bleedout <s>   !dag_revive_time <s>   !dag_downme   (server or client console)
+-- God mode (!dag_god): !dag_downme lifts it for its one hit and puts it back;
+-- a character in god mode never bleeds out (stood up at revive_hp instead).
 
 local Log         = Ext.Require("Shared/Log.lua")
 local Net         = Ext.Require("Shared/Net.lua")
@@ -132,6 +134,13 @@ local function revive(uuid, reviver)
 end
 
 local function bleedOut(uuid)
+    if Damage.Invincible(uuid) then
+        Log.Write(string.format("Downed: %s would bleed out now, but is in god mode (!dag_god) -> stood up at %d HP", name(uuid), D.revive_hp))
+        pcall(function() Osi.RemoveStatusesWithType(uuid, "DOWNED", uuid) end)
+        pcall(function() Osi.SetHitpoints(uuid, D.revive_hp, "Guaranteed") end)
+        upAgain(uuid, "god mode: no bleed-out")
+        return
+    end
     downed[uuid] = nil
     local ok, err = pcall(function() Osi.Die(uuid, 3, NULL, 0, 0) end)
     Log.Write(string.format("Downed: %s BLED OUT after %d s -> dead%s (vanilla revives only: Withers, Revivify, scrolls)", name(uuid),
@@ -323,12 +332,13 @@ function M.Register()
     end)
     -- Another action by a reviving player cancels it (the client says so too).
     for _, ch in ipairs({ Net.Channels.CastSpellRequest, Net.Channels.SpellArm, Net.Channels.JumpStart, Net.Channels.UsePotion,
-                          Net.Channels.HitClaim }) do
+                          Net.Channels.HitClaim, Net.Channels.BowDraw, Net.Channels.BowRelease }) do
         Ext.RegisterNetListener(ch, function(c, payload, peer)
             if next(downed) == nil then return end
-            if c == Net.Channels.SpellArm then
+            if c == Net.Channels.SpellArm or c == Net.Channels.BowDraw then
                 local ok, p = pcall(Ext.Json.Parse, payload)
-                if ok and type(p) == "table" and not p.spell then return end   -- a disarm is not an action
+                -- a disarm / a cancelled draw is not an action
+                if ok and type(p) == "table" and ((c == Net.Channels.SpellArm and not p.spell) or (c == Net.Channels.BowDraw and not p.on)) then return end
             end
             Ext.OnNextTick(function() cancelBy(Party.CharacterOfPeer(peer), "another action: " .. tostring(c):gsub("DAG_", "")) end)
         end)
@@ -343,10 +353,21 @@ function M.Register()
         Log.Write(string.format("Downed: revive takes %.1f s of holding F within %.1f m", D.revive_s, D.revive_range_m))
     end)
     ConsoleForward.Server("dag_downme", function()
-        local u = Party.Controlled(nil)
+        local c = ConsoleForward.Caller()
+        local u = (c and Party.CharacterOfPeer(c.peer)) or Party.Controlled(nil)
         local hp = Damage.Hp(u) or 1
-        Log.Write(string.format("Downed: !dag_downme -> %d damage to %s (BG3's downed flow)", hp + 5, name(u)))
+        -- God mode would stop the hit: lifted for it, back once down.
+        local god = Damage.Invincible(u)
+        if god then pcall(function() Osi.RemoveStatus(u, Damage.GOD_STATUS, u) end) end
+        Log.Write(string.format("Downed: !dag_downme -> %d damage to %s (BG3's downed flow)%s", hp + 5, name(u),
+            god and "; god mode lifted for this hit" or ""))
         pcall(function() Osi.ApplyDamage(u, hp + 5, "Bludgeoning", NULL) end)
+        if god then
+            Ext.Timer.WaitFor(1500, function()
+                local ok = pcall(function() Osi.ApplyStatus(u, Damage.GOD_STATUS, -1, 1, u) end)
+                Log.Write(string.format("Downed: god mode back on %s%s", name(u), ok and "" or " (ApplyStatus FAILED)"))
+            end)
+        end
     end)
     ensurePassives("register")
     Log.Write(string.format("Downed: registered (bleed-out %d s, revive %.1f s within %.1f m, up at %d HP)", D.bleedout_s, D.revive_s,

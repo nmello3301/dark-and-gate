@@ -15,11 +15,16 @@
 -- applied here (Osi.ApplyDamage runs BG3's own pipeline).
 -- The direct write skips concentration checks, on-damage passives and the
 -- combat log line (docs/rework-list.md).
+-- God mode (!dag_god, Server/Combat/TestKit.lua): a character with the
+-- DAG_GODMODE status takes nothing here (BG3's own damage is stopped by the
+-- status's Invulnerable() boost); the hit still plays its impact sound.
 
 local Log   = Ext.Require("Shared/Log.lua")
 local Party = Ext.Require("Server/Party.lua")
 
 local M = {}
+
+M.GOD_STATUS = "DAG_GODMODE"
 
 local DAMAGE_INDEX = {
     None = 0, Slashing = 1, Piercing = 2, Bludgeoning = 3, Acid = 4, Thunder = 5, Necrotic = 6, Fire = 7,
@@ -47,6 +52,16 @@ function M.Hp(uuid)
     end
     local okO, hp2 = pcall(function() return Osi.GetHitpoints(uuid) end)
     return okO and tonumber(hp2) or nil
+end
+
+-- !dag_god: true while the character has the god mode status.
+function M.Invincible(uuid)
+    local ok, v = pcall(function() return Osi.HasActiveStatus(uuid, M.GOD_STATUS) end)
+    return ok and tonumber(v) == 1
+end
+
+local function impactSound(target, damageType)
+    pcall(function() Osi.PlaySound(target, "Action_Impact_" .. (damageType == "Piercing" and "PiercingThrust" or damageType == "Slashing" and "Slash" or "Smash")) end)
 end
 
 function M.IsDowned(uuid)
@@ -85,6 +100,12 @@ function M.Apply(target, amount, damageType, source, why)
             source and name(source) or "?", why or "hit"))
         return 0, "downed"
     end
+    if M.Invincible(target) then
+        impactSound(target, damageType)
+        Log.Write(string.format("Damage: %s is in god mode (!dag_god) -> %d %s from %s ignored (%s)", name(target), amount, damageType,
+            source and name(source) or "?", why or "hit"))
+        return 0, "god mode"
+    end
     local h, ent = health(target)
     local hp0 = M.Hp(target)
     local rwhy = nil
@@ -107,7 +128,7 @@ function M.Apply(target, amount, damageType, source, why)
                 ent:Replicate("Health")
             end)
             if ok then
-                pcall(function() Osi.PlaySound(target, "Action_Impact_" .. (damageType == "Piercing" and "PiercingThrust" or damageType == "Slashing" and "Slash" or "Smash")) end)
+                impactSound(target, damageType)
                 Log.Write(string.format("Damage: %s took %d %s from %s (%s, no hit reaction%s): HP %d -> %d%s",
                     name(target), amount, damageType, source and name(source) or "?", why or "hit", rwhy and (", " .. rwhy) or "",
                     hp0, hp0 - (amount - fromTemp), fromTemp > 0 and string.format(" (temp HP -%d)", fromTemp) or ""))

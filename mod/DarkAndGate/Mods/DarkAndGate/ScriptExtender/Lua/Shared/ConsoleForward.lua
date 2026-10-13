@@ -7,6 +7,11 @@
 -- forwarder for the same names with Forward(), which sends
 -- ServerCommand { cmd, args } to the server. The server runs the same
 -- handler on the next tick (Osi calls are safe there) and logs who sent it.
+--
+-- Context: the client adds SetContext()'s table to every forwarded command
+-- (the camera's forward, for spawns "ahead of you"); while a forwarded
+-- handler runs, Caller() is { peer, ctx } (nil when typed in the server
+-- console itself).
 
 local Log = Ext.Require("Shared/Log.lua")
 local Net = Ext.Require("Shared/Net.lua")
@@ -14,6 +19,11 @@ local Net = Ext.Require("Shared/Net.lua")
 local M = {}
 
 local handlers = {}   -- server: name -> fn(cmd, ...)
+local context = nil   -- client: fn() -> table sent along (or nil)
+local caller = nil    -- server: { peer, ctx } while a forwarded handler runs
+
+function M.SetContext(fn) context = fn end
+function M.Caller() return caller end
 
 -- Server: `name` as a console command and as a forward target.
 function M.Server(name, fn)
@@ -27,8 +37,13 @@ function M.Forward(names)
         Ext.RegisterConsoleCommand(name, function(_, ...)
             local args = {}
             for i = 1, select("#", ...) do args[i] = tostring(select(i, ...)) end
+            local ctx = nil
+            if context then
+                local okC, c = pcall(context)
+                if okC and type(c) == "table" then ctx = c end
+            end
             local ok, err = pcall(function()
-                Ext.Net.PostMessageToServer(Net.Channels.ServerCommand, Ext.Json.Stringify({ cmd = name, args = args }))
+                Ext.Net.PostMessageToServer(Net.Channels.ServerCommand, Ext.Json.Stringify({ cmd = name, args = args, ctx = ctx }))
             end)
             Log.Write(string.format("Console: !%s %s -> server%s", name, table.concat(args, " "), ok and "" or (" FAILED " .. tostring(err))))
         end)
@@ -47,7 +62,9 @@ function M.RegisterServer()
         local args = type(p.args) == "table" and p.args or {}
         Ext.OnNextTick(function()
             Log.Write(string.format("Console: !%s %s (typed in user %s's client console)", p.cmd, table.concat(args, " "), tostring(userId)))
+            caller = { peer = userId, ctx = type(p.ctx) == "table" and p.ctx or nil }
             local okR, err = pcall(fn, p.cmd, table.unpack(args))
+            caller = nil
             if not okR then Log.Write("Console: !" .. p.cmd .. " failed: " .. tostring(err)) end
         end)
     end)

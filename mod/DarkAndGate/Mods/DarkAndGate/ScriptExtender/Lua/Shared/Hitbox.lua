@@ -27,6 +27,14 @@ function M.SetJump(uuid, durMs, h, k, t0)
     jumps[uuid] = { t0 = t0 or now(), dur = tonumber(durMs) or 0, h = tonumber(h) or 0, k = tonumber(k) or 2 }
 end
 
+-- In the air right now: a jump window that hasn't ended (AirSurfaces.lua).
+function M.Airborne(uuid, t)
+    local j = uuid and jumps[uuid]
+    if not j then return false end
+    local dt = (t or now()) - j.t0
+    return dt >= 0 and dt < j.dur
+end
+
 function M.SetLiftSample(uuid, lift)
     if not uuid then return end
     lift = tonumber(lift) or 0

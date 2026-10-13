@@ -42,6 +42,9 @@ local function getMovementDistanceMaxAmount(entity)
 end
 
 local function getMovementSpeed(entityUuid)
+    -- DAG: in our real-time fights everyone moves at data/realtime.lua
+    -- move_gait (the exploration run), not by remaining movement distance.
+    if DAG_MoveGait then return DAG_MoveGait end
     -- Players/allies out of combat should move at Run, not Sprint. Movement
     -- distance is always pinned to 1000 so the threshold check below would
     -- otherwise always return Sprint for them.

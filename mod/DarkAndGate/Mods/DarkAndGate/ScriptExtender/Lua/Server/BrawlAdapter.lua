@@ -60,6 +60,7 @@ local function applySettings()
     S.AutoPauseOnDowned = false          -- downed = our bleed-out, never a pause
     S.AutoPauseOnCombatStart = false
     S.ActionInterval = tonumber(cfg.action_interval_s) or 6.0
+    DAG_MoveGait = cfg.move_gait   -- Brawl Movement.getMovementSpeed (DAG patch)
     S.CombatRoundDuration = tonumber(cfg.round_s) or 6.0
     S.FullAuto = false
     S.HitpointsMultiplier = tonumber(cfg.hitpoints_multiplier) or 1.0
@@ -263,6 +264,15 @@ function Adapter.Register()
             DAG_BrawlLog = on and brawlLog or nil
             Log.Write("RT: Brawl debug lines " .. (on and "ON (into the session log)" or "OFF"))
         else status() end
+    end)
+    -- !dag_ai_interval <s>: how often Brawl's AI acts (data/realtime.lua
+    -- action_interval_s); fighters already in a fight keep their timers.
+    ConsoleForward.Server("dag_ai_interval", function(_, v)
+        if tonumber(v) then
+            BrawlState.Settings.ActionInterval = math.max(1.0, tonumber(v))
+            cfg.action_interval_s = BrawlState.Settings.ActionInterval
+        end
+        Log.Write(string.format("RT: AI acts every %.1f s (initiative-scaled; from the next fight)", BrawlState.Settings.ActionInterval))
     end)
     Log.Write(string.format("RT: Brawl import loaded (%d modules; real time %s; round %s s; !dag_rt on|off|status|debug)",
         16, BrawlState.Settings.ModEnabled and "on" or "off", tostring(BrawlState.Settings.CombatRoundDuration)))

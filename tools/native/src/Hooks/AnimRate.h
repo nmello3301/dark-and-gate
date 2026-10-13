@@ -48,6 +48,16 @@ void SetClipRates(uintptr_t instance, const char* spec);
 // Calls scaled by a clip rate since the spec was set.
 long ClipHits();
 
+// Per-clip play rates on several characters at once (2026-10-12, bows: the
+// draw of NPC / companion / co-op archers stretched to the draw time, and
+// their engine release fast-forwarded). spec = "INST:ID:RATE|INST:ID:RATE"
+// (hex GenomeBlueprintInstance, mapping-id GUID, rate), "" = none; at most
+// 16 entries and 8 distinct ids. Applied on top of the character rate and
+// SetClipRates. Cheap to call every frame (no-op while unchanged).
+void SetNpcClipRates(const char* spec);
+// Calls scaled by an NPC clip rate since the start.
+long NpcClipHits();
+
 // FixedString id -> text through ls::gGlobalStringTable (found lazily on
 // the first call). SEH-guarded; false and "" on any failure. Used by
 // GenomeCapture.cpp.

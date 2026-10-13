@@ -19,6 +19,7 @@ local State     = Ext.Require("Client/Combat/State.lua")
 local LookAt    = Ext.Require("Client/LookAt.lua")
 local WorldFx   = Ext.Require("Client/WorldFx.lua")
 local Overlay   = Ext.Require("Client/HUD/Overlay.lua")
+local Hud       = Ext.Require("Client/HUD/Hud.lua")
 local TickBudget = Ext.Require("Shared/TickBudget.lua")
 local cfg       = Ext.Require("data/interact.lua")
 
@@ -33,6 +34,27 @@ local lastAt = -1e9
 local function now() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
 
 function M.SetReviveSource(fn) reviveSource = fn end
+
+-- A chest / corpse loot window opened with F: the cursor is free (Hud counts
+-- it as an open menu) until the server says it closed, Esc, or we walk away.
+local lootOpen = nil   -- { target, name, at }
+local function lootClose(why)
+    if not lootOpen then return end
+    Log.Write(string.format("Interact: %s window closed (%s) -> first person back", tostring(lootOpen.name), tostring(why)))
+    lootOpen = nil
+    Hud.SetExternalMenu(nil)
+end
+function M.OnEscape() if lootOpen then lootClose("Esc") end end
+
+local function distTo(uuid)
+    local ok, d = pcall(function()
+        local a = Ext.Entity.GetAllEntitiesWithComponent("ClientControl")[1].Transform.Transform.Translate
+        local b = Ext.Entity.Get(uuid).Transform.Transform.Translate
+        local dx, dz = a[1] - b[1], a[3] - b[3]
+        return math.sqrt(dx * dx + dz * dz)
+    end)
+    return ok and d or nil
+end
 function M.Holding() return holding end
 
 local function stopHold(why)
@@ -53,6 +75,10 @@ local function update()
     local t = now()
     if t - lastAt < 66 then return end
     lastAt = t
+    if lootOpen and t - lootOpen.at > 1500 then
+        local d = distTo(lootOpen.target)
+        if d and d > (cfg.server_reach_m or 6) + 1 then lootClose(string.format("walked away, %.1f m", d)) end
+    end
     -- A spell is armed: the crosshair belongs to targeting (Targeting.lua
     -- draws its own markers); F still works, nothing is highlighted here.
     if State.armedSpell then
@@ -141,6 +167,17 @@ function M.Register()
         Log.Write(string.format("Interact: server %s %s (%s)", p.ok and "started" or "refused", tostring(p.target), tostring(p.how)))
         if p.target then LookAt.Forget(p.target) end
         if not p.ok and p.how then Overlay.Toast(tostring(p.how), 2) end
+    end)
+    Ext.RegisterNetListener(Net.Channels.ContainerUI, function(_, payload)
+        local ok, p = pcall(Ext.Json.Parse, payload)
+        if not ok or type(p) ~= "table" then return end
+        if p.open then
+            lootOpen = { target = p.target, name = p.name or "container", at = now() }
+            Hud.SetExternalMenu("Loot " .. tostring(p.name or ""))
+            Log.Write(string.format("Interact: %s window open -> cursor free until it closes", tostring(p.name)))
+        elseif lootOpen and (not p.target or p.target == lootOpen.target) then
+            lootClose(p.why or "closed")
+        end
     end)
     Ext.Events.Tick:Subscribe(TickBudget.Wrap("Interact", update))
     Log.Write("Interact: registered (F: tap = interact, hold = revive a downed ally)")

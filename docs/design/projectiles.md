@@ -26,8 +26,9 @@ A BG3 projectile fired at a point is allowed **only as a temporary test visual**
 
 ## Bows / crossbows / thrown (M2)
 - **Bows:**
-  - Hold LMB to draw; the draw clip freezes at full draw via the per-character play rate. Release to shoot.
-  - Draw time per bow (e.g. shortbow 0.6 s, longbow 1.0 s) × stat modifiers.
+  - Hold LMB to draw: BG3's own draw clip, stretched to the draw time by the DLL's per-clip rate, then its aim loop holds. Release to shoot.
+  - **Draw time: 3 s base for every bow** (developer, 2026-10-12; supersedes 0.6 s shortbow / 1.0 s longbow), scaled by a stat later. NPC archers draw the same way (the DLL's clip rates on several characters) and aim for the drop.
+  - Arrows drop (9.81 m/s2); full-draw speed per bow family; all knobs in `data/bows.lua`.
   - Damage and speed scale with the draw fraction; no shot below ~30 %.
   - **Full draw holds forever** (no sway, no fatigue).
   - ~60 % move speed while drawing (Movement modifier, like casting).

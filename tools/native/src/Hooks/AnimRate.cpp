@@ -231,6 +231,61 @@ float ClipRateFor(uint8_t* ctx)
     return r > 0.f ? r : 1.f;
 }
 
+// ---- per-clip rates on several instances (bows, 2026-10-12) ------------
+// The same id match as above, for up to kNpcEntries (instance, id, rate)
+// entries at once. g_npcInst is a lock-free pre-check, so characters that
+// are not in the table pay one short loop of atomic loads per node.
+constexpr int kNpcEntries = 16;
+constexpr int kNpcIds = 8;
+struct NpcEntry { uintptr_t inst; int id; float rate; };
+std::atomic<uintptr_t> g_npcInst[kNpcEntries];
+std::atomic<int>  g_npcCount{ 0 };
+std::atomic<long> g_npcHits{ 0 };
+NpcEntry g_npc[kNpcEntries];
+int      g_numNpc = 0;
+char     g_npcIdText[kNpcIds][40];
+int      g_numNpcIds = 0;
+// FixedString id -> index into g_npcIdText (-1 = not one of ours).
+constexpr int kNpcFsCache = 256;
+struct NpcFs { uint32_t fs; int id; };
+NpcFs    g_npcFs[kNpcFsCache];
+int      g_npcFsN = 0;
+char     g_npcSpec[1024] = "";
+std::atomic_flag g_npcLock = ATOMIC_FLAG_INIT;
+
+bool NpcCandidate(uintptr_t inst)
+{
+    const int n = g_npcCount.load(std::memory_order_acquire);
+    for (int i = 0; i < n; ++i)
+        if (g_npcInst[i].load(std::memory_order_relaxed) == inst) return true;
+    return false;
+}
+
+float NpcClipRateFor(uintptr_t inst, uint8_t* ctx)
+{
+    uint8_t* a = SocketVar(ctx, 0);
+    if (!a) return 1.f;
+    uint32_t fs = 0;
+    __try { fs = *reinterpret_cast<uint32_t*>(a); } __except (EXCEPTION_EXECUTE_HANDLER) { return 1.f; }
+    if (g_npcLock.test_and_set(std::memory_order_acquire)) return 1.f;   // busy: skip, never block the game
+    int id = -2;
+    for (int i = 0; i < g_npcFsN; ++i) if (g_npcFs[i].fs == fs) { id = g_npcFs[i].id; break; }
+    if (id == -2) {
+        id = -1;
+        char txt[64];
+        if (FsTextRaw(fs, txt, sizeof(txt))) {
+            for (int i = 0; i < g_numNpcIds; ++i) if (_stricmp(txt, g_npcIdText[i]) == 0) { id = i; break; }
+        }
+        if (g_npcFsN < kNpcFsCache) g_npcFs[g_npcFsN++] = { fs, id };
+    }
+    float r = 1.f;
+    if (id >= 0) {
+        for (int i = 0; i < g_numNpc; ++i) if (g_npc[i].inst == inst && g_npc[i].id == id) { r = g_npc[i].rate; break; }
+    }
+    g_npcLock.clear(std::memory_order_release);
+    return r > 0.f ? r : 1.f;
+}
+
 bool Lookup(uintptr_t inst, float& r)
 {
     for (auto& s : g_slots) {
@@ -268,8 +323,13 @@ void __fastcall HookExec(void* node, uint8_t* ctx)
         clip = ClipRateFor(ctx);
         if (clip != 1.f) g_clipHits.fetch_add(1, std::memory_order_relaxed);
     }
-    if (!charRate && clip == 1.f) { g_orig(node, ctx); return; }
-    r *= clip;
+    float npc = 1.f;
+    if (inst && g_npcCount.load(std::memory_order_relaxed) > 0 && NpcCandidate(inst)) {
+        npc = NpcClipRateFor(inst, ctx);
+        if (npc != 1.f) g_npcHits.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (!charRate && clip == 1.f && npc == 1.f) { g_orig(node, ctx); return; }
+    r *= clip * npc;
     float* p = PlayRateVar(ctx);
     if (!p) { g_orig(node, ctx); return; }
     const float saved = *p;
@@ -389,6 +449,51 @@ void SetClipRates(uintptr_t instance, const char* spec)
     dag::log::Writef("RATE: clip rates on %p: %s (%d ids)", reinterpret_cast<void*>(instance),
                      g_numClip ? g_clipSpec : "none", g_numClip);
 }
+
+void SetNpcClipRates(const char* spec)
+{
+    if (!spec) spec = "";
+    if (std::strncmp(spec, g_npcSpec, sizeof(g_npcSpec) - 1) == 0) return;
+    if (spec[0] && g_state == 0) Install();
+    if (!g_gstTried) FindStringTable();
+    while (g_npcLock.test_and_set(std::memory_order_acquire)) {}
+    strncpy_s(g_npcSpec, spec, _TRUNCATE);
+    g_numNpc = 0;
+    g_numNpcIds = 0;
+    g_npcFsN = 0;
+    const char* p = g_npcSpec;
+    while (*p && g_numNpc < kNpcEntries) {
+        char* end = nullptr;
+        const unsigned long long inst = std::strtoull(p, &end, 16);
+        if (!end || end == p || *end != ':') break;
+        const char* idStart = end + 1;
+        const char* colon = std::strchr(idStart, ':');
+        if (!colon) break;
+        const size_t n = static_cast<size_t>(colon - idStart);
+        const float rate = static_cast<float>(std::atof(colon + 1));
+        if (inst && n > 0 && n < sizeof(g_npcIdText[0]) && rate > 0.f) {
+            int id = -1;
+            for (int i = 0; i < g_numNpcIds; ++i)
+                if (std::strncmp(g_npcIdText[i], idStart, n) == 0 && g_npcIdText[i][n] == 0) { id = i; break; }
+            if (id < 0 && g_numNpcIds < kNpcIds) {
+                id = g_numNpcIds++;
+                std::memcpy(g_npcIdText[id], idStart, n);
+                g_npcIdText[id][n] = 0;
+            }
+            if (id >= 0) g_npc[g_numNpc++] = { static_cast<uintptr_t>(inst), id, rate };
+        }
+        const char* bar = std::strchr(colon, '|');
+        if (!bar) break;
+        p = bar + 1;
+    }
+    for (int i = 0; i < kNpcEntries; ++i)
+        g_npcInst[i].store(i < g_numNpc ? g_npc[i].inst : 0, std::memory_order_relaxed);
+    g_npcCount.store(g_state == 1 ? g_numNpc : 0, std::memory_order_release);
+    g_npcLock.clear(std::memory_order_release);
+    dag::log::Writef("RATE: npc clip rates: %s (%d entries)", g_numNpc ? g_npcSpec : "none", g_numNpc);
+}
+
+long NpcClipHits() { return g_npcHits.load(); }
 
 void Record(uintptr_t instance)
 {
