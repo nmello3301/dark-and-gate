@@ -2,6 +2,9 @@
 rem Dark and Gate friend installer: runs install.ps1 next to this file.
 rem Extra arguments are passed on, e.g.  INSTALL.bat -WhatIf
 rem                                  or  INSTALL.bat -GameRoot "D:\Games\Baldurs Gate 3"
+rem                                  or  INSTALL.bat -FindOnly
+rem -FindOnly installs nothing: it prints the game folder and the Windows
+rem Security exclusion command for FRIEND-README step 0.
 title Dark and Gate - install
 if exist "%~dp0install.ps1" goto run
 echo.

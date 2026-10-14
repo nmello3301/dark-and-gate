@@ -4,7 +4,7 @@ What to do with every build that leaves this PC: a friend zip (`scripts\make-fri
 
 ## Antivirus false positives
 
-**What happened (2026-10-13).** Windows Defender quarantined Ch4nKyy's Mod Loader (`bin\version.dll`) three times as `Trojan:Win32/Posilod.CA!cl`: once in `downloaded_mods\`, twice in the game's `bin`. `!cl` means a cloud machine-learning verdict, not a known-malware signature. Each time the process that opened the file was `powershell.exe` (our scripts reading it); the game had loaded the same DLL for days without a detection. Our own files (`DarkAndGate.dll`, the friend zips, INSTALL.bat, the `.ps1` scripts) were never flagged.
+**What happened (2026-10-13).** Windows Defender quarantined Ch4nKyy's Mod Loader (`bin\version.dll`) three times as `Trojan:Win32/Posilod.CA!cl`: once in `downloaded_mods\`, twice in the game's `bin`. `!cl` means a cloud machine-learning verdict, not a known-malware signature, and Posilod is Microsoft's name for DLL sideloading (a DLL named like a Windows file placed next to a program), which is how every native mod loader works. Each time the process that opened the file was `powershell.exe` (our scripts reading it); the game had loaded the same DLL for days without a detection. Our own files (`DarkAndGate.dll`, the friend zips, INSTALL.bat, the `.ps1` scripts) were never flagged.
 
 **For each public build:**
 
@@ -20,7 +20,7 @@ What to do with every build that leaves this PC: a friend zip (`scripts\make-fri
    - one readable `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <script>` line, echoed before it runs;
    - no hidden windows, no `-EncodedCommand`, no downloads at runtime, no `Invoke-Expression`;
    - no `Unblock-File` / Mark-of-the-Web stripping;
-   - no reading or changing Windows Defender state (`Get-Mp*`, `Set-Mp*`, `Add-MpPreference`). Exclusions are the player's own step (FRIEND-README step 0);
+   - never run Windows Defender commands (`Get-Mp*`, `Set-Mp*`, `Add-MpPreference`). install.ps1 only *prints* the exclusion and quarantine-restore commands with the player's paths; the player runs them in an administrator Command Prompt (FRIEND-README step 0);
    - never open `version.dll`, only stat it: opening it from a script is what triggered the detections above.
 4. Optional: look the SHA-256 up on VirusTotal by hash. Uploading a file shares it with every vendor, so only upload public builds.
 

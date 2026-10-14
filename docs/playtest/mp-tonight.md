@@ -20,7 +20,7 @@
 **CLIENT (friend):**
 1. Install the third-party mods from `FRIEND-README.md` (SE, the loader, BG3WASD 1.9.9, NCT 2.4.5, MCM 1.41, AnimationUnlocker 1.0.5.5), then run `INSTALL.bat`. It finds the game in any Steam library, installs our files plus the host's NCT/WASD tomls and `ScriptExtenderSettings.json` (backing up theirs), checks the game version (`bg3_dx11.exe` 4.1.1.7631656) and every mod, and offers to set the load order (MCM > AnimationUnlocker > DarkAndGate, after a backup).
 2. Repeat until it ends with a green **READY**. Launch in **DirectX 11**.
-3. Add the two Windows Security file exclusions from README step 0 (`bin\version.dll` right after installing the loader, `bin\NativeMods\DarkAndGate.dll` right after INSTALL.bat).
+3. First of all, README step 0: `INSTALL.bat -FindOnly` in an administrator Command Prompt prints the exclusion command for `bin\version.dll` + `bin\NativeMods\DarkAndGate.dll` with his paths; run it (it must print both), then extract the loader straight into `bin`.
 
 ## 1. Install check, solo sanity, joining
 

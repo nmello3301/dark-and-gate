@@ -20,8 +20,12 @@
        the game version (bg3_dx11.exe) against manifest.json,
     6. checks the load order (the host's: MCM > AnimationUnlocker >
        DarkAndGate) and offers to fix modsettings.lsx (backed up first),
-    7. reminds that the game must run in DirectX 11, and ends with a green
-       READY or a red list of what is still missing.
+    7. prints the Windows Security exclusion command for this PC's paths
+       (FRIEND-README step 0; the player runs it in an administrator
+       Command Prompt, this script never touches Windows Security), the
+       quarantine-restore commands if bin\version.dll is missing, the
+       DirectX 11 reminder, and a green READY or a red list of what is
+       still missing.
   It touches nothing else. RESTORE.txt in the backup folder says how to undo it.
 
 .PARAMETER GameRoot
@@ -34,7 +38,8 @@
   Never ask: fail if the game isn't found, fix the load order without asking.
 
 .PARAMETER FindOnly
-  Print the game folder and the %LOCALAPPDATA% paths it finds, then stop.
+  Print the game folder, the %LOCALAPPDATA% paths and the Windows Security
+  exclusion command (FRIEND-README step 0), then stop. Installs nothing.
 
 .PARAMETER TargetRoot
   Testing only: treat <TargetRoot>\Baldurs Gate 3 as the game folder and
@@ -187,6 +192,34 @@ function Read-LoadOrder([string]$path) {
   return $out
 }
 
+# FRIEND-README step 0: the two Windows Security file exclusions as one line
+# for an administrator Command Prompt, with this PC's paths. Only printed:
+# this script never runs Windows Security commands itself.
+function Get-ExclusionCommand {
+  $v = (Join-Path $bin 'version.dll') -replace "'", "''"
+  $d = (Join-Path $nativeDir 'DarkAndGate.dll') -replace "'", "''"
+  return "powershell -NoProfile -Command ""Add-MpPreference -ExclusionPath '$v','$d'; Get-MpPreference | Select-Object -ExpandProperty ExclusionPath"""
+}
+function Show-ExclusionHelp([bool]$loaderMissing) {
+  Write-Host ""
+  Write-Host "Windows Security exclusions (FRIEND-README step 0)" -ForegroundColor Cyan
+  Write-Host "  Start > type cmd > right-click Command Prompt > Run as administrator (Command Prompt, not PowerShell)."
+  Write-Host "  Copy the line below (it is ONE line), paste it there, press Enter. It must print both paths."
+  Write-Host "  Do it before you put version.dll into bin; it only excludes these two files."
+  Write-Host ""
+  Write-Host (Get-ExclusionCommand) -ForegroundColor White
+  Write-Host ""
+  if ($loaderMissing) {
+    Write-Host "  version.dll is NOT in $bin." -ForegroundColor Red
+    Write-Host "  If you had put it there, Windows Security probably quarantined it. After the line above, in the same" -ForegroundColor Red
+    Write-Host "  administrator Command Prompt, list the quarantine, then restore (only if it lists version.dll / DarkAndGate.dll):" -ForegroundColor Red
+    Write-Host ""
+    Write-Host """%ProgramFiles%\Windows Defender\MpCmdRun.exe"" -Restore -ListAll" -ForegroundColor White
+    Write-Host """%ProgramFiles%\Windows Defender\MpCmdRun.exe"" -Restore -Name ""Trojan:Win32/Posilod.CA!cl"" -All" -ForegroundColor White
+    Write-Host ""
+  }
+}
+
 # Everything red ends up in $missing (the final list); yellow counts as a warning.
 $missing = New-Object System.Collections.Generic.List[object]
 $warnCount = 0
@@ -275,6 +308,10 @@ if ($FindOnly) {
   foreach ($p in @($bin, $nativeDir, $larian, $modsDir, $loadOrderF)) {
     Write-Host ("  {0,-7} {1}" -f $(if (Test-Path -LiteralPath $p) { 'exists' } else { 'MISSING' }), $p)
   }
+  $vdl = Join-Path $bin 'version.dll'
+  if (Test-Path -LiteralPath $vdl) { Write-Host "  exists  $vdl (Ch4nKyy's Mod Loader)" }
+  else { Write-Host "  not yet $vdl (normal before you install Ch4nKyy's Mod Loader)" -ForegroundColor Yellow }
+  Show-ExclusionHelp $false
   exit 0
 }
 
@@ -453,12 +490,12 @@ if (Test-Path -LiteralPath $vd) {
     else { Add-Row "Ch4nKyy's Mod Loader" 'WARN' "bin\version.dll is $len bytes, the host's is $($lt.host.size): another version, or another mod's version.dll? The host has $(Expected-Version 'loader')" $links.loader }
   } else { Add-Row "Ch4nKyy's Mod Loader" 'OK' 'bin\version.dll present' $links.loader }
 } else {
-  Add-Row "Ch4nKyy's Mod Loader" 'MISSING' "put version.dll ($(Expected-Version 'loader')) into $bin. If it vanished, Windows Security may have removed it: see Protection history" $links.loader
+  Add-Row "Ch4nKyy's Mod Loader" 'MISSING' "bin\version.dll is missing: probably quarantined by Windows Security if you had installed it (restore commands below), else put version.dll ($(Expected-Version 'loader')) into $bin" $links.loader
 }
 
-# Windows Security is never queried or changed from here: scripts that read
-# antivirus state look suspicious to antivirus heuristics. FRIEND-README
-# step 0 covers exclusions and Protection history by hand.
+# Windows Security is never queried or changed from here (antivirus
+# heuristics distrust scripts that do); section 8 prints the commands for
+# the player to run (FRIEND-README step 0).
 
 # A second loader?
 $nml = @()
@@ -582,7 +619,7 @@ if ($manifest -and $manifest.files) {
       } else { Add-Row $leaf 'MISMATCH' 'the package file is damaged or was changed: download the zip again' $null }
       continue
     }
-    if (-not (Test-Path -LiteralPath $dest)) { Add-Row $leaf 'MISSING' "not at $dest. If it vanished, Windows Security may have quarantined it: FRIEND-README step 0" $null; continue }
+    if (-not (Test-Path -LiteralPath $dest)) { Add-Row $leaf 'MISSING' "not at $dest. If it vanished, Windows Security probably quarantined it: FRIEND-README step 0" $null; continue }
     $have = Get-Sha $dest
     if ($have -eq $want.sha256) {
       Add-Row $leaf 'MATCH' "SHA256 $have" $null
@@ -709,9 +746,10 @@ if (-not $WhatIf) {
   [System.IO.File]::WriteAllText((Join-Path $backupDir 'RESTORE.txt'), ($lines -join "`r`n"), (New-Object System.Text.UTF8Encoding $false))
 }
 
-# ---------------------------------------------------------------- 8. DirectX 11 + verdict
+# ---------------------------------------------------------------- 8. exclusions, DirectX 11, verdict
 
-Write-Host ""
+Show-ExclusionHelp (-not (Test-Path -LiteralPath (Join-Path $bin 'version.dll')))
+
 Write-Host " DIRECTX 11 ONLY " -ForegroundColor Black -BackgroundColor Yellow
 Write-Host "  Start the game in DirectX 11: in the Larian launcher, the box next to PLAY must say DirectX 11, not Vulkan." -ForegroundColor Yellow
 Write-Host "  The host plays DX11, and Dark and Gate's native part only works in bin\bg3_dx11.exe." -ForegroundColor Yellow
