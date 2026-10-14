@@ -269,3 +269,30 @@ Only while `move_mode=1` **and** first person is live (on, active, not the downe
    - Does ×5 look right, or should they be skipped outright?
    - Does the blend go straight to the run cycle now that `Movement.Speed` is the target?
 5. **Input.** Build 2 moves on the physical keys (see Playtest 1). Do the `input off` checks confirm BG3's vector was the one that flicked? Does the 120 ms gate still release cleanly in chat?
+
+## Body facing from the camera (2026-10-13, static Ghidra, `bg3_dx11.exe`)
+
+Developer: "rotating the camera in the air also rotates the character model", and "if not jumping, rotating the camera should rotate the character if past 30 degrees".
+
+**BG3's steering machine** (`ecl::Character+0x80`) **[H]:**
+- `0x141BBD130(machine, type)` returns its state of a type, creating it if needed. The pointers are at `+0x00` (type 2), `+0x08` (3), `+0x10` (4), `+0x18` (5) and `+0x20` (**6, look-at**). The look-at state is 0x30 bytes, vtable `0x1456508A0`.
+- The active state is at `+0x38`; state 2 (turn to `SteeringComponent.TargetRotation`) runs below it at `+0x30`.
+- **Push `0x142006580(_, machine, _, state)`:**
+  - if the active state has the same type, it calls Continue (slot 3) and stops;
+  - otherwise CanExit (slot 5), Exit (slot 6), set `+0x38`, counter into `state+0x14`, Enter (slot 2).
+  - Pattern `48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B 7A 38 49 8B F1 48 8B EA 48 85 FF 74 ?? 4D 85 C9 74 ?? 48 8B 07 48 8B CF 48 89 5C 24 30 FF 50 08` (unique). `0x1420064B0` shares the first 28 bytes: it is the movement machine's push (counter at `+0x10`).
+- **Look-at set `0x141BEAA10(state, dir)`:** `state+0x18 = normalise(dir.x, 0, dir.z)`.
+- **Look-at Update `0x141BEAA60`**, every frame while the direction is non-zero:
+  - yaw = `atan2(−dx, −dz)` → `0x141BBD650(state 2, yaw, 1.0, 0)` (TargetRotation; 1.0 = the turn-rate multiplier);
+  - pushes state 2 into `+0x30`;
+  - sets `+0x10 = 1` when the direction moved more than about 25° from `+0x24`, most likely the sync of message 0x24.
+- **The WASD MoveController** (`0x14425F2C0`, `0x14426001A..0x14426004A`) does exactly this every moving frame: GetState(6), look-at with the step direction, push.
+
+**Built (build 11), `MoveFeel.cpp` `Facing()`:**
+- Runs every frame from the camera hook, in direct mode with first person live. It points the look-at state along the camera's forward (direction write, then push if it isn't active). BG3's steering then turns the body at its own rate, with no second writer, and the rotation syncs like a walk's facing.
+- **In the air** (`realjump::Active()`; the WASD controller sits out jumps, so nothing else writes): every frame. Data `move.face_air`.
+- **Standing still** (no WASD held, measured speed ≤ 0.3 m/s): once the camera is more than `move.face_idle_deg` (30°) off the body, until it is within 4° (or 1.5 s, logged).
+- **Moving on the ground:** untouched; the controller's own look-at faces the way you move.
+- **The body's visible front is the Transform's local −Z** (playtest 10, from the log): walking forward with BG3's facing, then stopping, read as 180° off by `QuatYaw` (+Z). Build 11's self-check took that for a wrong look-at sign and flipped it, which turned the body around in the air and standing. Build 12 measures the facing as `QuatYaw + 180°`, keeps the look-at direction = the camera forward (+1, as the static reading said; the air turns before the flip were already right), and only logs a turn that ends facing away. **[H]** Instant facing (`move.turn instant`, `SetYaw(atan2(move dir))`) used +Z too, so it most likely faced the body backwards. That may be part of playtest 2's "body turned by others" fight; to check before that knob is ever used again.
+- **Logs** (native.log): `MOVEFEEL: steering push at rva …`, `FACING: idle turn #n done, a deg -> b deg in N ms`, `FACING: air: the body followed the camera for N frames, at most N deg behind`, `FACING: couldn't point BG3's steering …`.
+- **Thread:** the camera hook, the same place RealJump::Start pushes movement states from (stable since 2026-10-10).

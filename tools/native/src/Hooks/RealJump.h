@@ -28,6 +28,9 @@ void NoteCharacter(void* character);
 // Per frame: measure the character's horizontal velocity (take-off inertia).
 void MeasureFrame();
 
+// The measured horizontal speed, m/s (MoveFeel's body facing: standing still?).
+float MeasuredSpeed();
+
 // +1 / -1: which way A/D steer in the air (checked in-game).
 void SetStrafeSign(float s);
 

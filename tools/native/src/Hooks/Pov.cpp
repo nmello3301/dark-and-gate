@@ -217,6 +217,8 @@ struct LuaState {
     bool      moveRaw = false;
     bool      moveHold = false;
     bool      moveMetrics = false;
+    float     moveFaceIdle = 30.f;  // standing still: the body turns to the camera past this (0 = never)
+    bool      moveFaceAir = true;   // in the air: the body turns with the camera
     // Locomotion Start / End / turn clips fast-forwarded in direct mode
     // (AnimRate SetLocoSkip): the player's instance, ids, rate.
     uintptr_t locoInst = 0;
@@ -359,6 +361,8 @@ void PollLuaFile()
     s.moveAccel = ValF(buf, "move_accel", 0.06f);
     s.moveDecel = ValF(buf, "move_decel", 0.04f);
     s.moveTurn = ValF(buf, "move_turn", 0.f);
+    s.moveFaceIdle = ValF(buf, "move_face_idle", 30.f);
+    s.moveFaceAir = ValI(buf, "move_face_air", 1) != 0;
     s.moveRaw = ValI(buf, "move_raw", 0) != 0;
     s.moveHold = ValI(buf, "move_hold", 0) != 0;
     s.moveMetrics = ValI(buf, "move_metrics", 0) != 0;
@@ -1381,8 +1385,13 @@ void OnFrame(void* gameplayCam)
         // dialogue, camera mode); move_hold is for anything beyond that.
         ms.hold = g_lua.moveHold;
         ms.metrics = g_lua.moveMetrics;
+        ms.faceIdleDeg = g_lua.moveFaceIdle;
+        ms.faceAir = g_lua.moveFaceAir;
         dag::movefeel::Configure(ms, g_lua.on && g_lua.active && !g_lua.orbit);
         dag::movefeel::Frame();
+        // Body facing from the camera: in the air, and standing still past
+        // move.face_idle_deg (DECISIONS 2026-10-13).
+        dag::movefeel::Facing(dag::realjump::Active());
         const bool direct = std::strcmp(dag::movefeel::State(), "direct") == 0;
         // Not during a jump: its take-off and landing blend exactly as the
         // signed-off jump did (playtest 2: a twitch at every take-off).

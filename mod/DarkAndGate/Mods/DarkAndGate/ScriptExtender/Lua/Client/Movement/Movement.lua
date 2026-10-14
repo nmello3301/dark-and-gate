@@ -37,7 +37,10 @@
 --           !dag_move_status, !dag_loco_sync on|off,
 --           !dag_move_mode vanilla|direct, !dag_move_accel <s>,
 --           !dag_move_decel <s>, !dag_move_turn instant|engine|<deg/s>,
---           !dag_move_input game|raw (!dag_move_metrics: MoveMetrics.lua)
+--           !dag_move_input game|raw (!dag_move_metrics: MoveMetrics.lua),
+--           !dag_face_idle <deg> (standing still: body turns to the camera
+--           past this; 0 = never), !dag_face_air on|off (in the air: body
+--           turns with the camera)
 
 local Log      = Ext.Require("Shared/Log.lua")
 local MCM      = Ext.Require("Shared/MCM.lua")
@@ -171,6 +174,8 @@ local function pushFeel()
         turn  = turnValue(feel.turn),
         raw   = feel.input == "raw" and 1 or 0,
         hold  = feel.hold and 1 or 0,
+        face_idle = math.max(0, tonumber(MCM.Get("move_face_idle_deg")) or D.face_idle_deg or 30),
+        face_air  = MCM.Get("move_face_air") and 1 or 0,
     })
 end
 
@@ -251,6 +256,8 @@ function M.Register()
     MCM.DefineBool("move_direct", (D.mode or "direct") == "direct", "Direct WASD movement (instant start, stop and turn)")
     MCM.DefineNumber("move_accel_time", D.accel_time or 0.06, "Direct movement: seconds to full speed", 0, 0.5)
     MCM.DefineNumber("move_decel_time", D.decel_time or 0.04, "Direct movement: seconds to a stop", 0, 0.5)
+    MCM.DefineNumber("move_face_idle_deg", D.face_idle_deg or 30, "Standing still: body turns to the camera past this many degrees (0 = never)", 0, 180)
+    MCM.DefineBool("move_face_air", D.face_air ~= false, "In the air: body turns with the camera")
 
     Ext.Events.Tick:Subscribe(function() pcall(tick) end)
 
@@ -279,6 +286,18 @@ function M.Register()
     end
     secCmd("dag_move_accel", "move_accel_time")
     secCmd("dag_move_decel", "move_decel_time")
+    -- Body facing from the camera (MoveFeel.cpp Facing; native.log FACING lines).
+    Ext.RegisterConsoleCommand("dag_face_idle", function(_, x)
+        if tonumber(x) then MCM.Set("move_face_idle_deg", math.max(0, tonumber(x))) end
+        pushFeel()
+        Log.Write(string.format("Move: standing still, the body turns to the camera past %.0f deg (0 = never)",
+            tonumber(MCM.Get("move_face_idle_deg")) or 0))
+    end)
+    Ext.RegisterConsoleCommand("dag_face_air", function(_, a)
+        if a == "on" or a == "off" then MCM.Set("move_face_air", a == "on") end
+        pushFeel()
+        Log.Write("Move: in the air the body " .. (MCM.Get("move_face_air") and "turns with the camera" or "keeps its facing"))
+    end)
     Ext.RegisterConsoleCommand("dag_move_turn", function(_, a)
         if a == "instant" or a == "engine" then feel.turn = a
         elseif tonumber(a) and tonumber(a) > 0 then feel.turn = tonumber(a) end

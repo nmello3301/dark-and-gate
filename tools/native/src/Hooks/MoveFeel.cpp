@@ -48,6 +48,18 @@ namespace dag::movefeel {
 namespace {
 
 constexpr uintptr_t kCharVtRva = 0x56576A0;   // ecl::Character
+// Body facing: the steering machine (ecl::Character +0x80) holds its states
+// by type at +0x00..+0x20 (type 6 = look-at at +0x20) and the active one at
+// +0x38. The look-at state keeps a horizontal direction at +0x18 and turns
+// it into SteeringComponent.TargetRotation every frame (Update 0x141BEAA60).
+// The push (0x142006580): same type -> Continue, else CanExit / Exit, set,
+// counter, Enter.
+constexpr uintptr_t kLookVtRva = 0x56508A0;   // steering look-at state (type 6)
+constexpr const char* kSteerPushPat =
+    "48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B 7A 38 49 8B F1 48 8B EA 48 85 FF 74 ?? 4D 85 C9 74 ?? 48 8B 07 48 8B CF 48 89 5C 24 30 FF 50 08";
+constexpr float kFaceDoneDeg = 4.f;      // an idle turn ends this close to the camera
+constexpr double kFaceTimeout = 1.5;     // ... or after this long (logged)
+constexpr float kStillSpeed = 0.3f;      // m/s, as data move.idle_speed
 constexpr float kPi = 3.14159265f;
 
 // Patterns: each unique in Patch 8 .text (byte scan, 2026-10-13).
@@ -97,6 +109,7 @@ using UpdateFn   = uint64_t(__fastcall*)(void* ctl, uint8_t* gameTime);
 using EnterFn    = uint64_t(__fastcall*)(void* ctl);
 using GetXformFn = uint8_t*(__fastcall*)(void* character);
 using SetQuatFn  = void(__fastcall*)(void* character, const float* quat);
+using SteerPushFn = char(__fastcall*)(void* unused, void* machine, void* unused2, void* state);
 
 uintptr_t g_base = 0;
 bool      g_ok = false;
@@ -119,6 +132,21 @@ std::atomic<float> g_camFx{ 0.f }, g_camFz{ 1.f };
 std::atomic<void*> g_char{ nullptr };
 std::atomic<float> g_vOut{ 0.f }, g_target{ 0.f };
 std::atomic<long>  g_updates{ 0 };
+SteerPushFn        g_steerPush = nullptr;
+std::atomic<float> g_faceIdle{ 30.f };
+std::atomic<bool>  g_faceAir{ true };
+
+// Body facing (camera hook thread, Facing()).
+struct Face {
+    bool   turning = false;     // an idle turn is running
+    double t0 = 0.0;
+    float  from = 0.f;          // degrees off when it started
+    long   turns = 0;
+    bool   air = false;         // following the camera in the air
+    long   airFrames = 0;
+    float  airMax = 0.f;        // the most the body lagged the camera in the air
+    int    pointFails = 0;
+} g_f;
 
 // Controller state, game thread only (the MoveController Update).
 struct Ctl {
@@ -648,6 +676,13 @@ void Install()
         Fail("could not patch the MoveController vtable");
         return;
     }
+    if (uint8_t* sp = dag::patternscan::Find(mod, kSteerPushPat)) {
+        g_steerPush = reinterpret_cast<SteerPushFn>(sp);
+        dag::log::Writef("MOVEFEEL: steering push at rva 0x%llX (body facing from the camera)",
+                         static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(sp) - g_base));
+    } else {
+        dag::log::Writef("MOVEFEEL: steering push pattern not found -> no body facing from the camera");
+    }
     g_ok = true;
     strcpy_s(g_why, "vanilla");
     dag::log::Writef("MOVEFEEL: installed (MoveController vtable slot rva 0x%llX, start-delay rva 0x%llX, ramp rva 0x%llX, "
@@ -684,6 +719,8 @@ void ApplyDirect(bool on, const char* why)
 
 void Configure(const Settings& s, bool povLive)
 {
+    g_faceIdle.store(s.faceIdleDeg, std::memory_order_relaxed);
+    g_faceAir.store(s.faceAir, std::memory_order_relaxed);
     g_accel.store(s.accelS < 0.f ? 0.f : s.accelS, std::memory_order_relaxed);
     g_decel.store(s.decelS < 0.f ? 0.f : s.decelS, std::memory_order_relaxed);
     g_turn.store(s.turn, std::memory_order_relaxed);
@@ -703,6 +740,105 @@ void SetCameraForward(float fx, float fz)
 {
     g_camFx.store(fx, std::memory_order_relaxed);
     g_camFz.store(fz, std::memory_order_relaxed);
+}
+
+namespace {
+
+// Point BG3's look-at steering along (fx, fz): its Update turns the body
+// there at BG3's own rate. Pushed as the active steering state if it isn't.
+bool Point(void* ch, float fx, float fz)
+{
+    __try {
+        uint8_t* steer = *reinterpret_cast<uint8_t**>(static_cast<uint8_t*>(ch) + 0x80);
+        if (!steer) return false;
+        uint8_t* look = *reinterpret_cast<uint8_t**>(steer + 0x20);
+        if (!look || !VtIs(look, kLookVtRva)) return false;   // made by the first WASD move
+        float* d = reinterpret_cast<float*>(look + 0x18);
+        d[0] = fx;   // the look-at direction is the way the body should face
+        d[1] = 0.f;  // (as the WASD controller's step direction; playtest 10)
+        d[2] = fz;
+        if (*reinterpret_cast<uint8_t**>(steer + 0x38) != look && !g_steerPush(nullptr, steer, nullptr, look)) return false;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+void PointOrNote(void* ch, float fx, float fz)
+{
+    if (Point(ch, fx, fz)) return;
+    if (++g_f.pointFails <= 5 || g_f.pointFails % 100 == 0)
+        dag::log::Writef("FACING: couldn't point BG3's steering (#%d: no look-at state yet = move once first, or the active steering state can't exit)",
+                         g_f.pointFails);
+}
+
+}  // namespace
+
+void Facing(bool airborne)
+{
+    void* ch = g_char.load(std::memory_order_relaxed);
+    if (!g_steerPush || !g_direct.load(std::memory_order_relaxed) || !ch || !VtIs(ch, kCharVtRva)) {
+        g_f.turning = false;
+        g_f.air = false;
+        return;
+    }
+    float q[4];
+    if (!ReadXform(ch, nullptr, q)) return;
+    const float fx = g_camFx.load(std::memory_order_relaxed), fz = g_camFz.load(std::memory_order_relaxed);
+    // The body's visible front is the Transform's local -Z, not +Z
+    // (playtest 10: walking forward then stopping read as 180 deg off, and
+    // the build 11 self-check "fixed" it by turning everyone around).
+    const float bodyYaw = QuatYaw(q) + kPi;
+    const float off = std::fabs(WrapPi(std::atan2(fx, fz) - bodyYaw)) * 180.f / kPi;
+    const double now = Now();
+
+    // In the air: the body follows the camera every frame.
+    const bool air = airborne && g_faceAir.load(std::memory_order_relaxed);
+    if (air != g_f.air) {
+        if (!air && g_f.airFrames > 0)
+            dag::log::Writef("FACING: air: the body followed the camera for %ld frames, at most %.0f deg behind", g_f.airFrames, g_f.airMax);
+        g_f.air = air;
+        g_f.airFrames = 0;
+        g_f.airMax = 0.f;
+    }
+    if (air) {
+        ++g_f.airFrames;
+        if (off > g_f.airMax) g_f.airMax = off;
+        g_f.turning = false;
+        PointOrNote(ch, fx, fz);
+        return;
+    }
+    if (airborne) return;   // face_air off: BG3's own
+
+    // On the ground: moving keeps BG3's facing (the way you move).
+    if (KeyMask() != 0 || dag::realjump::MeasuredSpeed() > kStillSpeed) {
+        g_f.turning = false;
+        return;
+    }
+    const bool logTurn = g_f.turns <= 10 || g_f.turns % 25 == 0;
+    if (g_f.turning) {
+        if (off < kFaceDoneDeg) {
+            g_f.turning = false;
+            if (logTurn) dag::log::Writef("FACING: idle turn #%ld done, %.0f deg -> %.0f deg in %.0f ms", g_f.turns, g_f.from, off, (now - g_f.t0) * 1000.0);
+            return;
+        }
+        if (now - g_f.t0 > kFaceTimeout) {
+            g_f.turning = false;
+            dag::log::Writef("FACING: idle turn #%ld gave up after %.1f s, still %.0f deg off (from %.0f)%s", g_f.turns, now - g_f.t0, off, g_f.from,
+                             off > 150.f ? " -- the body faces AWAY from the camera" : "");
+            return;
+        }
+        PointOrNote(ch, fx, fz);
+        return;
+    }
+    const float idle = g_faceIdle.load(std::memory_order_relaxed);
+    if (idle > 0.f && off > idle) {
+        g_f.turning = true;
+        g_f.t0 = now;
+        g_f.from = off;
+        ++g_f.turns;
+        PointOrNote(ch, fx, fz);
+    }
 }
 
 void ForgetCharacter()

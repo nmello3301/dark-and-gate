@@ -16,6 +16,33 @@ Claude reads all of them; you only report how it *felt*.
 - Keep the mouse still: the strafe and reverse timings are measured in camera space.
 - Leave about a second between presses.
 
+## Build 12 (2026-10-13): body facing the right way round
+
+Playtest 10: in the air and standing, the body faced 180° away from the camera, and it turned around in place when you stopped. The steering direction was right; the measurement of the body's front was 180° off (the model's front is the Transform's −Z). The first turn looked like a failure, and the self-check "fixed" it by flipping the direction. Build 12 measures the front correctly and drops the flip.
+
+**Do / expect:** the build 11 steps below. The body faces the camera; stopping doesn't turn you around. native.log: `FACING: idle turn #n done, …`, `FACING: air: … at most N deg behind` (small N), and no `faces AWAY`.
+
+## Build 11 (2026-10-13): the body follows the camera
+
+In the air, the body turns with the camera. Standing still, it turns to the camera once you look more than 30° away from where it faces. Moving on the ground, nothing changes: the body faces the way you move. BG3's own steering does the turn, so it should be smooth and never flicker.
+
+**Do:**
+1. Walk a step first: the steering hooks up on the first move after a load.
+2. Stand still. Turn the camera slowly to the right until the body turns (look down to see it). Then turn back and forth by about 20°.
+3. Jump and swing the camera around in the air, hopping a few times.
+4. Strafe with A, stop, and stand.
+
+**Expect:**
+- standing, the body turns to the camera once past about 30° and then stays put while you look around within 30°;
+- in the air the body turns with the camera, at BG3's turn speed;
+- after the strafe stops, the body turns from sideways to the camera;
+- no flicker, and the view doesn't wobble when the body turns.
+- native.log: `MOVEFEEL: steering push at rva …`, `FACING: idle turn #n done, a deg -> b deg in N ms`, `FACING: air: the body followed the camera …`. No `FACING: couldn't point …` and no `… sign flipped`.
+
+**Knobs:** `!dag_face_idle <deg>` (0 = off), `!dag_face_air on|off`.
+
+**Please say:** is the turn speed right, in the air and standing? Does the camera sway when the body turns under it?
+
 ## Build 10 (2026-10-13): no recover after a jump
 
 Playtest 8: the grace worked (Space pressed early was kept), but every hop still caught. The log showed two causes:

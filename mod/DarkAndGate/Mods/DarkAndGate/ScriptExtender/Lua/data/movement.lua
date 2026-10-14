@@ -103,6 +103,15 @@
 --                   movement direction at once; BG3's steering keeps its own
 --                   yaw and fights it, so the body flickers), or a number in
 --                   degrees per second (the same fight). Never delays movement.
+--   face_idle_deg   standing still (first person, direct mode): once the
+--                   camera is this many degrees off the body, the body turns
+--                   to the camera (developer 2026-10-13: 30). 0 = never.
+--                   MCM "move_face_idle_deg", !dag_face_idle <deg>.
+--   face_air        in the air (a real jump): the body turns with the camera
+--                   all the time. MCM "move_face_air", !dag_face_air on|off.
+--                   Both turn through BG3's own steering (MoveFeel.cpp
+--                   Facing), at its turn rate, synced like a walk's facing.
+--                   Moving on the ground the body faces the way you move.
 --   input           direction of the move: "raw" = the physical W/A/S/D
 --                   on our own camera's forward (what the real jump steers
 --                   with) | "game" = BG3's own movement vector (turned by
@@ -175,6 +184,8 @@ return {
         accel_time    = 0.06,
         decel_time    = 0.04,
         turn          = "engine",
+        face_idle_deg = 30,       -- standing still: the body turns to the camera past this (2026-10-13; 0 = never)
+        face_air      = true,     -- in the air: the body turns with the camera (2026-10-13)
         input         = "raw",
         skip_loco_transitions = true,
         loco_transition_rate  = 5.0,

@@ -578,6 +578,8 @@ void MeasureFrame()
 
 void SetCameraForward(float fx, float fz) { g_camFwd[0] = fx; g_camFwd[1] = fz; }
 
+float MeasuredSpeed() { return std::sqrt(g_measVel[0] * g_measVel[0] + g_measVel[1] * g_measVel[1]); }
+
 bool Start(float durMs, float h, float k, const float camFwdXZ[2], int seq)
 {
     if (!g_getState || !g_counter) { dag::log::Writef("RJUMP: not available (%s)", g_why); return false; }

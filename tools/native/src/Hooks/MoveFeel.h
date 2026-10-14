@@ -39,6 +39,8 @@ struct Settings {
     float strafeSign = -1.f;   // raw input: A/D side (the real jump's sign)
     bool  hold = false;        // input released (menus, dialogue, map, downed)
     bool  metrics = false;     // !dag_move_metrics on
+    float faceIdleDeg = 30.f;  // standing still: the body turns to the camera once it is this far off (0 = never)
+    bool  faceAir = true;      // in the air (a real jump): the body turns with the camera
 };
 
 // Pattern scans, call-site and vtable hooks, stubs. Call once at DLL load,
@@ -49,6 +51,16 @@ void Install();
 // downed orbit. Direct mode runs only while povLive; the byte patches are
 // applied / restored when that changes.
 void Configure(const Settings& s, bool povLive);
+
+// Every frame (camera hook), after Configure, while direct mode is live:
+// the body faces the camera in the air (airborne = a real jump steers),
+// and standing still once the camera is faceIdleDeg off the body (until it
+// is lined up). Moving on the ground the body still faces the way you move.
+// BG3's own steering does the turn: we point the look-at steering state the
+// WASD controller drives (type 6) along the camera, so the body turns at
+// BG3's own rate, without the two-writer fight of instant facing, and the
+// rotation syncs. docs/spikes/move-feel.md "Body facing".
+void Facing(bool airborne);
 
 // Camera forward on the ground plane (unit vector), for raw input and the
 // metrics' strafe angles.

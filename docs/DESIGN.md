@@ -74,6 +74,7 @@ The left mouse button does everything offensive: it swings the held weapon, or c
 
 - **Camera on the head bone.** It sits at the eyes, slightly forward, follows the head's position but not its animation wobble, and uses a wider field of view (about 90°, adjustable).
 - **Hide the head on your own screen only.** The local player's head, hair, beard and headwear are hidden on their own client. Body, arms, legs and weapon stay visible, so you see your hands and blade when you swing and your feet when you look down. Other players still see the full character. The head is hidden only while the camera is in your eyes: the downed camera, dialogues and cutscenes, and first person off all show it again (DECISIONS 2026-10-13).
+- **The body follows the camera** (decided 2026-10-13). Moving, the body faces the way you move. In the air it turns with the camera all the time. Standing still, it turns to the camera once the camera is more than 30° off. BG3's own steering does the turn, so it is smooth and other players see it (`data/movement.lua` `move.face_idle_deg`, `move.face_air`).
 - **Near-clip and weapon clipping.** The camera's near plane is tuned so close walls and your own weapon don't cut through the view.
 - **Fallback:** a floating arms-and-weapon view model, as in classic shooters. It is the most robust option but needs its own animation set, so it is the last resort.
 
