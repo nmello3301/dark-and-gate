@@ -193,8 +193,11 @@ function M.Register()
         Log.Write("MP: you control " .. tostring(p.uuid) .. " (server)")
     end)
     listen(Net.Channels.MpNoteMark, onNoteMark)
+    -- Every session load (joining mid-session, reconnecting after a drop, a
+    -- level / save load): say hello again, so the host re-sends the snapshot.
     Ext.Events.SessionLoaded:Subscribe(function()
         me.started = true
+        me.welcomed, me.tries, me.bestRtt = false, 0, nil
         me.nextAt = nowMs() + 1000   -- let the server's listeners settle
     end)
     Ext.Events.Tick:Subscribe(function() pcall(tick) end)
