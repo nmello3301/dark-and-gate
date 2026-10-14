@@ -16,8 +16,13 @@
 namespace dag::log {
 
 void Init();
-void Writef(const char* fmt, ...);
+void Writef(const char* fmt, ...);   // thread-safe
 void Shutdown();
+
+// Multiplayer: prefix every line with "[Native <tag>]" (e.g. "u65537 host"),
+// so logs from several machines can be told apart. Lua sends it (mp_tag in
+// native-pov.txt) once the server has said who we are. Empty = "[Native]".
+void SetTag(const char* tag);
 
 inline void Write(const std::string& s) { Writef("%s", s.c_str()); }
 

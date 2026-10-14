@@ -15,12 +15,19 @@
 --   Party.CharacterOfPeer(peer) the character a net message's sender controls
 --   Party.OnControl(fn)         fn(user, uuid, previous uuid) after each change
 --
--- Control is tracked from Osiris GainedControl (Brawl does the same); before
--- the first event the host character counts as controlled.
+-- Control is tracked from Osiris GainedControl (Brawl does the same), then
+-- Osi.GetCurrentCharacter(user). Only the HOST's user falls back to the host
+-- character (single player: exactly as before); any other user with no
+-- known character gets nil, so a remote player's request is dropped instead
+-- of acting on the host's character (multiplayer MP-1, blocker B1/B2 in
+-- docs/design/multiplayer.md).
+--   Party.Users()               Osiris user ids of the players in the party
+--   Party.HostUser()            the host's Osiris user id
 
 local M = {}
 
 local controlled = {}   -- Osiris user id -> uuid
+local userCache = { at = -1e9, list = {} }
 local controlHooks = {} -- OnControl listeners (Server/Combat/Downed.lua)
 local memberCache = { at = -1e9, list = {}, set = {} }
 
@@ -78,24 +85,43 @@ local function host()
     return ok and M.Norm(h) or nil
 end
 
+function M.HostUser()
+    local h = host()
+    return h and M.UserOf(h) or nil
+end
+
+-- Every player's Osiris user (deduplicated reserved users of the party).
+function M.Users()
+    local t = now()
+    if t - userCache.at < 1000 then return userCache.list end
+    local set, list = {}, {}
+    for _, u in ipairs(M.Members()) do
+        local id = M.UserOf(u)
+        if id and id > 0 and not set[id] then set[id] = true; list[#list + 1] = id end
+    end
+    local hu = M.HostUser()
+    if hu and not set[hu] then list[#list + 1] = hu end
+    userCache.at, userCache.list = t, list
+    return list
+end
+
 function M.Controlled(user)
     if user and controlled[user] then return controlled[user] end
     if user then
         local ok, c = pcall(function() return Osi.GetCurrentCharacter(user) end)
         if ok and c and c ~= "" then return M.Norm(c) end
     end
-    return host()
+    -- Only the host's own user falls back to the host character.
+    if user == nil or user == M.HostUser() then return host() end
+    return nil
 end
 
 function M.IsControlled(uuid)
     uuid = M.Norm(uuid)
     if not uuid then return false end
-    local any = false
-    for _, c in pairs(controlled) do
-        any = true
-        if c == uuid then return true end
+    for _, user in ipairs(M.Users()) do
+        if M.Controlled(user) == uuid then return true end
     end
-    if not any then return uuid == host() end
     return false
 end
 
@@ -107,7 +133,8 @@ function M.CompanionsOf(user)
     return out
 end
 
--- The character the sender of a net message controls (falls back to the host).
+-- The character the sender of a net message controls (the host's own
+-- messages fall back to the host character; anyone else's to nil).
 function M.CharacterOfPeer(peer)
     return M.Controlled(M.UserFromPeer(peer))
 end
@@ -130,8 +157,14 @@ function M.Register()
             for _, fn in ipairs(controlHooks) do pcall(fn, user, uuid, prev) end
         end
     end)
-    Ext.Osiris.RegisterListener("CharacterJoinedParty", 1, "after", function() memberCache.at = -1e9 end)
-    Ext.Osiris.RegisterListener("CharacterLeftParty", 1, "after", function() memberCache.at = -1e9 end)
+    Ext.Osiris.RegisterListener("CharacterJoinedParty", 1, "after", function() memberCache.at = -1e9; userCache.at = -1e9 end)
+    Ext.Osiris.RegisterListener("CharacterLeftParty", 1, "after", function() memberCache.at = -1e9; userCache.at = -1e9 end)
+    Ext.Osiris.RegisterListener("CharacterReservedUserIDChanged", 3, "after", function() userCache.at = -1e9 end)
+    Ext.Osiris.RegisterListener("UserDisconnected", 3, "after", function(user)
+        local u = tonumber(user)
+        if u then controlled[u] = nil end
+        userCache.at = -1e9
+    end)
 end
 
 return M

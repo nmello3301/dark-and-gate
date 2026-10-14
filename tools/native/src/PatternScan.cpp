@@ -71,12 +71,22 @@ bool GetTextSection(void* module, uint8_t** base, size_t* size)
     return false;
 }
 
-}  // namespace
+SRWLOCK g_recLock = SRWLOCK_INIT;
+std::vector<ScanRecord>  g_scans;
+std::vector<PatchRecord> g_patches;
 
-uint8_t* Find(void* module, std::string_view patternIdaStyle)
+uintptr_t ExeRva(const void* at)
 {
-    if (!module) module = GetModuleHandleW(nullptr);
+    const auto base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+    const auto a = reinterpret_cast<uintptr_t>(at);
+    auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+    if (a < base || a >= base + nt->OptionalHeader.SizeOfImage) return 0;
+    return a - base;
+}
 
+uint8_t* FindIn(void* module, std::string_view patternIdaStyle)
+{
     Compiled c;
     if (!CompilePattern(patternIdaStyle, c)) return nullptr;
 
@@ -94,6 +104,77 @@ uint8_t* Find(void* module, std::string_view patternIdaStyle)
         if (ok) return base + i;
     }
     return nullptr;
+}
+
+}  // namespace
+
+uint8_t* Find(void* module, std::string_view patternIdaStyle)
+{
+    if (!module) module = GetModuleHandleW(nullptr);
+    uint8_t* hit = FindIn(module, patternIdaStyle);
+    if (module == GetModuleHandleW(nullptr)) {
+        AcquireSRWLockExclusive(&g_recLock);
+        g_scans.push_back({ std::string(patternIdaStyle), hit ? ExeRva(hit) : 0 });
+        ReleaseSRWLockExclusive(&g_recLock);
+    }
+    return hit;
+}
+
+std::vector<ScanRecord> ScanRecords()
+{
+    AcquireSRWLockShared(&g_recLock);
+    std::vector<ScanRecord> out = g_scans;
+    ReleaseSRWLockShared(&g_recLock);
+    return out;
+}
+
+std::vector<PatchRecord> PatchRecords()
+{
+    AcquireSRWLockShared(&g_recLock);
+    std::vector<PatchRecord> out = g_patches;
+    ReleaseSRWLockShared(&g_recLock);
+    return out;
+}
+
+int CountMatches(const uint8_t* buf, size_t size, std::string_view pattern, size_t* firstOff, int stopAt)
+{
+    Compiled c;
+    if (!CompilePattern(pattern, c)) return -1;
+    const size_t n = c.bytes.size();
+    if (!buf || n > size) return 0;
+    // Anchor on the first fixed byte (memchr), then compare the rest.
+    size_t anchor = 0;
+    while (anchor < n && !c.mask[anchor]) ++anchor;
+    if (anchor == n) return -1;
+    int count = 0;
+    const uint8_t* p = buf + anchor;
+    const uint8_t* end = buf + (size - n) + anchor + 1;   // last anchor position + 1
+    while (p < end) {
+        p = static_cast<const uint8_t*>(std::memchr(p, c.bytes[anchor], static_cast<size_t>(end - p)));
+        if (!p) break;
+        const uint8_t* start = p - anchor;
+        bool ok = true;
+        for (size_t j = 0; j < n; ++j) {
+            if (c.mask[j] && start[j] != c.bytes[j]) { ok = false; break; }
+        }
+        if (ok) {
+            if (count == 0 && firstOff) *firstOff = static_cast<size_t>(start - buf);
+            if (++count >= stopAt) break;
+        }
+        ++p;
+    }
+    return count;
+}
+
+void RecordPatch(const void* at, size_t len, const char* kind)
+{
+    const uintptr_t rva = ExeRva(at);
+    if (!rva) return;
+    AcquireSRWLockExclusive(&g_recLock);
+    bool seen = false;
+    for (const auto& p : g_patches) if (p.rva == rva) { seen = true; break; }
+    if (!seen) g_patches.push_back({ rva, len, kind });
+    ReleaseSRWLockExclusive(&g_recLock);
 }
 
 uint8_t* DecodeRelCallTarget(uint8_t* callSite)
@@ -123,6 +204,7 @@ uint8_t* WriteCall5(uint8_t* callSite, void* newTarget)
     DWORD tmp = 0;
     VirtualProtect(callSite, 5, oldProtect, &tmp);
     FlushInstructionCache(GetCurrentProcess(), callSite, 5);
+    RecordPatch(callSite, 5, "call");
 
     return oldTarget;
 }
@@ -208,6 +290,7 @@ bool PatchCode(uint8_t* at, const uint8_t* bytes, size_t n)
     DWORD tmp = 0;
     VirtualProtect(blk, 16, old, &tmp);
     FlushInstructionCache(GetCurrentProcess(), blk, 16);
+    RecordPatch(at, n, "bytes");
     return true;
 }
 
@@ -275,6 +358,7 @@ uint8_t* InstallFarJmp5(uint8_t* jmpSite, void* newTarget)
     DWORD tmp = 0;
     VirtualProtect(jmpSite, 5, oldProtect, &tmp);
     FlushInstructionCache(GetCurrentProcess(), jmpSite, 5);
+    RecordPatch(jmpSite, 5, "jmp");
     return oldTarget;
 }
 
@@ -332,6 +416,7 @@ bool InstallEntryDetour(uint8_t* fn, const uint8_t* expected, size_t stolenLen, 
     DWORD tmp = 0;
     VirtualProtect(fn, 8, oldProtect, &tmp);
     FlushInstructionCache(GetCurrentProcess(), fn, 8);
+    RecordPatch(fn, stolenLen, "detour");
     return true;
 }
 

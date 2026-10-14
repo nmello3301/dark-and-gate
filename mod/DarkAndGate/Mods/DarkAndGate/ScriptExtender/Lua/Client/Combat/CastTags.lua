@@ -27,6 +27,7 @@
 
 local Log    = Ext.Require("Shared/Log.lua")
 local spells = Ext.Require("data/spells.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
 
@@ -247,7 +248,7 @@ function M.Register()
         if removeAt and nowMs() >= removeAt then pcall(removeNow, "after clip") end
     end)
     Ext.RegisterConsoleCommand("dag_cast_tags", function(_, a)
-        local okE, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+        local okE, ents = pcall(Me.All)
         local me = okE and ents and ents[1] or nil
         if a == "off" then removeNow("command") return end
         M.Apply(me)

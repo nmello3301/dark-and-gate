@@ -24,6 +24,7 @@
 
 local Log    = Ext.Require("Shared/Log.lua")
 local spells = Ext.Require("data/spells.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
 
@@ -190,7 +191,7 @@ function M.Forget() memo = {} end
 function M.Register()
     Ext.RegisterConsoleCommand("dag_spell_anims", function(_, spell)
         spell = spell or "Projectile_FireBolt"
-        local okE, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+        local okE, ents = pcall(Me.All)
         local ent = okE and ents and ents[1] or nil
         if not ent then Log.Write("SpellAnims: no controlled character"); return end
         memo = {}

@@ -19,13 +19,14 @@ local SpellAnims   = Ext.Require("Client/Combat/SpellAnims.lua")
 local GenomeEvents = Ext.Require("Client/Combat/GenomeEvents.lua")
 local CastTags     = Ext.Require("Client/Combat/CastTags.lua")
 local Gallery      = Ext.Require("Client/AnimLib/Gallery.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
 
 local RESEND_S = 7.0
 
 local function player()
-    local ok, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    local ok, ents = pcall(Me.All)
     return ok and ents and ents[1] or nil
 end
 

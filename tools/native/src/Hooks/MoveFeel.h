@@ -41,6 +41,7 @@ struct Settings {
     bool  metrics = false;     // !dag_move_metrics on
     float faceIdleDeg = 30.f;  // standing still: the body turns to the camera once it is this far off (0 = never)
     bool  faceAir = true;      // in the air (a real jump): the body turns with the camera
+    bool  mpRemote = false;    // multiplayer: other players connected (host: their synced paths replay here)
 };
 
 // Pattern scans, call-site and vtable hooks, stubs. Call once at DLL load,

@@ -19,6 +19,37 @@ Net.MOD_UUID = "d5d298fd-ba29-4dc1-8346-6ac96b8c2cd7"
 -- Channel names. Keep sorted and documented. Add here first; handlers go in
 -- Server/Net.lua and Client/Net.lua.
 Net.Channels = {
+    -- Multiplayer MP-0 (Client/MP.lua, Server/MP.lua, docs/design/multiplayer.md):
+    -- MpHello     client -> server  this machine's versions (Shared/Version.lua)
+    -- MpWelcome   server -> client  { user, peer, osi_user, character, host
+    --             = host versions, must = {keys}, warn = {keys}, text }
+    -- MpStatusReq client -> server  {}  (!dag_mp_status)
+    -- MpStatus    server -> client  { peers = {...}, host = versions }
+    -- MpProbe     server -> client  { id }, answered with MpProbeBack { id }:
+    --             the round trip the server measures for each peer's ping.
+    MpHello           = "DAG_MpHello",
+    MpWelcome         = "DAG_MpWelcome",
+    MpStatusReq       = "DAG_MpStatusReq",
+    MpStatus          = "DAG_MpStatus",
+    MpProbe           = "DAG_MpProbe",
+    MpProbeBack       = "DAG_MpProbeBack",
+    -- MP-1..MP-4:
+    -- MpFeatures  server -> all     { features = {name = bool} } (kill switches)
+    -- MpRoster    server -> all     { peers = n } (connected players)
+    -- MpClock     client -> server  { tc } ; MpClockBack { tc, ts } (clock sync)
+    -- MpControl   server -> client  { uuid } the character you control now
+    -- MpSettings  server -> client  { melee_cooldown, ... } host rules (join snapshot)
+    -- MpNote      client -> server  { text, state } issue marker request
+    -- MpNoteMark  server -> all     { n, from, text, t, state } "Issue #n marked"
+    MpFeatures        = "DAG_MpFeatures",
+    MpRoster          = "DAG_MpRoster",
+    MpClock           = "DAG_MpClock",
+    MpClockBack       = "DAG_MpClockBack",
+    MpControl         = "DAG_MpControl",
+    MpSettings        = "DAG_MpSettings",
+    MpNote            = "DAG_MpNote",
+    MpNoteMark        = "DAG_MpNoteMark",
+
     -- Round-trip verification. Payload: { nonce: string, sentMs: int64 }.
     -- Server echoes with { nonce, sentMs, recvMs, replyMs }.
     Ping              = "DAG_Ping",
@@ -243,6 +274,20 @@ Net.AllChannels = {
     Net.Channels.Scene,
     Net.Channels.MoveProbeReq,
     Net.Channels.MoveProbe,
+    Net.Channels.MpHello,
+    Net.Channels.MpWelcome,
+    Net.Channels.MpStatusReq,
+    Net.Channels.MpStatus,
+    Net.Channels.MpProbe,
+    Net.Channels.MpProbeBack,
+    Net.Channels.MpFeatures,
+    Net.Channels.MpRoster,
+    Net.Channels.MpClock,
+    Net.Channels.MpClockBack,
+    Net.Channels.MpControl,
+    Net.Channels.MpSettings,
+    Net.Channels.MpNote,
+    Net.Channels.MpNoteMark,
 }
 
 return Net

@@ -9,9 +9,26 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace dag::patternscan {
+
+// Startup self-check (SelfCheck.cpp): every Find() in the game exe and
+// every code patch site is recorded here, so the check can re-scan each
+// pattern in the exe file on disk (resolves? unique?) and test the patch
+// sites against a known exe patch (Party Limit Begone).
+struct ScanRecord  { std::string pattern; uintptr_t rva; };      // rva 0 = not found
+struct PatchRecord { uintptr_t rva; size_t len; const char* kind; };
+std::vector<ScanRecord>  ScanRecords();
+std::vector<PatchRecord> PatchRecords();
+// Matches of `pattern` in a raw buffer (e.g. the exe file's code section),
+// counting up to `stopAt`; `*firstOff` = offset of the first. -1 = bad pattern.
+int CountMatches(const uint8_t* buf, size_t size, std::string_view pattern, size_t* firstOff, int stopAt);
+// For code a module patches itself, or will patch later (byte toggles).
+// Ignored outside the game exe; one record per rva.
+void RecordPatch(const void* at, size_t len, const char* kind);
 
 // Finds the first occurrence of `patternIdaStyle` inside `module`.
 // Returns nullptr if not found or if the pattern string is malformed.

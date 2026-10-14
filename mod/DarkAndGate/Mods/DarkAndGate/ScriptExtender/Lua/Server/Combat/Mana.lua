@@ -12,6 +12,9 @@
 local Log = Ext.Require("Shared/Log.lua")
 local Net = Ext.Require("Shared/Net.lua")
 
+local MPState = Ext.Require("Shared/MPState.lua")
+local ServerNetMod = Ext.Require("Server/Net.lua")
+
 local M = {}
 
 -- user id -> state table
@@ -70,6 +73,11 @@ function M.TrySpend(userId, uuid, cost)
     return true, u
 end
 
+-- Join snapshot (Server/MP.lua): send this player their mana now.
+function M.Push(userId, uuid)
+    pcall(function() broadcast(userId, stateFor(userId, uuid)) end)
+end
+
 function M.Refill(userId, uuid)
     local u = stateFor(userId, uuid)
     u.current = u.max
@@ -97,7 +105,12 @@ function M.Register()
         pcall(M.Tick, tonumber(Ext.Timer.MonotonicTime()))
     end)
     Ext.RegisterNetListener(Net.Channels.ManaRefill, function(_, _, userId)
-        local uuid = (Ext.Require("Server/Net.lua")).UserToCharacter(userId)
+        -- A test helper: with other players connected, only the host may refill.
+        if MPState.Multi() and ((tonumber(userId) or 0) >> 16) ~= 1 then
+            Log.Write("Mana: refill from user " .. tostring(userId) .. " REJECTED (only the host, in co-op)")
+            return
+        end
+        local uuid = ServerNetMod.UserToCharacter(userId)
         M.Refill(userId, uuid)
         Log.Write("Mana: refill user=" .. tostring(userId))
     end)

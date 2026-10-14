@@ -54,6 +54,7 @@ local FullPov   = Ext.Require("FullPov.lua")
 local JumpAnims = Ext.Require("Client/Movement/JumpAnims.lua")
 local movement  = Ext.Require("data/movement.lua")
 local Actions   = Ext.Require("Client/Combat/Actions.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
 
@@ -183,7 +184,7 @@ local speed = { at = 0, x = nil, z = nil, v = 0 }
 local function sampleSpeed(now)
     if now - speed.at < 100 then return end
     local ok, t = pcall(function()
-        return Ext.Entity.GetAllEntitiesWithComponent("ClientControl")[1].Transform.Transform.Translate
+        return Me.All()[1].Transform.Transform.Translate
     end)
     if ok and t then
         if speed.x then
@@ -271,7 +272,7 @@ function M.OnSpace()
     FullPov.Jump(J.seq, J.T, h, k)
     -- Real jump: the character's real position rises, so the hitbox follows
     -- by itself; only the visual lift needs the hitbox lifted by hand.
-    ClientNet.JumpStart(J.T, FullPov.JumpMode() == "real" and 0 or h, k)
+    ClientNet.JumpStart(J.T, FullPov.JumpMode() == "real" and 0 or h, k, h)
 
     -- Slow the jump clips to fit the airtime with the native per-character
     -- play rate (AnimRate.cpp, docs/spikes/anim-clock.md); reset on landing.
@@ -495,7 +496,7 @@ function M.Register()
     Ext.RegisterConsoleCommand("dag_lift_probe", function(_, m)
         local dy = tonumber(m) or 0.5
         local ok, err = pcall(function()
-            local e = Ext.Entity.GetAllEntitiesWithComponent("ClientControl")[1]
+            local e = Me.All()[1]
             local v = e.Visual.Visual
             local t = e.Transform.Transform.Translate
             v:SetWorldTranslate({ t[1], t[2] + dy, t[3] })

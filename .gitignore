@@ -39,3 +39,6 @@ desktop.ini
 # two are per-run artefacts that would just churn the repo.
 patches/**/apply.result
 patches/**/commit-msg.txt
+
+# Build stamp written by scripts/deploy.ps1 at pack time (multiplayer version handshake)
+mod/DarkAndGate/Mods/DarkAndGate/ScriptExtender/Lua/Shared/BuildInfo.lua

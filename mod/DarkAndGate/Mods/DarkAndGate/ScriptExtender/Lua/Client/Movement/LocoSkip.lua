@@ -19,6 +19,7 @@
 local Log     = Ext.Require("Shared/Log.lua")
 local FullPov = Ext.Require("FullPov.lua")
 local D       = Ext.Require("data/movement.lua").move
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
 
@@ -29,7 +30,7 @@ local function us() return Ext.Timer.MicrosecTime() end
 local function nowMs() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
 
 local function player()
-    local ok, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    local ok, ents = pcall(Me.All)
     return ok and ents and ents[1] or nil
 end
 

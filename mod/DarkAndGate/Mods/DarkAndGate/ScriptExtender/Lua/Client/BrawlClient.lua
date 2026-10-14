@@ -13,11 +13,12 @@
 local Log = Ext.Require("Shared/Log.lua")
 
 local FullPov = Ext.Require("FullPov.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
 
 local function controlled()
-    local ok, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    local ok, ents = pcall(Me.All)
     local e = ok and ents and ents[1] or nil
     local okU, u = pcall(function() return e.Uuid.EntityUuid end)
     return okU and u or nil

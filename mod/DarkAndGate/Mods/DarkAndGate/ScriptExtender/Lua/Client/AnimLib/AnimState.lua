@@ -12,6 +12,7 @@
 -- Take one while vanilla targeting runs and one while ours runs, then diff.
 
 local Log = Ext.Require("Shared/Log.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
 
@@ -20,7 +21,7 @@ local pending = nil   -- { label, at }
 local function nowMs() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
 
 local function player()
-    local ok, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    local ok, ents = pcall(Me.All)
     return ok and ents and ents[1] or nil
 end
 

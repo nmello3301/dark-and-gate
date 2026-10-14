@@ -30,6 +30,7 @@ local SpellFx      = Ext.Require("Client/Combat/SpellFx.lua")
 local CastTags     = Ext.Require("Client/Combat/CastTags.lua")
 local movement     = Ext.Require("data/movement.lua")
 local spells       = Ext.Require("data/spells.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
 
@@ -39,7 +40,7 @@ local enabled = P.enabled ~= false
 local function nowMs() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
 
 local function player()
-    local ok, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    local ok, ents = pcall(Me.All)
     return ok and ents and ents[1] or nil
 end
 

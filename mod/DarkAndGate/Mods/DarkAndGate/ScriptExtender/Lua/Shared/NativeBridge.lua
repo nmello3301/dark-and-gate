@@ -73,9 +73,12 @@ M.GetEyeHeightForRace = getEyeHeightForRace
 -- Returns the local client's controlled entity, or nil. Multiplayer-safe:
 -- each client sees its own controlled char. Falls back through SE's
 -- several APIs because none are documented as universally present.
+local Me = Ext.Require("Client/Me.lua")       -- the local player's character (multiplayer)
+local MPState = Ext.Require("Shared/MPState.lua")
 local function getControlledEntity()
-    -- Preferred: ClientControl component (one per locally-controlled char).
-    local ok, entities = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    -- Preferred: ClientControl component; in co-op other players' characters
+    -- can carry it too, so Me.All() puts the local one first (Client/Me.lua).
+    local ok, entities = pcall(Me.All)
     if ok and entities and #entities > 0 then
         return entities[1]
     end
@@ -89,6 +92,9 @@ M.GetControlledEntity = getControlledEntity
 -- Returns true if any dialog on the controlled character or a party
 -- member is active, or any cinematic/cutscene is playing.
 local function isGameplayPaused()
+    -- Co-op: another player's dialogue must not pause THIS player; the
+    -- server's per-player scene message (Server/Scene.lua) covers ours.
+    if MPState.Multi() then return false end
     -- Any entity with a Dialog component means a dialog is active somewhere.
     local ok, dlgs = pcall(Ext.Entity.GetAllEntitiesWithComponent, "Dialog")
     if ok and dlgs and #dlgs > 0 then return true end

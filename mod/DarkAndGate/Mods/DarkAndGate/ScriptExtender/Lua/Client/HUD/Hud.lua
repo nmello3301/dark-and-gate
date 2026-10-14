@@ -36,6 +36,7 @@ local FullPov    = Ext.Require("FullPov.lua")
 local HotbarMenu = Ext.Require("Client/HUD/HotbarMenu.lua")
 local GiveUpButton = Ext.Require("Client/HUD/GiveUpButton.lua")
 local WindowFlags = Ext.Require("Client/HUD/WindowFlags.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = { menuOpen = false }
 
@@ -66,7 +67,7 @@ local function viewport()
 end
 
 local function player()
-    local ok, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    local ok, ents = pcall(Me.All)
     return ok and ents and ents[1] or nil
 end
 

@@ -27,6 +27,7 @@
 local Log = Ext.Require("Shared/Log.lua")
 local movement = Ext.Require("data/movement.lua")
 local Tags = Ext.Require("Client/AnimLib/Tags.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
 
@@ -284,7 +285,7 @@ function M.Register()
     -- live value of each one on the controlled character. Read-only.
     Ext.RegisterConsoleCommand("dag_anim_vars", function(_, filter)
         local f = filter and filter:lower() or nil
-        local ents = Ext.Entity.GetAllEntitiesWithComponent("ClientControl")
+        local ents = Me.All()
         local e = ents and ents[1]
         if not e then Log.Write("AnimVars: no controlled entity"); return end
         local ok, err = pcall(function()

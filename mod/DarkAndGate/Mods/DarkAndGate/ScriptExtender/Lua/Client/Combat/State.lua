@@ -52,12 +52,16 @@ end
 -- inFight (see above — needed for dummy tests before the goblin fight).
 -- fix3: the modal-UI part (3 entity queries) is cached for 250 ms; it
 -- used to run on every input event and every HUD tick.
+local MPState = Ext.Require("Shared/MPState.lua")
 local modalCache = { at = -1e9, modal = false }
 local function modalOpen()
     local now = tonumber(Ext.Timer.MonotonicTime()) or 0
     if now - modalCache.at < 250 then return modalCache.modal end
     modalCache.at = now
     local modal = false
+    -- Co-op: another player's dialogue is not ours; the server's per-player
+    -- scene message (sceneOn) covers ours (multiplayer MP-3).
+    if MPState.Multi() then modalCache.modal = false; return false end
     for _, c in ipairs({ "Dialog", "Cinematic", "Cutscene" }) do
         local ok, es = pcall(Ext.Entity.GetAllEntitiesWithComponent, c)
         if ok and es and #es > 0 then modal = true; break end

@@ -11,6 +11,7 @@
 local Log       = Ext.Require("Shared/Log.lua")
 local Net       = Ext.Require("Shared/Net.lua")
 local ServerNet = Ext.Require("Server/Net.lua")
+local Party     = Ext.Require("Server/Party.lua")
 
 local M = {}
 
@@ -24,7 +25,7 @@ local MANA_PATTERNS = { "DAG_Potion_Mana", "Potion_Mana" }
 
 local PERIOD_MS = 1000
 local lastSent = -1e9
-local lastPayload = nil
+local lastPayload = {}   -- Osiris user -> last payload sent to that player
 
 local function now() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
 
@@ -65,17 +66,23 @@ local function xpOf(char)
     return 0, 0, 0
 end
 
-local function send(force)
-    local char = ServerNet.UserToCharacter(0)
+-- Each player gets their own character's stats (multiplayer MP-1: this was
+-- the host's, broadcast to everyone). Solo: the one user, as before.
+local function sendTo(user, force)
+    local char = Party.Controlled(user)
     if not char then return end
     local hp = 0
     for _, h in ipairs(HEALING) do hp = hp + count(h.tpl, char) end
     local mana = #findByStats(char, MANA_PATTERNS)
     local cur, nxt, lvl = xpOf(char)
     local payload = Ext.Json.Stringify({ uuid = char, xpCur = cur, xpNext = nxt, level = lvl, hpPotions = hp, manaPotions = mana })
-    if payload == lastPayload and not force then return end
-    lastPayload = payload
-    pcall(function() Ext.Net.BroadcastMessage(Net.Channels.HudStats, payload) end)
+    if payload == lastPayload[user] and not force then return end
+    lastPayload[user] = payload
+    pcall(function() Ext.Net.PostMessageToUser(user, Net.Channels.HudStats, payload) end)
+end
+
+local function send(force)
+    for _, user in ipairs(Party.Users()) do sendTo(user, force) end
 end
 
 local function usePotion(userId, kind)

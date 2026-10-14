@@ -22,6 +22,7 @@ local Overlay   = Ext.Require("Client/HUD/Overlay.lua")
 local Hud       = Ext.Require("Client/HUD/Hud.lua")
 local TickBudget = Ext.Require("Shared/TickBudget.lua")
 local cfg       = Ext.Require("data/interact.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
 
@@ -48,7 +49,7 @@ function M.OnEscape() if lootOpen then lootClose("Esc") end end
 
 local function distTo(uuid)
     local ok, d = pcall(function()
-        local a = Ext.Entity.GetAllEntitiesWithComponent("ClientControl")[1].Transform.Transform.Translate
+        local a = Me.All()[1].Transform.Transform.Translate
         local b = Ext.Entity.Get(uuid).Transform.Transform.Translate
         local dx, dz = a[1] - b[1], a[3] - b[3]
         return math.sqrt(dx * dx + dz * dz)

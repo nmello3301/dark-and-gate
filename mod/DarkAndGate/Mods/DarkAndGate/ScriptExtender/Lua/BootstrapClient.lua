@@ -4,6 +4,10 @@
 -- Client owns feel: input, camera, aim, swing animation, HUD, effects.
 -- M0: just prove the client state loads too.
 
+-- Multiplayer: every net message of ours through one hub (counts, the
+-- last 10 s for issue markers, !dag_mp_lag). First, before any listener.
+Ext.Require("Shared/NetHub.lua").Install()
+
 local Log = Ext.Require("Shared/Log.lua")
 Log.Init("Client")
 
@@ -109,6 +113,10 @@ Ext.Require("Client/Travel.lua").Register()
 -- !dag_play: the whole mod on, remembered; first person by itself after
 -- loads and character creation (Client/PlayMode.lua, Server/PlayMode.lua).
 Ext.Require("Client/PlayMode.lua").Register()
+-- Multiplayer MP-0: version handshake, log tags, !dag_mp_status (Client/MP.lua).
+Ext.Require("Client/MP.lua").Register()
+-- Other players' jump arcs on this screen (Client/RemoteJump.lua; switch jump_sync).
+Ext.Require("Client/RemoteJump.lua").Register()
 local ConsoleForward = Ext.Require("Shared/ConsoleForward.lua")
 ConsoleForward.Forward({
     "dag_ai", "dag_ai_aim", "dag_ai_react", "dag_ai_debug", "dag_shield_pct", "dag_shield_debug",
@@ -122,6 +130,8 @@ ConsoleForward.Forward({
     "dag_enemy_pace",
     -- The melee cooldown: the client sets its own too (Client/Combat/Swing.lua).
     "dag_melee_cooldown",
+    -- Multiplayer kill switches (Server/MP.lua; host only).
+    "dag_mp_feature",
 })
 -- Forwarded commands carry the camera's forward ("ahead of you" spawns).
 local AimForCtx = Ext.Require("Client/Combat/Aim.lua")

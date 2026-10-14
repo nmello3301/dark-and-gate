@@ -3,6 +3,10 @@
 -- Server owns truth: damage, mana, hit validation, AI, hotbars, saves.
 -- M0: just prove the mod loads and can write to the log file.
 
+-- Multiplayer: every net message of ours through one hub (counts, the
+-- last 10 s for issue markers, !dag_mp_lag). First, before any listener.
+Ext.Require("Shared/NetHub.lua").Install()
+
 local Log = Ext.Require("Shared/Log.lua")
 Log.Init("Server")
 
@@ -86,6 +90,8 @@ Ext.Require("Server/Combat/HpBonus.lua").Register()
 Ext.Require("Server/PlayMode.lua").Register()
 -- Dialogues / cutscenes: clients hide our HUD and release input (Server/Scene.lua).
 Ext.Require("Server/Scene.lua").Register()
+-- Multiplayer MP-0: version handshake, !dag_mp_status (Server/MP.lua).
+Ext.Require("Server/MP.lua").Register()
 -- !dag_move_metrics: the server's own position of a client's character, for
 -- the client/server drift (Client/Movement/MoveMetrics.lua).
 Ext.Require("Server/MoveProbe.lua").Register()

@@ -6,6 +6,7 @@
 local Log = Ext.Require("Shared/Log.lua")
 local Net = Ext.Require("Shared/Net.lua")
 local Hitbox = Ext.Require("Shared/Hitbox.lua")
+local RemoteJump = Ext.Require("Client/RemoteJump.lua")
 
 local M = {}
 
@@ -33,8 +34,10 @@ function M.PlayAnimOn(target, animId, dur, force, quiet)
     send(Net.Channels.PlayAnimRequest, { animId = animId, dur = dur, target = target, force = force, quiet = quiet })
 end
 
-function M.JumpStart(durMs, h, k)
-    send(Net.Channels.JumpStart, { durMs = durMs, h = h, k = k })
+-- h: the hitbox lift (0 for a real jump: the real position rises); arcH:
+-- the arc's height, for other players' screens (Client/RemoteJump.lua).
+function M.JumpStart(durMs, h, k, arcH)
+    send(Net.Channels.JumpStart, { durMs = durMs, h = h, k = k, arcH = arcH })
 end
 
 function M.CastSpell(spell, aim, targetUuid)
@@ -73,7 +76,10 @@ function M.Register()
     -- Another player's jump: lift their hitbox locally for aim and melee.
     Ext.RegisterNetListener(Net.Channels.JumpNotify, function(_, payload)
         local ok, msg = pcall(Ext.Json.Parse, payload)
-        if ok and msg and msg.uuid then Hitbox.SetJump(msg.uuid, msg.durMs, msg.h, msg.k) end
+        if ok and msg and msg.uuid then
+            Hitbox.SetJump(msg.uuid, msg.durMs, msg.h, msg.k)
+            RemoteJump.Start(msg)   -- draw the arc on this screen (multiplayer)
+        end
     end)
     Log.Write("Client Net: PingReply + JumpNotify listeners registered")
 end

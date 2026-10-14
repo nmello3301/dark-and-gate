@@ -6,6 +6,7 @@
 
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 
@@ -14,6 +15,8 @@ namespace dag::log {
 namespace {
 
 std::ofstream g_file;
+SRWLOCK g_lock = SRWLOCK_INIT;   // the startup self-check logs from its own thread
+char g_tag[48] = "";             // "u65537 host" once Lua knows (multiplayer logs)
 
 std::filesystem::path LogPath()
 {
@@ -54,8 +57,22 @@ void Writef(const char* fmt, ...)
     va_end(ap);
     if (n < 0) return;
 
-    g_file << "[Native] " << buf << "\n";
+    AcquireSRWLockExclusive(&g_lock);
+    if (g_tag[0]) g_file << "[Native " << g_tag << "] " << buf << "\n";
+    else          g_file << "[Native] " << buf << "\n";
     g_file.flush();  // small writes, we want them visible immediately
+    ReleaseSRWLockExclusive(&g_lock);
+}
+
+void SetTag(const char* tag)
+{
+    char t[sizeof(g_tag)] = "";
+    if (tag) strncpy_s(t, tag, _TRUNCATE);
+    AcquireSRWLockExclusive(&g_lock);
+    const bool changed = std::strcmp(t, g_tag) != 0;
+    if (changed) std::memcpy(g_tag, t, sizeof(g_tag));
+    ReleaseSRWLockExclusive(&g_lock);
+    if (changed && t[0]) Writef("log tag: lines from this machine are tagged [Native %s] (multiplayer)", t);
 }
 
 void Shutdown()

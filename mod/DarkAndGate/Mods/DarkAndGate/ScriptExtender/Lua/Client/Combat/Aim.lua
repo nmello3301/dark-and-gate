@@ -19,6 +19,7 @@
 
 local Log = Ext.Require("Shared/Log.lua")
 local Hitbox = Ext.Require("Shared/Hitbox.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
 
@@ -44,7 +45,7 @@ local function refreshSelf()
     local t = now()
     if t - selfCache.at < 1000 and selfCache.ent then return end
     selfCache.at = t
-    local ok, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    local ok, ents = pcall(Me.All)
     if ok and ents and ents[1] then
         selfCache.ent = ents[1]
         local okU, u = pcall(getUuid, ents[1])

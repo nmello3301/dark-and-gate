@@ -29,6 +29,7 @@ local Hud       = Ext.Require("Client/HUD/Hud.lua")
 local CombatHUD = Ext.Require("Client/Combat/HUD.lua")
 local Overlay   = Ext.Require("Client/HUD/Overlay.lua")
 local State     = Ext.Require("Client/Combat/State.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
 
@@ -52,7 +53,7 @@ end
 
 local function characterReady()
     local ok, ready = pcall(function()
-        local e = Ext.Entity.GetAllEntitiesWithComponent("ClientControl")[1]
+        local e = Me.All()[1]
         return e ~= nil and e.Transform ~= nil
     end)
     return ok and ready == true

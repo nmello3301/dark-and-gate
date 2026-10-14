@@ -24,6 +24,7 @@ local Prepare   = Ext.Require("Client/Combat/Prepare.lua")
 local airAction = Ext.Require("data/movement.lua").air_action
 local Movement  = Ext.Require("Client/Movement/Movement.lua")
 local Targeting = Ext.Require("Client/Combat/Targeting.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
 
@@ -162,7 +163,7 @@ end
 local castProbeLogged = false
 local function tick()
     if not Actions.Running("cast") then return end
-    local okE, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    local okE, ents = pcall(Me.All)
     local me = okE and ents and ents[1] or nil
     if not me then return end
     local okC, c = pcall(function() return me.SpellCastIsCasting end)

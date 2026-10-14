@@ -39,6 +39,7 @@ local TickBudget   = Ext.Require("Shared/TickBudget.lua")
 local cfg          = Ext.Require("data/bows.lua")
 local spells       = Ext.Require("data/spells.lua")
 local airAction    = Ext.Require("data/movement.lua").air_action
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
 
@@ -60,7 +61,7 @@ local loggedNoClips = {}
 local function now() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
 
 local function player()
-    local ok, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    local ok, ents = pcall(Me.All)
     return ok and ents and ents[1] or nil
 end
 

@@ -40,6 +40,7 @@ add_library(DarkAndGate SHARED
     src/Log.cpp
     src/PatternScan.cpp
     src/Watchdog.cpp
+    src/SelfCheck.cpp
     src/Hooks/Camera.cpp
     src/Hooks/Mouselook.cpp
     src/Hooks/Pov.cpp
@@ -54,6 +55,17 @@ add_library(DarkAndGate SHARED
 )
 
 target_include_directories(DarkAndGate PRIVATE src)
+
+# Build stamp (build_info.h, DAG_DLL_BUILD) for the multiplayer version
+# handshake; regenerated on every build.
+set(DAG_GEN_DIR ${CMAKE_BINARY_DIR}/generated)
+file(MAKE_DIRECTORY ${DAG_GEN_DIR})
+add_custom_target(dag_build_info
+    COMMAND ${CMAKE_COMMAND} -DSRC=${PROJECT_SOURCE_DIR} -DOUT=${DAG_GEN_DIR}/build_info.h -P ${PROJECT_SOURCE_DIR}/cmake/BuildInfo.cmake
+    BYPRODUCTS ${DAG_GEN_DIR}/build_info.h
+    COMMENT "DLL build stamp")
+add_dependencies(DarkAndGate dag_build_info)
+target_include_directories(DarkAndGate PRIVATE ${DAG_GEN_DIR})
 
 # Match NCT / WASD compile flags where it matters for ABI compatibility
 # with the game process (MSVC, /MD runtime, no exceptions in hot paths).

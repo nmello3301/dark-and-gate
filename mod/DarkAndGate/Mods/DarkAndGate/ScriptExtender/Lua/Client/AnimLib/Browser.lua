@@ -41,6 +41,7 @@ local Tags      = Ext.Require("Client/AnimLib/Tags.lua")
 local Gallery   = Ext.Require("Client/AnimLib/Gallery.lua")
 local AnimSpeed = Ext.Require("Client/AnimLib/AnimSpeed.lua")
 local Notes     = Ext.Require("Client/AnimLib/Notes.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
 
@@ -100,7 +101,7 @@ local function collectTargets()
             list[#list + 1] = { uuid = u, name = nameOf(ent) .. tag, ent = ent }
         end
     end
-    local okC, cc = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    local okC, cc = pcall(Me.All)
     local me = okC and cc and cc[1] or nil
     add(me, " (you)")
     local okP, party = pcall(Ext.Entity.GetAllEntitiesWithComponent, "PartyMember")

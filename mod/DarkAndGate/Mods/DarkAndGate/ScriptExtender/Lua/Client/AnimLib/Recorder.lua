@@ -16,6 +16,7 @@
 
 local Log     = Ext.Require("Shared/Log.lua")
 local FullPov = Ext.Require("FullPov.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
 
@@ -23,7 +24,7 @@ local REC_PATH = "DarkAndGate/native-anim-rec.txt"
 local OUT_PATH = "DarkAndGate/anim-record.txt"
 
 local function player()
-    local ok, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    local ok, ents = pcall(Me.All)
     return ok and ents and ents[1] or nil
 end
 

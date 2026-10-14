@@ -9,6 +9,7 @@ local Net       = Ext.Require("Shared/Net.lua")
 local ClientNet = Ext.Require("Client/Net.lua")
 local State     = Ext.Require("Client/Combat/State.lua")
 local FullPov   = Ext.Require("FullPov.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
 
@@ -20,7 +21,7 @@ local peak = 0
 local function now() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
 
 local function feetY()
-    local ok, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    local ok, ents = pcall(Me.All)
     local me = ok and ents and ents[1] or nil
     if not me then return nil end
     local okT, y = pcall(function() return me.Transform.Transform.Translate[2] end)

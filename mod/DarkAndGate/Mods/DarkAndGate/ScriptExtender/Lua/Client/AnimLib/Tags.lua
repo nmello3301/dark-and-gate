@@ -17,6 +17,7 @@
 local Log     = Ext.Require("Shared/Log.lua")
 local Library = Ext.Require("Client/AnimLib/Library.lua")
 local data    = Ext.Require("data/anim_tags.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
 
@@ -172,7 +173,7 @@ function M.Reload() return loadAll() end
 local rigCache = { key = nil, rig = "?", at = -1e9 }
 function M.PlayerRig()
     local t = tonumber(Ext.Timer.MonotonicTime()) or 0
-    local ok, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    local ok, ents = pcall(Me.All)
     local e = ok and ents and ents[1] or nil
     if not e then return "?" end
     local key = tostring(e)

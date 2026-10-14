@@ -20,6 +20,7 @@ local Movement  = Ext.Require("Client/Movement/Movement.lua")
 local Input     = Ext.Require("Client/Combat/Input.lua")
 local TickBudget = Ext.Require("Shared/TickBudget.lua")
 local movement  = Ext.Require("data/movement.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
 
@@ -27,7 +28,7 @@ local C = movement.crouch
 local cones = { saved = nil, logged = false }
 
 local function player()
-    local ok, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    local ok, ents = pcall(Me.All)
     return ok and ents and ents[1] or nil
 end
 

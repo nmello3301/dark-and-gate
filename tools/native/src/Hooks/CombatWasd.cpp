@@ -77,6 +77,7 @@ void Install()
     }
     std::memcpy(g_orig, site, sizeof(g_orig));
     g_site = site;
+    dag::patternscan::RecordPatch(site, 6, "bytes (toggled)");
     strcpy_s(g_state, "off");
     const uintptr_t base = reinterpret_cast<uintptr_t>(mod);
     dag::log::Writef("COMBATWASD: the WASD gate's combat check found at rva 0x%llX (skipped while first person is on)",

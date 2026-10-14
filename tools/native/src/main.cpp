@@ -21,6 +21,7 @@
 #include "Hooks/MoveFeel.h"
 #include "Hooks/RealJump.h"
 #include "Hooks/CombatWasd.h"
+#include "SelfCheck.h"
 #include "Watchdog.h"
 #include "Log.h"
 
@@ -81,8 +82,8 @@ BOOL APIENTRY DllMain(HMODULE /*module*/, DWORD reason, LPVOID /*reserved*/)
     if (reason == DLL_PROCESS_ATTACH) {
         WriteVersionFile();
         dag::log::Init();
-        dag::log::Writef("Native: Dark and Gate %s %s loaded",
-                         kPluginVersion, kBuildKind);
+        dag::log::Writef("Native: Dark and Gate %s %s loaded, build %s",
+                         kPluginVersion, kBuildKind, dag::selfcheck::DllBuild());
 
         // Loads native-config.toml and caches it.
         (void)dag::config::Get();
@@ -108,6 +109,10 @@ BOOL APIENTRY DllMain(HMODULE /*module*/, DWORD reason, LPVOID /*reserved*/)
         dag::genomecapture::Install();
         // Freeze reporter (FREEZE: lines in native.log if frames stop).
         dag::watchdog::Start();
+        // Which exe (vanilla / PLB-patched / unknown), every pattern and
+        // patch site re-checked against the exe file, on its own thread
+        // (SELFCHECK lines, native-selfcheck.txt; multiplayer MP-0).
+        dag::selfcheck::Start();
     } else if (reason == DLL_PROCESS_DETACH) {
         dag::log::Shutdown();
     }

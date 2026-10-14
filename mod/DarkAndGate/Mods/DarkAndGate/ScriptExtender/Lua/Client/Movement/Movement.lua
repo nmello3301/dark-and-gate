@@ -48,6 +48,8 @@ local FullPov  = Ext.Require("FullPov.lua")
 local State    = Ext.Require("Client/Combat/State.lua")
 local Actions  = Ext.Require("Client/Combat/Actions.lua")
 local movement = Ext.Require("data/movement.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
+local MPFeatures = Ext.Require("Shared/MPFeatures.lua")
 
 local M = {}
 
@@ -56,7 +58,7 @@ local D = movement.move
 local function nowMs() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
 
 local function player()
-    local ok, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    local ok, ents = pcall(Me.All)
     return ok and ents and ents[1] or nil
 end
 
@@ -164,7 +166,8 @@ local function turnValue(t)
     return (n and n > 0) and n or -1
 end
 
-function M.Direct() return MCM.Get("move_direct") and true or false end
+-- The host's direct_move kill switch (Shared/MPFeatures.lua) turns it off for everyone.
+function M.Direct() return (MCM.Get("move_direct") and MPFeatures.On("direct_move")) and true or false end
 
 local function pushFeel()
     FullPov.SetMoveFeel({
@@ -314,6 +317,14 @@ function M.Register()
         Log.Write("Move: locomotion rate sync " .. (S.locoSync and "ON" or "OFF"))
     end)
     pushFeel()
+    MPFeatures.OnChange(function(changed)
+        for _, n in ipairs(changed) do
+            if n == "direct_move" then
+                pushFeel()
+                Log.Write("Move: direct_move " .. (MPFeatures.On("direct_move") and "ON" or "OFF (vanilla movement, host switch)") .. "; " .. feelLine())
+            end
+        end
+    end)
     Log.Write("Move: registered (!dag_speed_mult / !dag_walk_speed / !dag_run_speed / !dag_move_status / !dag_loco_sync / "
         .. "!dag_move_mode / !dag_move_accel / !dag_move_decel / !dag_move_turn / !dag_move_input); " .. feelLine())
 end

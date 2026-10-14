@@ -734,6 +734,18 @@ void Configure(const Settings& s, bool povLive)
         ApplyDirect(want, want ? "first person, move_mode direct"
                                : (!s.direct ? "move_mode vanilla" : "first person off / paused / downed"));
     }
+    // Multiplayer (host): the server replays every player's synced path. With
+    // other players connected, its step stub follows the direct-mode setting,
+    // not this machine's first person (the host in a menu or in third person
+    // must not slow the others' replay). Alone: exactly as before.
+    if (g_serverFlag) {
+        const bool serverWant = s.direct && (povLive || s.mpRemote);
+        if ((*g_serverFlag != 0) != serverWant) {
+            *g_serverFlag = serverWant ? 1 : 0;
+            dag::log::Writef("MOVEFEEL: server path replay %s (direct %d, first person %d, other players %d)",
+                             serverWant ? "at the requested speed" : "vanilla", s.direct ? 1 : 0, povLive ? 1 : 0, s.mpRemote ? 1 : 0);
+        }
+    }
 }
 
 void SetCameraForward(float fx, float fz)

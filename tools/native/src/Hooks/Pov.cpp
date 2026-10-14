@@ -219,6 +219,7 @@ struct LuaState {
     bool      moveMetrics = false;
     float     moveFaceIdle = 30.f;  // standing still: the body turns to the camera past this (0 = never)
     bool      moveFaceAir = true;   // in the air: the body turns with the camera
+    bool      mpRemote = false;     // multiplayer: other players connected (Client/MP.lua roster)
     // Locomotion Start / End / turn clips fast-forwarded in direct mode
     // (AnimRate SetLocoSkip): the player's instance, ids, rate.
     uintptr_t locoInst = 0;
@@ -333,6 +334,14 @@ void PollLuaFile()
     s.syncGuard = ValI(buf, "rj_sync_guard", 1) != 0;
     s.jumpWaitMs = ValF(buf, "jump_wait_ms", 250.f);
     s.landHold = ValI(buf, "rj_land_hold", 0) != 0;
+    // Multiplayer log tag ("u65537-host"), once the server has said who we are.
+    if (const char* v = FindVal(buf, "mp_tag")) {
+        char tag[48];
+        size_t n = 0;
+        while (v[n] && v[n] != ' ' && v[n] != '\n' && v[n] != '\r' && n + 1 < sizeof(tag)) { tag[n] = v[n]; ++n; }
+        tag[n] = 0;
+        dag::log::SetTag(std::strcmp(tag, "-") == 0 ? "" : tag);
+    }
     s.menu = ValI(buf, "menu", 0) != 0;
     s.crouch = ValI(buf, "crouch", 0) != 0;
     s.noCombatCam = ValI(buf, "nocombatcam", 1) != 0;
@@ -363,6 +372,7 @@ void PollLuaFile()
     s.moveTurn = ValF(buf, "move_turn", 0.f);
     s.moveFaceIdle = ValF(buf, "move_face_idle", 30.f);
     s.moveFaceAir = ValI(buf, "move_face_air", 1) != 0;
+    s.mpRemote = ValI(buf, "mp_remote", 0) != 0;
     s.moveRaw = ValI(buf, "move_raw", 0) != 0;
     s.moveHold = ValI(buf, "move_hold", 0) != 0;
     s.moveMetrics = ValI(buf, "move_metrics", 0) != 0;
@@ -1387,6 +1397,7 @@ void OnFrame(void* gameplayCam)
         ms.metrics = g_lua.moveMetrics;
         ms.faceIdleDeg = g_lua.moveFaceIdle;
         ms.faceAir = g_lua.moveFaceAir;
+        ms.mpRemote = g_lua.mpRemote;
         dag::movefeel::Configure(ms, g_lua.on && g_lua.active && !g_lua.orbit);
         dag::movefeel::Frame();
         // Body facing from the camera: in the air, and standing still past

@@ -22,6 +22,7 @@ local Net       = Ext.Require("Shared/Net.lua")
 local ClientNet = Ext.Require("Client/Net.lua")
 local SpellDefs = Ext.Require("Shared/SpellDefs.lua")
 local PlayFlag  = Ext.Require("Client/PlayFlag.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local function sendArm(id, castTime)
     ClientNet.Send(Net.Channels.SpellArm, { spell = id, castTime = castTime })
@@ -51,7 +52,7 @@ end
 -- only, by level, damage spells first within a level, at most 10.
 local function ownSpells()
     local me = nil
-    pcall(function() me = Ext.Entity.GetAllEntitiesWithComponent("ClientControl")[1] end)
+    pcall(function() me = Me.All()[1] end)
     if not me then return nil end
     local list, seen = {}, {}
     local function add(id)
@@ -181,7 +182,7 @@ local function tick()
     local t = tonumber(Ext.Timer.MonotonicTime()) or 0
     if t - lastCheck < 500 then return end
     lastCheck = t
-    local okE, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    local okE, ents = pcall(Me.All)
     local me = okE and ents and ents[1] or nil
     if not me then return end
     local okU, uuid = pcall(function() return tostring(me.Uuid.EntityUuid) end)

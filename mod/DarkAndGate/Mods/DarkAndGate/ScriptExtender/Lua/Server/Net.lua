@@ -31,6 +31,17 @@ local function enqueueOsi(fn)
     end
 end
 M.EnqueueOsi = enqueueOsi
+-- Run the deferred Osi queue now (the smoke tests' simulated peers; the
+-- game drains it on the next tick by itself).
+function M.FlushOsi()
+    local drain = osiQueue
+    osiQueue = {}
+    tickHooked = false
+    for _, f in ipairs(drain) do
+        local ok, err = pcall(f)
+        if not ok then Log.Write("Net: deferred Osi error: " .. tostring(err)) end
+    end
+end
 
 -- Resolve the character UUID a given user is controlling. Uses Osi, so only
 -- call from a deferred callback. Returns nil if the user has no character.
@@ -39,12 +50,16 @@ M.EnqueueOsi = enqueueOsi
 -- 2026-10-08: logged "no character for user 65536" when called). The reliable
 -- single-player path is Osi.GetHostCharacter(). For MP we'll need a proper
 -- user->character lookup; this stub falls through to the host for now.
+--
+-- 2026-10-13 (multiplayer MP-1): userId is the NET id (65536 for the host's
+-- client); Osiris wants (id & 0xffff0000) | 1. Party.CharacterOfPeer does
+-- that, tracks control changes, and falls back to the host character only
+-- for the host's own messages: before, every remote player's request acted
+-- on the host's character.
+local Party = Ext.Require("Server/Party.lua")
+local MPFeatures = Ext.Require("Shared/MPFeatures.lua")
 local function userToCharacter(userId)
-    local ok, uuid = pcall(function() return Osi.GetCurrentCharacter(userId) end)
-    if ok and uuid and uuid ~= "" then return uuid end
-    local ok2, host = pcall(function() return Osi.GetHostCharacter() end)
-    if ok2 and host and host ~= "" then return host end
-    return nil
+    return Party.CharacterOfPeer(userId)
 end
 M.UserToCharacter = userToCharacter
 
@@ -284,7 +299,13 @@ handlers[Net.Channels.JumpStart] = function(payload, userId)
         -- durMs can arrive as a float: %d on it threw and cut the broadcast below.
         Log.Write(string.format("Net: Jump uuid=%s dur=%dms h=%.2f (hitbox lifted)",
             uuid, math.floor((tonumber(payload.durMs) or 0) + 0.5), tonumber(payload.h) or 0))
-        local msg = Ext.Json.Stringify({ uuid = uuid, durMs = payload.durMs, h = payload.h, k = payload.k })
+        -- Other players draw the arc (Client/RemoteJump.lua): its height, the
+        -- take-off height and the host clock at take-off. Switch: jump_sync.
+        local y0 = nil
+        pcall(function() local _, y = Osi.GetPosition(uuid); y0 = tonumber(y) end)
+        if not MPFeatures.On("jump_sync") then return end
+        local msg = Ext.Json.Stringify({ uuid = uuid, durMs = payload.durMs, h = payload.h, k = payload.k,
+                                          arcH = payload.arcH, t0 = t0, y0 = y0 })
         local okB = pcall(function() Ext.Net.BroadcastMessage(Net.Channels.JumpNotify, msg, uuid) end)
         if not okB then pcall(function() Ext.ServerNet.BroadcastMessage(Net.Channels.JumpNotify, msg, uuid) end) end
     end)

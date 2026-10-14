@@ -27,6 +27,7 @@ local cfg       = Ext.Require("data/hud.lua")
 local dataSpells = Ext.Require("data/spells.lua")
 local WindowFlags = Ext.Require("Client/HUD/WindowFlags.lua")
 local PlayFlag  = Ext.Require("Client/PlayFlag.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
 
@@ -51,7 +52,7 @@ local function viewport()
 end
 
 local function player()
-    local ok, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    local ok, ents = pcall(Me.All)
     return ok and ents and ents[1] or nil
 end
 

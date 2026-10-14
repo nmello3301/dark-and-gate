@@ -32,8 +32,11 @@ local function timestamp()
     return string.format("+%07.3fs", secs)
 end
 
-function Log.Init(side)
-    tag = side  -- "Server" or "Client"
+local side = "?"
+
+function Log.Init(s)
+    side = s
+    tag = s  -- "Server" or "Client"; Log.SetTag adds who we are in co-op
     LOG_PATH = "DarkAndGate/" .. string.lower(side) .. ".log"
     -- Fresh file for this session. Later lines append in-memory and the whole
     -- buffer is rewritten on each Write.
@@ -56,6 +59,13 @@ local function flush()
     pcall(Ext.IO.SaveFile, LOG_PATH, table.concat(buffer, "\n") .. "\n")
 end
 Log.Flush = flush
+
+-- Multiplayer: "[Client p2]" / "[Client p1 host]" once the server has said
+-- who we are (Client/MP.lua), so logs from several machines can be told
+-- apart. nil / "" = the plain side name.
+function Log.SetTag(extra)
+    tag = (extra and extra ~= "") and (side .. " " .. extra) or side
+end
 
 function Log.Write(msg)
     local line = string.format("[%s] [%s] %s", timestamp(), tag, tostring(msg))

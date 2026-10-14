@@ -18,6 +18,7 @@
 --   WorldFx.Clear(key)   WorldFx.ClearPrefix(prefix)   WorldFx.Count()
 
 local Log = Ext.Require("Shared/Log.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
 
@@ -34,7 +35,7 @@ local live = {}       -- key -> { h, pos, r, kind, ent }
 local loaded = {}     -- kind -> bool (checked once)
 
 local function player()
-    local ok, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ClientControl")
+    local ok, ents = pcall(Me.All)
     return ok and ents and ents[1] or nil
 end
 
