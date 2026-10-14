@@ -13,6 +13,12 @@ pause
 exit /b 1
 
 :run
+rem A plain PowerShell call: it runs install.ps1 from this folder, nothing is
+rem hidden, encoded or downloaded. "-ExecutionPolicy Bypass" applies to this
+rem one run only (Windows blocks unsigned scripts by default); it changes no
+rem setting on the PC.
+echo Running: powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" %*
+echo.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" %*
 echo.
 pause

@@ -367,7 +367,6 @@ try {
       continue
     }
     Copy-Item -LiteralPath $p.Src -Destination $dest -Force
-    try { Unblock-File -LiteralPath $dest -ErrorAction Stop } catch { }
     if ((Get-Sha $dest) -ne $srcSha) {
       Add-Row $p.Leaf 'FAILED' "copy does not match the package: $dest" $null
     } else {
@@ -457,18 +456,9 @@ if (Test-Path -LiteralPath $vd) {
   Add-Row "Ch4nKyy's Mod Loader" 'MISSING' "put version.dll ($(Expected-Version 'loader')) into $bin. If it vanished, Windows Security may have removed it: see Protection history" $links.loader
 }
 
-# Windows Security detections on the game's mod files (read-only).
-try {
-  $threats = @{}
-  foreach ($t in @(Get-MpThreat -ErrorAction Stop)) { $threats[[string]$t.ThreatID] = $t.ThreatName }
-  $hits = @(Get-MpThreatDetection -ErrorAction Stop | Where-Object {
-      ($_.Resources -join ';') -match '(?i)Baldurs Gate 3\\bin|Larian Studios\\Baldur''s Gate 3\\Mods|DarkAndGate' })
-  if ($hits.Count -gt 0) {
-    $files = @($hits | ForEach-Object { $_.Resources } | ForEach-Object { ($_ -replace '^[a-z]+:_', '') } | Select-Object -Unique)
-    $names = @($hits | ForEach-Object { $threats[[string]$_.ThreatID] } | Where-Object { $_ } | Select-Object -Unique)
-    Add-Row 'Windows Security' 'WARN' ("flagged {0} ({1}). A blocked loader means no native mods load. Windows Security > Virus & threat protection > Protection history: only restore/allow files you downloaded from the links in FRIEND-README" -f ($files -join ', '), ($names -join ', ')) $null
-  }
-} catch { }
+# Windows Security is never queried or changed from here: scripts that read
+# antivirus state look suspicious to antivirus heuristics. FRIEND-README
+# step 0 covers exclusions and Protection history by hand.
 
 # A second loader?
 $nml = @()
@@ -592,7 +582,7 @@ if ($manifest -and $manifest.files) {
       } else { Add-Row $leaf 'MISMATCH' 'the package file is damaged or was changed: download the zip again' $null }
       continue
     }
-    if (-not (Test-Path -LiteralPath $dest)) { Add-Row $leaf 'MISSING' "not at $dest" $null; continue }
+    if (-not (Test-Path -LiteralPath $dest)) { Add-Row $leaf 'MISSING' "not at $dest. If it vanished, Windows Security may have quarantined it: FRIEND-README step 0" $null; continue }
     $have = Get-Sha $dest
     if ($have -eq $want.sha256) {
       Add-Row $leaf 'MATCH' "SHA256 $have" $null

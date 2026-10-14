@@ -10,6 +10,10 @@ pause
 exit /b 1
 
 :run
+rem A plain PowerShell call (see INSTALL.bat): it only reads logs and writes
+rem one zip to the Desktop. "-ExecutionPolicy Bypass" is for this run only.
+echo Running: powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0mp-collect-logs.ps1" -Reveal %*
+echo.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0mp-collect-logs.ps1" -Reveal %*
 echo.
 pause

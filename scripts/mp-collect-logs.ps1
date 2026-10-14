@@ -278,15 +278,9 @@ try {
       }
     } else { $info.Add("  (missing)") }
   }
-  # Windows Security detections on game / mod files (a blocked loader = no native mods).
-  try {
-    $hits = @(Get-MpThreatDetection -ErrorAction Stop | Where-Object { ($_.Resources -join ';') -match '(?i)Baldurs Gate 3|Baldur''s Gate 3|DarkAndGate' })
-    if ($hits.Count -gt 0) {
-      $names = @{}; foreach ($t in @(Get-MpThreat -ErrorAction SilentlyContinue)) { $names[[string]$t.ThreatID] = $t.ThreatName }
-      $info.Add(""); $info.Add("Windows Security detections:")
-      foreach ($h in $hits) { $info.Add(("  {0:yyyy-MM-dd HH:mm}  {1}  status {2}  {3}" -f $h.InitialDetectionTime, $names[[string]$h.ThreatID], $h.ThreatStatusID, ($h.Resources -join '; '))) }
-    }
-  } catch { }
+  # Windows Security is not queried (antivirus heuristics flag scripts that
+  # read antivirus state); "(not present)" above on version.dll or
+  # DarkAndGate.dll is the hint to check Protection history by hand.
   if ($notes.Count -gt 0) { $info.Add(""); $info.Add("notes:"); foreach ($n in $notes) { $info.Add("  $n") } }
   [System.IO.File]::WriteAllText((Join-Path $stage 'info.txt'), ($info -join "`r`n"), (New-Object System.Text.UTF8Encoding $false))
 

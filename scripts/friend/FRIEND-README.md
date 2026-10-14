@@ -4,6 +4,20 @@ Thanks for testing! This sets up your PC so you can join the host's game. It tak
 
 <!-- BUILD:BEGIN -->Build: (filled in when the host makes the package)<!-- BUILD:END -->
 
+## 0. Windows Security: two file exclusions (read this first)
+
+Windows Security can quarantine two of the files you're about to install, although they're harmless:
+
+- `bin\version.dll` (Ch4nKyy's Mod Loader). It works by posing as a Windows file so the game loads it, which is also a malware trick. On the host's PC Windows Security removed it as **Trojan:Win32/Posilod.CA!cl**, a guess by its cloud machine learning rather than a known virus, and then no native mod loaded. Its source is public: https://github.com/Ch4nKyy/Ch4nKyys_Mod_Loader
+- `bin\NativeMods\DarkAndGate.dll` (this mod). It's new and unsigned, so Windows has no reputation for it yet.
+
+Add a **file exclusion** for each: Windows Security > Virus & threat protection > **Manage settings** (under "Virus & threat protection settings") > **Exclusions**: Add or remove exclusions > **Add an exclusion** > **File**, then pick the file.
+
+- The file picker only accepts files that exist: add `version.dll` right after you put it in `bin` (step 1), and `DarkAndGate.dll` right after INSTALL.bat (step 2), before you start the game.
+- Exclude only these two files: never the whole game folder, `bin`, or a drive. Exclude `version.dll` only if you downloaded it from the Nexus link in step 1.
+
+**If something gets quarantined anyway:** Windows Security > Virus & threat protection > **Protection history** > open the entry > Actions > **Restore**. Only for these two files (`version.dll`, `DarkAndGate.dll`). If anything else from this setup shows up there, don't restore it: tell the host.
+
 ## 1. Install these mods first (same versions as the host)
 
 You need a free Nexus Mods account to download. If the version below isn't the main download, open the mod's **Files** tab and look under **Old files**.
@@ -21,7 +35,7 @@ You need a free Nexus Mods account to download. If the version below isn't the m
 - **Finding `bin`:** in Steam, right-click Baldur's Gate 3 > Manage > Browse local files, then open `bin`. Make a folder called `NativeMods` inside it if there isn't one.
 - **The Mods folder:** press Win+R, paste `%LOCALAPPDATA%\Larian Studios\Baldur's Gate 3\Mods` and press Enter. Or drag the pak into BG3 Mod Manager, which copies it there.
 - **Don't** install "Native Mod Loader" as well. Two loaders load everything twice.
-- Windows Security may flag `version.dll` (the mod loader) as **Trojan:Win32/Posilod.CA!cl**. It did on the host's PC. Mod loaders get flagged because they pose as a Windows file. If it's blocked, no native mods load. Only if you downloaded it from the Nexus link above: Windows Security > Virus & threat protection > **Protection history** > that entry > Actions > **Restore** (or Allow on device). INSTALL.bat warns you if this happened.
+- **Right after** you put `version.dll` into `bin`: add its exclusion (step 0). If it has already vanished, Windows Security took it: see step 0, "If something gets quarantined anyway". INSTALL.bat says MISSING for a vanished file.
 - **Only for 5 or more players:** Party Limit Begone, **SE version** pak (https://www.nexusmods.com/baldursgate3/mods/327). Everyone needs it then. Never use the "standalone" version: it writes into the game folder.
 
 ## 2. Run INSTALL.bat
@@ -37,7 +51,8 @@ You need a free Nexus Mods account to download. If the version below isn't the m
    - The "Installed files" section must say **MATCH**: that means you have exactly the host's build.
    - If it says "access denied", right-click INSTALL.bat > **Run as administrator**.
    - If it can't find the game, it asks for the folder. In Steam: right-click Baldur's Gate 3 > Manage > Browse local files, and copy the path from the address bar.
-6. If you install or update WASD or Native Camera Tweaks **after** this, run INSTALL.bat again. Their own settings file replaces ours.
+6. **Now** add the exclusion for `bin\NativeMods\DarkAndGate.dll` (step 0), before you start the game.
+7. If you install or update WASD or Native Camera Tweaks **after** this, run INSTALL.bat again. Their own settings file replaces ours.
 
 Before replacing anything (including your `ScriptExtenderSettings.json`, the camera settings and your load order), INSTALL.bat backs it up to `%LOCALAPPDATA%\Larian Studios\Baldur's Gate 3\DarkAndGate-backup-<date>\`.
 
@@ -87,4 +102,5 @@ After playing (it also works with the game still open), double-click **COLLECT-L
 
 1. In BG3 Mod Manager, move DarkAndGate back to Inactive and **Export Order to Game** again.
 2. Open the `DarkAndGate-backup-<date>` folders in `%LOCALAPPDATA%\Larian Studios\Baldur's Gate 3\`, newest first (each run of INSTALL.bat that changed something made one). `RESTORE.txt` in each lists every file that run touched: copy the backed-up ones back (`ScriptExtenderSettings.json`, the `.toml` files, `modsettings.lsx`), and delete the ones marked NEW (`DarkAndGate.pak`, `DarkAndGate.dll`).
-3. The other mods: delete their files the same way you added them. Steam's **Verify integrity of game files** won't remove extra files, so this step is manual.
+3. Remove the two exclusions from step 0 (same Exclusions page > the file > Remove).
+4. The other mods: delete their files the same way you added them. Steam's **Verify integrity of game files** won't remove extra files, so this step is manual.
