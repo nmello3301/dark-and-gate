@@ -1,7 +1,18 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Real-time combat rules (DECISIONS 2026-10-12): shields, downed / bleed-out
--- / revive. Live knobs: !dag_shield_pct, !dag_bleedout, !dag_revive_time.
+-- / revive, the melee cooldown. Live knobs: !dag_shield_pct, !dag_bleedout,
+-- !dag_revive_time, !dag_melee_cooldown.
 return {
+    -- Melee cooldown (developer 2026-10-13): one swing per cooldown_s,
+    -- counted from swing start to swing start, so LMB spam can't out-swing
+    -- a fight. A starting value; the weapon's cooldown_mult scales it
+    -- (data/weapons/*.lua), and later stats / perks will (docs/DESIGN.md
+    -- "Melee cooldown"). Shared/MeleeCooldown.lua reads it on both sides.
+    melee = {
+        cooldown_s     = 1.5,
+        buffer_s       = 0.3,   -- a click this close to the end of the cooldown waits and swings on time; earlier clicks are ignored
+        server_slack_s = 0.4,   -- server: a new swing's first hit may arrive this much sooner than the cooldown (swings hit at different points of their windup / active window; lag)
+    },
     -- Passive shields: an equipped shield takes this share of the damage of any
     -- melee hit, arrow or projectile spell that lands on it.
     shield = {

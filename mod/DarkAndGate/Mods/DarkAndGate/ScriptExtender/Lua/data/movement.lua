@@ -16,7 +16,21 @@
 --   max_air_s
 --   apex_flatness   shape of the lift curve: y = h * (1 - |2u - 1|^k), u = t / T.
 --                   k = 2 is a plain parabola; 3-4 hangs longer near the apex.
---   cooldown_s      after landing, before the next jump is accepted.
+--   cooldown_s      after landing, before the next jump is accepted (0 since
+--                   2026-10-13: a hop leaves the moment you land).
+--   land_hold       real mode: BG3's landing animation holds the character
+--                   in its landed fall state for 150-230 ms (WASD and the
+--                   next hop wait: the "catch" on every bunny hop). false =
+--                   the DLL clears that hold after our jumps (RealJump.cpp
+--                   SkipLandHold), and a hop keeps the last jump's momentum.
+--                   !dag_jump_land_hold on|off.
+--   buffer_s        bunny-hop grace (developer 2026-10-13): Space pressed up
+--                   to this long before landing (or during cooldown_s after
+--                   it) is kept and jumps the moment a jump is allowed, so a
+--                   hop doesn't need exact timing. Real mode: a jump that
+--                   reaches the DLL while the character is still falling
+--                   waits up to this long for the landing (Pov.cpp). MCM
+--                   "jump_buffer_s", !dag_jump_buffer <s> (0 = off).
 --   land_lead_s     the landing (Recover) clip starts this long before touchdown.
 --   use_cast        play the JumpFlight Cast (take-off) clip first.
 --   phases          which clips a jump plays, in order. 2026-10-09 playtest:
@@ -123,7 +137,9 @@ return {
         min_air_s     = 0.30,
         max_air_s     = 3.00,
         apex_flatness = 3.0,
-        cooldown_s    = 0.15,
+        cooldown_s    = 0.0,      -- 2026-10-13: no recover after landing (was 0.15; bunny hops caught on it)
+        buffer_s      = 0.25,     -- bunny-hop grace before landing (2026-10-13)
+        land_hold     = false,    -- real mode: BG3's landing hold (recover) after a jump; false = skipped (2026-10-13)
         land_lead_s   = 0.05,
         mode          = "real",   -- 2026-10-10 playtest: real jump approved
         strafe_sign   = -1,       -- A/D in the air (playtest: +1 was reversed)

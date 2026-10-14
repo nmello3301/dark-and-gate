@@ -184,6 +184,8 @@ struct LuaState {
     float     landSpeed = 3.f;
     float     wallH = 1.3f;
     bool      syncGuard = true;   // RealJump: skip the server-flag reset during a jump
+    float     jumpWaitMs = 250.f; // bunny-hop grace: a jump that comes while still in the air waits this long for the landing
+    bool      landHold = false;   // RealJump: keep BG3's landing hold (recover) after a jump
     bool      menu = false;        // a BG3 panel is open (Lua, Client/HUD): mouse-look off, cursor free
     // Crouch = sneaking (Client/Crouch.lua): the head bone lowers by itself;
     // the eye-height calibration must not run while crouched.
@@ -327,6 +329,8 @@ void PollLuaFile()
     s.landSpeed = ValF(buf, "rj_land_speed", 3.f);
     s.wallH = ValF(buf, "rj_wall_h", 1.3f);
     s.syncGuard = ValI(buf, "rj_sync_guard", 1) != 0;
+    s.jumpWaitMs = ValF(buf, "jump_wait_ms", 250.f);
+    s.landHold = ValI(buf, "rj_land_hold", 0) != 0;
     s.menu = ValI(buf, "menu", 0) != 0;
     s.crouch = ValI(buf, "crouch", 0) != 0;
     s.noCombatCam = ValI(buf, "nocombatcam", 1) != 0;
@@ -583,6 +587,8 @@ struct JumpLift {
     float         durMs = 0, h = 0, k = 2;
     float         lift = 0;      // this frame, metres
     bool          real = false;  // the real position carries it (RealJump)
+    bool          waiting = false; // still in the air: retried until the landing (bunny-hop grace)
+    LARGE_INTEGER waitT0 = {};
 };
 JumpLift g_jump;
 
@@ -952,6 +958,7 @@ void UpdateJump()
         const bool start = g_jump.seen && g_lua.jumpSeq != 0 && g_lua.jumpMs > 1.0f && g_lua.on && g_lua.active;
         g_jump.seq = g_lua.jumpSeq;
         g_jump.seen = true;
+        g_jump.waiting = false;
         if (start) {
             g_jump.active = true;
             QueryPerformanceCounter(&g_jump.t0);
@@ -971,15 +978,46 @@ void UpdateJump()
                 dag::realjump::SetLandSpeed(g_lua.landSpeed);
                 dag::realjump::SetWallHeight(g_lua.wallH);
                 dag::realjump::SetSyncGuard(g_lua.syncGuard);
+                dag::realjump::SetLandHold(g_lua.landHold);
                 g_jump.real = dag::realjump::Start(g_jump.durMs, g_jump.h, g_jump.k, nullptr, g_jump.seq);
+                // Still in the air (the last fall hasn't landed): wait for
+                // the landing within the bunny-hop grace, below. Never the
+                // visual lift on the ground: that let BG3 walk you on under
+                // a fake jump (playtest 7).
+                if (!g_jump.real && dag::realjump::RefusedAirborne()) {
+                    g_jump.active = false;
+                    g_jump.waiting = true;
+                    QueryPerformanceCounter(&g_jump.waitT0);
+                }
             }
-            dag::log::Writef("JUMP start seq=%d dur=%.0fms h=%.2f k=%.1f lift=%s",
-                             g_jump.seq, g_jump.durMs, g_jump.h, g_jump.k,
-                             g_jump.real ? "REAL position (RealJump)"
-                             : (dag::visuallift::BodyLiftActive() ? "body+camera" : "camera-only jump"));
+            if (g_jump.waiting)
+                dag::log::Writef("JUMP seq=%d waits for the landing (still in the air; grace %.0f ms)", g_jump.seq, g_lua.jumpWaitMs);
+            else
+                dag::log::Writef("JUMP start seq=%d dur=%.0fms h=%.2f k=%.1f lift=%s",
+                                 g_jump.seq, g_jump.durMs, g_jump.h, g_jump.k,
+                                 g_jump.real ? "REAL position (RealJump)"
+                                 : (dag::visuallift::BodyLiftActive() ? "body+camera" : "camera-only jump"));
         }
     }
     g_jump.lift = 0;
+    if (g_jump.waiting) {
+        const double waited = MsSince(g_jump.waitT0);
+        if (!g_lua.on || !g_lua.active) {
+            g_jump.waiting = false;
+            dag::log::Writef("JUMP seq=%d dropped while waiting for the landing (first person off)", g_jump.seq);
+        } else if (dag::realjump::Start(g_jump.durMs, g_jump.h, g_jump.k, nullptr, g_jump.seq)) {
+            g_jump.waiting = false;
+            g_jump.active = true;
+            g_jump.real = true;
+            QueryPerformanceCounter(&g_jump.t0);
+            dag::log::Writef("JUMP start seq=%d after waiting %.0f ms for the landing dur=%.0fms h=%.2f k=%.1f lift=REAL position (RealJump)",
+                             g_jump.seq, waited, g_jump.durMs, g_jump.h, g_jump.k);
+        } else if (!dag::realjump::RefusedAirborne() || waited >= g_lua.jumpWaitMs) {
+            g_jump.waiting = false;
+            dag::log::Writef("JUMP seq=%d skipped: %s after %.0f ms (no double jump, no visual lift)", g_jump.seq,
+                             dag::realjump::RefusedAirborne() ? "still in the air" : "the real jump failed", waited);
+        }
+    }
     if (!g_jump.active) return;
     const double ms = MsSince(g_jump.t0);
     if (ms >= g_jump.durMs || !g_lua.on || !g_lua.active) {

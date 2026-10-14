@@ -96,6 +96,21 @@ Each weapon family has its own chain of three swings, and the blade's path throu
 
 **Swing timing (data, per chain step).** Wind-up, active window, recovery, combo window, movement slow, turn-rate limit, reach, max targets, stagger power and damage scale. Design targets: light swings about 0.4–0.5 s, medium 0.6–0.75 s, heavy 0.9–1.1 s, all tuned in playtests. Clicking inside the combo window continues the chain; otherwise it resets.
 
+**Melee cooldown (decided 2026-10-13).** At most one swing per **1.5 s**, measured from swing start to swing start, so spamming left click can't out-swing a fight. A click in the last 0.3 s of the cooldown is kept and swings the moment it ends; earlier clicks do nothing. The chain still advances: its combo window opens when the cooldown ends. The server enforces the cooldown too: a swing that starts too soon lands nothing. Enemies already act on their own pace (4–10 s, `data/realtime.lua`), so today the cooldown only limits players. 1.5 s is a starting value (`data/combat.lua` `melee.cooldown_s`; live `!dag_melee_cooldown <s>`), and every weapon's data already carries a `cooldown_mult` (1.0 for now).
+
+Possible scaling for balancing and the RPG layer (not built; all multiply the base, clamped to about 0.4–3 s):
+
+- **Weapon family** (`cooldown_mult`): short blades and unarmed about ×0.65, finesse and staves ×0.8, longswords ×1.0, axes and light blunt ×1.1, great blades and polearms ×1.25, heavy blunt ×1.45.
+- **Chain step:** a per-swing multiplier, so a finisher (overhead, lunge) costs more than the openers.
+- **Weapon properties:** Light ×0.85, Heavy ×1.15; a versatile weapon held in two hands slower than in one.
+- **Ability score:** the attack ability (STR, or DEX for finesse) shortens it, for example −3 % per modifier point, capped at −15 %.
+- **Level and class:** Extra Attack's "+20 % swing speed per tier" becomes ×0.83 per tier here; monks' Martial Arts gives unarmed and monk weapons its own lower base.
+- **Buffs and conditions:** Haste ×0.5, Action Surge ×0.67 for its 10 s, Slow ×2, Exhaustion ×1.1 per level, frightened ×1.2.
+- **Gear and feats:** heavy armour without proficiency ×1.2; Great Weapon Master trades a longer cooldown for its damage bonus; Dual Wielder and Polearm Master give the off-hand and butt strikes their own short cooldown.
+- **Outcome:** a whiffed swing could recover a little faster; a swing blocked by a shield could add to it (ties into the stagger rules).
+- **Difficulty:** NPC cooldowns by BG3 difficulty, like the enemy pace, once enemies swing more often than their pace allows.
+- **Feedback:** a ring around the crosshair (like the bow draw ring) once cooldowns vary, so a click that does nothing never feels like a bug.
+
 **Blade-path hit check.**
 
 1. During the active window, sample 5 points from hilt to tip each tick.

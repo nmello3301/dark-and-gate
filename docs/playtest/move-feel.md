@@ -16,6 +16,61 @@ Claude reads all of them; you only report how it *felt*.
 - Keep the mouse still: the strafe and reverse timings are measured in camera space.
 - Leave about a second between presses.
 
+## Build 10 (2026-10-13): no recover after a jump
+
+Playtest 8: the grace worked (Space pressed early was kept), but every hop still caught. The log showed two causes:
+
+- After each jump, BG3's landing animation held the character in the landed fall state for 150–230 ms. WASD couldn't move you, so each hop took off at 0 m/s and the air steering's 2.5 m/s floor took over. A running jump takes off at about 3–4 m/s.
+- A 0.15 s jump cooldown after landing came on top of that.
+
+Build 10:
+- the cooldown is 0, and a hop buffered in the air leaves on the landing tick;
+- the DLL clears BG3's landing hold after our jumps (spikes/real-lift.md "The landing hold");
+- a hop keeps the last jump's speed.
+
+**Do:**
+1. Hold W and bunny hop 15 times, pressing Space just before each landing.
+2. Single jumps while running: land and keep running.
+3. Strafe-hop with A/D.
+
+**Expect:**
+- no catch between hops, and the speed stays the same from hop to hop;
+- after a single jump you run on at once.
+- native.log: `RJUMP landing hold skipped …`, `RJUMP landing: fall state off the machine N ms after the jump's end` (N under about 50), and `RJUMP start … (the last jump's momentum)` on hops.
+
+**Knob:** `!dag_jump_land_hold on` brings BG3's hold back, for comparison.
+
+## Build 9 (2026-10-13): bunny-hop grace
+
+The build 8 session's log: 32 jumps, 8 take-overs of the landing state, and no fake (visual-lift) jumps. One hop was lost: Space pressed 90 ms before landing was ignored as "already airborne".
+
+Build 9: Space pressed up to 0.25 s before landing, or in the 0.15 s after it, is kept and jumps the moment a jump is allowed. In the DLL, a jump that arrives while you are still falling waits up to 0.25 s for the landing, then starts. A hop never takes over a fall that is lower than its take-off, so there is no double jump off a ledge.
+
+**Do:**
+1. Hop 15 times in a row, pressing Space a little *before* you land, running and standing.
+2. Jump off a ledge (or the gate's steps) and press Space while falling, well before you land.
+
+**Expect:**
+- every hop goes up the moment you land, with no exact timing needed;
+- off the ledge: no jump in mid-air. A press in the last moment before touching down jumps right after the landing.
+- client.log: `Jump: Space buffered N ms before landing`, then `Jump: buffered Space fires`;
+- native.log: `JUMP seq=… waits for the landing` followed by `JUMP start seq=… after waiting N ms`, or nothing when no wait was needed. No `lift=body+camera`.
+
+**Knob:** `!dag_jump_buffer <s>` (0 = off).
+
+## Build 8 (2026-10-13): hopping right after a landing
+
+Playtest 7: almost every other jump changed your direction. Those jumps came right after a landing, while BG3's fall state was still in its landing phase. The real jump refused them ("RJUMP: already falling") and fell back to the old visual lift: you stayed on the ground, and BG3's walk carried you on under a fake jump.
+
+Build 8: the real jump takes that fall state over. A jump pressed while you are really in the air (falling off a ledge) is skipped, without the visual lift.
+
+**Do:** hop 15 times in a row (Space again right as you land), running and standing.
+
+**Expect:**
+- every jump goes up for real;
+- no direction change;
+- native.log: `RJUMP: re-arming the last fall for a new jump …`, and no `lift=body+camera`.
+
 ## After build 7 (2026-10-13): standing on rocks dropped
 
 The developer had the rock attempts (builds 5–7: foot box, step-up, hold-the-floor, knee-height walls) removed: jumping felt worse. Rocks are a known limitation (DESIGN, Campaign compatibility). The sync guard (no take-off flicker, verified) stays. Ignore the rock steps in builds 5–7 below.

@@ -55,6 +55,17 @@ bool Active();
 // Skip the engine's "server changed flag 0x20" stop-everything reset on our
 // character during a jump (and 0.6 s after). Default on.
 void SetSyncGuard(bool on);
+
+// true = keep BG3's landing hold after a jump (its landing animation holds
+// the fall in the landed state, WASD and the next hop wait); false = clear
+// it after our jumps (data jump.land_hold).
+void SetLandHold(bool on);
+
+// The last Start refused because the character is already in the air (a
+// fall that isn't our jump's landing): no jump yet, not the visual lift.
+// Pov retries every frame within the bunny-hop grace (jump_wait_ms) and
+// starts the jump the moment the fall lands. Logged once per seq.
+bool RefusedAirborne();
 const char* State();
 
 // A level change or a teleport (Lua bumps level_seq): the remembered WASD

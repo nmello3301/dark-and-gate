@@ -82,6 +82,8 @@ local S = {
     rj_land_speed = 3.0,
     rj_wall_h = 1.5,
     rj_sync_guard = 1,   -- RealJump: skip the server-flag reset during a jump
+    jump_wait_ms = 250,  -- bunny-hop grace: a jump that comes while still falling waits this long for the landing
+    rj_land_hold = 0,    -- RealJump: 1 = keep BG3's landing hold (recover) after a jump
     -- WASD speed multipliers for the DLL's ground-speed lever
     -- (Client/Movement/Movement.lua, docs/spikes/move-speed.md).
     move_walk = 1.0,
@@ -332,10 +334,10 @@ local function writeState()
     if S.on and USE_BONE_ANCHOR then refreshCache(e, now) end
 
     local line = string.format(
-        "orbit=%d orbit_seq=%d orbit_dist=%.2f orbit_up=%.2f orbit_pmin=%.1f orbit_pmax=%.1f orbit_spin=%d orbit_tilt=%d orbit_rate=%.1f orbit_tilt_rate=%.1f orbit_vis=%s orbit_x=%.3f orbit_y=%.3f orbit_z=%.3f crouch=%d level_seq=%d on=%d active=%d menu=%d anim_inst=%s anim_rate=%.3f clip_inst=%s clip_rates=%s nclips=%s nocombatcam=%d combat_wasd=%d rec_inst=%s lift_objects=%d jump_mode=%d genome_capture=%d strafe_sign=%d rj_land_speed=%.2f rj_wall_h=%.2f rj_sync_guard=%d head_smooth=%.2f move_walk=%.3f move_run=%.3f move_mode=%d move_accel=%.3f move_decel=%.3f move_turn=%.1f move_raw=%d move_hold=%d move_metrics=%d loco_inst=%s loco_rate=%.2f loco_skip=%s visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
+        "orbit=%d orbit_seq=%d orbit_dist=%.2f orbit_up=%.2f orbit_pmin=%.1f orbit_pmax=%.1f orbit_spin=%d orbit_tilt=%d orbit_rate=%.1f orbit_tilt_rate=%.1f orbit_vis=%s orbit_x=%.3f orbit_y=%.3f orbit_z=%.3f crouch=%d level_seq=%d on=%d active=%d menu=%d anim_inst=%s anim_rate=%.3f clip_inst=%s clip_rates=%s nclips=%s nocombatcam=%d combat_wasd=%d rec_inst=%s lift_objects=%d jump_mode=%d genome_capture=%d strafe_sign=%d rj_land_speed=%.2f rj_wall_h=%.2f rj_sync_guard=%d jump_wait_ms=%d rj_land_hold=%d head_smooth=%.2f move_walk=%.3f move_run=%.3f move_mode=%d move_accel=%.3f move_decel=%.3f move_turn=%.1f move_raw=%d move_hold=%d move_metrics=%d loco_inst=%s loco_rate=%.2f loco_skip=%s visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
         S.orbit, S.orbit_seq, S.orbit_dist, S.orbit_up, S.orbit_pmin, S.orbit_pmax, S.orbit_spin, S.orbit_tilt, S.orbit_rate,
         S.orbit_tilt_rate, S.orbit_vis, S.orbit_x, S.orbit_y, S.orbit_z, S.crouch, S.level_seq,
-        S.on and 1 or 0, active and 1 or 0, S.menu and 1 or 0, S.anim_inst, S.anim_rate, S.clip_inst, S.clip_rates, S.nclips, S.nocombatcam, S.combat_wasd, S.rec_inst, S.lift_objects, S.jump_mode, S.genome_capture, S.strafe_sign, S.rj_land_speed, S.rj_wall_h, S.rj_sync_guard, S.head_smooth, S.move_walk, S.move_run, S.move_mode, S.move_accel, S.move_decel, S.move_turn, S.move_raw, S.move_hold, S.move_metrics, S.loco_inst, S.loco_rate, S.loco_skip, (S.on and cache.visual) or "0", S.anchor, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
+        S.on and 1 or 0, active and 1 or 0, S.menu and 1 or 0, S.anim_inst, S.anim_rate, S.clip_inst, S.clip_rates, S.nclips, S.nocombatcam, S.combat_wasd, S.rec_inst, S.lift_objects, S.jump_mode, S.genome_capture, S.strafe_sign, S.rj_land_speed, S.rj_wall_h, S.rj_sync_guard, math.floor(S.jump_wait_ms + 0.5), S.rj_land_hold, S.head_smooth, S.move_walk, S.move_run, S.move_mode, S.move_accel, S.move_decel, S.move_turn, S.move_raw, S.move_hold, S.move_metrics, S.loco_inst, S.loco_rate, S.loco_skip, (S.on and cache.visual) or "0", S.anchor, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
         S.jump_seq, math.floor(S.jump_ms + 0.5), S.jump_h, S.jump_k,
         S.dump, cache.sock or -1, cache.skel or 0, x, y, z,
         (S.on and #cache.meshes > 0) and table.concat(cache.meshes, ",") or "0",
@@ -440,6 +442,19 @@ function M.SetRealJumpTuning(strafeSign, landSpeed, wallH)
 end
 function M.SetJumpSyncGuard(on)
     S.rj_sync_guard = on and 1 or 0
+    lastWrite = 0
+    pcall(writeState)
+end
+-- Bunny-hop grace in the DLL: a jump that reaches it while the character
+-- is still falling waits this long for the landing (Pov.cpp UpdateJump).
+function M.SetJumpWait(ms)
+    S.jump_wait_ms = math.max(0, tonumber(ms) or 0)
+    lastWrite = 0
+    pcall(writeState)
+end
+-- Keep (true) or skip (false) BG3's landing hold after a real jump.
+function M.SetJumpLandHold(on)
+    S.rj_land_hold = on and 1 or 0
     lastWrite = 0
     pcall(writeState)
 end

@@ -8,9 +8,15 @@
 --                animation's real timings.
 --   windup_ms    time between LMB press and the start of the active window.
 --   active_ms    duration the hit arc is live (and the ray fan sweeps).
---   recovery_ms  time after active before the next swing can start.
---   combo_ms     how long after active ends another LMB chains to the next
---                swing in the chain. Beyond this, LMB resets to swing 1.
+--   recovery_ms  time after active before the next swing can start (the
+--                melee cooldown below is longer, so it is what gates).
+--   combo_ms     how long after the next swing is allowed (the melee
+--                cooldown's end) another LMB chains to the next swing in the
+--                chain. Beyond this, LMB resets to swing 1.
+--
+-- cooldown_mult  x the melee cooldown (data/combat.lua melee.cooldown_s,
+--                swing start to swing start; DECISIONS 2026-10-13). The
+--                weapon-family scaling hook: a dagger < 1, a greataxe > 1.
 --   damage       base damage dealt on a non-crit limb hit. Zone multipliers
 --                apply (head 2.0, torso 1.0, limbs 0.6).
 --   reach_m      straight-line reach from the eye along forward.
@@ -37,6 +43,7 @@ local PROBE_SWING_ANIM = "01932f4d-a39b-4ea8-96ba-aef3e6b4c2d8"
 
 return {
     name = "longsword",
+    cooldown_mult = 1.0,
     chain = {
         {
             name       = "swing1_R2L",

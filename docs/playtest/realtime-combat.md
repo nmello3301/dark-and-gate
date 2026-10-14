@@ -69,3 +69,20 @@ Stand at the DEV-SAVE start with a companion in the party. `!dag_god` (not `part
 Server start line: `SpellRange: N shot spells (70 m), M area / multi-target spells (30 m); K raised (StatsLoaded); Projectile_FireBolt 18 -> 70, … Target_Sleep 18 -> 30, …`.
 
 **Knobs if something is off:** `!dag_combat_wasd on|off` (BG3's own WASD in fights), `!dag_combat_move auto|server|off` (the server fallback), `!dag_ai_interval <s>` (AI cadence, next fight), `!dag_combat_cam on|off` (BG3's combat camera mode back / away), `!dag_bow_draw <s>` (draw time), `!dag_ai_aim <deg>`, `!dag_ai_react <ms>`, `!dag_shield_pct <0-1>`, `!dag_bleedout <s>`, `!dag_revive_time <s>`, `!dag_crouch_speed <x>`, `!dag_stealth_debug on`, `!dag_ai off` (Brawl's own attacks back), `!dag_stealth off` (vanilla detection only).
+
+## Melee cooldown (added 2026-10-13)
+
+One swing per 1.5 s, measured from swing start to swing start (DECISIONS 2026-10-13). A click in the last 0.3 s of the cooldown is kept and swings the moment the cooldown ends. Earlier clicks do nothing. The chain still goes #1 → #2 → #3 if you keep clicking. The server rejects hits from a swing that started too soon.
+
+**Do:** with `!dag_goblins` (or the gate fight), spam LMB on a goblin for about 10 s. Then click about once a second.
+
+**Expect:**
+- spamming swings once every 1.5 s, on the beat, never faster;
+- the chain still advances: R2L, L2R, overhead, then back to #1;
+- every swing that touches the goblin hurts it.
+- client.log: `Swing: start #n … cooldown=1.50s` about 1.5 s apart, `Swing: LMB ignored, melee cooldown …s left` (once per swing) and `Swing: LMB buffered, swings in N ms`;
+- server.log: `HitValidator: HIT …`, and no `REJECT melee cooldown` (that line means the client and server disagree).
+
+**Knob:** `!dag_melee_cooldown <s>` (sets the client and the server).
+
+**Please say:** does 1.5 s feel right, too slow or too fast, and does an ignored click feel like a bug (then the crosshair needs a cooldown ring)?

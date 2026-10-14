@@ -120,6 +120,8 @@ ConsoleForward.Forward({
     "dag_hp", "dag_scene", "dag_unstick",
     -- The enemies' pace (Server/Combat/Pace.lua).
     "dag_enemy_pace",
+    -- The melee cooldown: the client sets its own too (Client/Combat/Swing.lua).
+    "dag_melee_cooldown",
 })
 -- Forwarded commands carry the camera's forward ("ahead of you" spawns).
 local AimForCtx = Ext.Require("Client/Combat/Aim.lua")

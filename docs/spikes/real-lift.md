@@ -87,7 +87,7 @@ The transaction counter global is `0x145ed576c` (server: `0x145ed9ea8`).
 | +0x1C | vec3 | **StartPosition** |
 | +0x28 | vec3 | **Velocity** |
 | +0x34 | vec3 | Current velocity (Y loses 20·dt per frame; used for the impact sound) |
-| +0x40 | u8 | Hold landed: blocks state 2 → 3 |
+| +0x40 | u8 | Hold landed: blocks state 2 → 3. Set and released by animation events (slot 8, see "The landing hold" below) |
 | +0x41 | u8 | When 0, Enter sets GameplayController(`ecl::Character+0xB0`)`+0x18 |= 0x800000`; Exit clears it |
 | +0x42 | u8 | Skips the template threshold calculation; also sent to the server |
 | +0x43 | u8 | Fall sound started |
@@ -248,3 +248,14 @@ Lever **L1** in `tools/native/src/Hooks/RealJump.cpp`, behind `!dag_jump_mode re
 - **Walls:** sphere r = 0.25, swept along the frame's step + 0.35 m at chest height (`jump.wall_check_m`, 1.5 m above the feet; 1.3 m in the first chest-only build). A hit stops horizontal motion (`RJUMP wall …`). The first version also swept at the knee (0.45 m); the 2026-10-10 playtest showed rocks and debris catching the jump.
 - **Ceiling:** while rising, a sweep from head (feet + 1.6 m) to the next head height + 0.15 m. A hit hands the state back with vy = 0, so the engine's gravity takes over (`RJUMP ceiling …`).
 - **Landing:** hand-back fall speed capped (`jump.land_speed`, 3 m/s; the k = 3 curve ends at about 13 m/s). Lua clears the last jump clip at touchdown (`__stop__`).
+
+## The landing hold (2026-10-13, static Ghidra, `bg3_dx11.exe`)
+
+Playtest 8 (bunny hops): after each of our jumps the fall stayed in state 2 (landed) for 150–230 ms. A hop pressed then took off at 0 m/s, and WASD couldn't move you until the state left layer 1. That was the "catch" on every hop.
+
+- **MSFalling vtable** (`0x14564F770`): 0 dtor `0x141bd6ec0`, 1 GetType `0x14189c8b0`, 2 Enter `0x141bd71f0`, 3 Continue `0x1405d68b0`, 4 Update `0x141bd7280`, 5 CanExit `0x141bd71e0`, 6 Exit `0x141bd7c10`, 7 `0x141bd71e0`, **8 event handler `0x141bd7dc0`**, 9 `0x141b6c500`, 10 `0x141bd91f0` (no function defined there), 11 `0x141bd8db0`. **[H]**
+- **Slot 8 `0x141bd7dc0`** handles events of type 2 (`event+8`). Id `DAT_145eed760` sets **+0x40 = 1** (hold). Id `DAT_145eed75c`: when the hold is set and State == 2, it sets State = 3 (release); otherwise it clears +0x40. Most likely the landing animation's start and end text keys, so **BG3's landing animation holds you in place until the clip ends**. **[M]** (the two ids weren't resolved to names)
+- **Update, state 2** (`0x141bd7280`): if the character is on the ground (`y <= ground + 1e-7`) and +0x40 == 0, State = 3. If it is above the ground, the fall restarts from the ground position (State = 0). **State 3** calls the layer-1 state's CanExit / Exit and clears layer 1. **[H]**
+- The landing helper `0x141bd7e40` only computes the fall height and a "big fall" flag for the land event `0x141bd85f0`. It doesn't touch +0x40. **[H]**
+
+**Lever (built, build 10):** RealJump hooks Update (slot 4). From take-off until 2 s after our jump's planned end, when State == 2 and +0x40 is set, it clears +0x40 before the engine's Update. The engine then moves to State 3 and pops layer 1 one Update later. The animation's release event later finds State != 2 and only clears the flag. `data/movement.lua` `jump.land_hold = false`, `!dag_jump_land_hold on|off`. native.log: `RJUMP landing hold skipped …` and `RJUMP landing: fall state off the machine N ms after the jump's end`. A hop within 0.35 s of the last jump's end also takes off with that jump's velocity (`… (the last jump's momentum)`), not the measured one, which the landing zeroed.

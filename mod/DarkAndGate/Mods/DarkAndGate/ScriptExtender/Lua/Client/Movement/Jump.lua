@@ -41,6 +41,10 @@
 --   !dag_jump_moving_anims auto|on|off     clips on moving jumps (see above)
 --   !dag_jump_sync_guard on|off            real mode: skip the engine's reset
 --                                          when the server changes flag 0x20
+--   !dag_jump_buffer <s>                   bunny-hop grace: Space this early
+--                                          before landing still jumps (0 = off)
+--   !dag_jump_land_hold on|off             real mode: BG3's landing hold (the
+--                                          recover after a jump), off = skipped
 
 local Log       = Ext.Require("Shared/Log.lua")
 local MCM       = Ext.Require("Shared/MCM.lua")
@@ -70,6 +74,7 @@ local J = {
     T = 0,            -- ms
     events = {},      -- { at = ms (absolute), clip, label, every = ms?, untilAt = ms? }
     readyAt = 0,      -- ms (absolute), next jump accepted
+    bufferedAt = nil, -- ms: Space pressed within the bunny-hop grace, jumps at readyAt
     P = nil,          -- phase clips of the current jump
     Ts = 0,           -- airtime, seconds
     rate = nil,       -- clip play rate of the current jump (nil = clips off)
@@ -202,9 +207,24 @@ function M.OnSpace()
     if not cfg("enabled") then return end
     local now = nowMs()
     if J.active or now < J.readyAt then
-        if J.active then Log.Write("Jump: ignored (already airborne, no double jump)") end
+        -- Bunny-hop grace (developer 2026-10-13): a press in the last
+        -- buffer_s before landing, or in the cooldown after it, is kept and
+        -- jumps the moment a jump is allowed (tick), so a hop doesn't need
+        -- exact timing. Earlier presses in the air are still no double jump.
+        local toLand = J.active and (J.t0 + J.T - now) or 0
+        local grace = cfg("buffer_s") or 0
+        if grace > 0 and toLand <= grace * 1000 then
+            if not J.bufferedAt then
+                Log.Write(string.format("Jump: Space buffered %d ms before landing (bunny-hop grace %.2fs)",
+                    math.floor(toLand), grace))
+            end
+            J.bufferedAt = now
+        elseif J.active then
+            Log.Write(string.format("Jump: ignored (already airborne, no double jump; %d ms to landing)", math.floor(toLand)))
+        end
         return
     end
+    J.bufferedAt = nil
 
     local P = {}
     for _, ph in ipairs(D.phases or { "cast", "ascend", "hang", "descend", "land" }) do P[ph] = JumpAnims.Pick(ph) end
@@ -277,6 +297,22 @@ local function landNow(why)
     Log.Write("Jump: landing clip " .. why)
 end
 
+-- Bunny-hop grace: the buffered Space jumps once a jump is allowed (on the
+-- landing tick itself since cooldown_s is 0). A BG3 panel opening drops it
+-- (like a buffered swing).
+local function fireBuffered(now)
+    if not J.bufferedAt or J.active then return end
+    if State.uiPaused then
+        J.bufferedAt = nil
+        Log.Write("Jump: buffered Space dropped (a BG3 panel opened)")
+    elseif now >= J.readyAt then
+        local ago = now - J.bufferedAt
+        Log.Write(string.format("Jump: buffered Space fires (pressed %d ms ago)", math.floor(ago)))
+        J.bufferedAt = nil
+        M.OnSpace()
+    end
+end
+
 local function tick()
     local now = nowMs()
     sampleSpeed(now)
@@ -292,6 +328,8 @@ local function tick()
         end
         J.landPending = nil
     end
+
+    fireBuffered(now)
 
     if not J.active then return end
 
@@ -347,6 +385,8 @@ local function tick()
         end
         Log.Write(string.format("Jump: landed seq=%d after %.2fs speed=%.1fm/s wasd=%s%s",
             J.seq, (now - J.t0) / 1000, speed.v, moveKeysHeld() and "held" or "none", landWait))
+        -- A hop buffered in the air leaves on this same tick.
+        fireBuffered(now)
     end
 end
 
@@ -374,6 +414,8 @@ function M.Register()
     -- Max 10 m: 2026-10-10 test of casting at the top of a 10x jump.
     MCM.DefineNumber("jump_height_m", D.height_m, "Jump height (m)", 0.1, 10.0)
     MCM.DefineNumber("jump_apex_flatness", D.apex_flatness, "Jump apex hang (2 = parabola)", 1.0, 8.0)
+    MCM.DefineNumber("jump_buffer_s", D.buffer_s or 0.25, "Bunny-hop grace: Space this early before landing still jumps (s)", 0.0, 0.6)
+    FullPov.SetJumpWait(cfg("buffer_s") * 1000)
 
     Ext.Events.Tick:Subscribe(function() pcall(tick) end)
     Actions.OnChange(onActions)
@@ -391,6 +433,20 @@ function M.Register()
     Ext.RegisterConsoleCommand("dag_jump_height", function(_, x)
         if tonumber(x) then MCM.Set("jump_height_m", tonumber(x)) end
         Log.Write(string.format("Jump: height=%.2fm", cfg("height_m")))
+    end)
+    -- BG3's landing hold (the recover after a jump): skipped by default.
+    local landHold = D.land_hold == true
+    FullPov.SetJumpLandHold(landHold)
+    Ext.RegisterConsoleCommand("dag_jump_land_hold", function(_, x)
+        if x == "on" then landHold = true elseif x == "off" then landHold = false end
+        FullPov.SetJumpLandHold(landHold)
+        Log.Write("Jump: BG3's landing hold after a jump " .. (landHold and "KEPT (recover before you can move / hop)" or "skipped")
+            .. " (native.log RJUMP landing lines)")
+    end)
+    Ext.RegisterConsoleCommand("dag_jump_buffer", function(_, x)
+        if tonumber(x) then MCM.Set("jump_buffer_s", tonumber(x)) end
+        FullPov.SetJumpWait(cfg("buffer_s") * 1000)
+        Log.Write(string.format("Jump: bunny-hop grace %.2fs (Space this early before landing still jumps; 0 = off)", cfg("buffer_s")))
     end)
     Ext.RegisterConsoleCommand("dag_jump_mode", function(_, x)
         if x == "real" or x == "visual" then FullPov.SetJumpMode(x) end

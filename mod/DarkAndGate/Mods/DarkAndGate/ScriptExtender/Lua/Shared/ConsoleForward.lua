@@ -19,6 +19,7 @@ local Net = Ext.Require("Shared/Net.lua")
 local M = {}
 
 local handlers = {}   -- server: name -> fn(cmd, ...)
+local localFns = {}   -- client: name -> fn(cmd, ...) run here too, before forwarding
 local context = nil   -- client: fn() -> table sent along (or nil)
 local caller = nil    -- server: { peer, ctx } while a forwarded handler runs
 
@@ -31,10 +32,19 @@ function M.Server(name, fn)
     Ext.RegisterConsoleCommand(name, fn)
 end
 
+-- Client: a forwarded command that also runs fn in the client first (a
+-- knob both sides read, e.g. !dag_melee_cooldown). The name still goes in
+-- the Forward list.
+function M.Local(name, fn) localFns[name] = fn end
+
 -- Client: forward these command names to the server.
 function M.Forward(names)
     for _, name in ipairs(names) do
         Ext.RegisterConsoleCommand(name, function(_, ...)
+            if localFns[name] then
+                local okL, errL = pcall(localFns[name], name, ...)
+                if not okL then Log.Write("Console: !" .. name .. " client part failed: " .. tostring(errL)) end
+            end
             local args = {}
             for i = 1, select("#", ...) do args[i] = tostring(select(i, ...)) end
             local ctx = nil

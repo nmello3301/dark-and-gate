@@ -11,6 +11,11 @@
 --
 -- M1b scope: one chain reset after the overhead or after combo_ms expires.
 -- No weapon-family-specific logic yet (just reads longsword.lua).
+--
+-- Melee cooldown (DECISIONS 2026-10-13, Shared/MeleeCooldown.lua): one
+-- swing per cooldown (1.5 s), swing start to swing start. A click in the
+-- last buffer_s of it waits and swings on time; earlier clicks are ignored.
+-- The chain still advances: combo_ms counts from the cooldown's end.
 
 local Log       = Ext.Require("Shared/Log.lua")
 local Net       = Ext.Require("Shared/Net.lua")
@@ -22,6 +27,8 @@ local Anims     = Ext.Require("Client/Combat/Anims.lua")
 local Tags      = Ext.Require("Client/AnimLib/Tags.lua")
 local Actions   = Ext.Require("Client/Combat/Actions.lua")
 local airAction = Ext.Require("data/movement.lua").air_action
+local MeleeCooldown = Ext.Require("Shared/MeleeCooldown.lua")
+local ConsoleForward = Ext.Require("Shared/ConsoleForward.lua")
 
 local M = {}
 
@@ -94,21 +101,26 @@ local function startSwing(index)
     if not def then return end
     if State.currentSwing then logSummary(State.currentSwing) end
     local eye, fwd = Aim.ReadInvView()
+    local t = nowMs()
+    local cooldownS = MeleeCooldown.Seconds(longsword)
+    -- Next swing allowed: the cooldown or the swing's own recovery, the later.
+    local readyAt = t + math.max(cooldownS * 1000, def.windup_ms + def.active_ms + def.recovery_ms)
     State.currentSwing = {
         swingIndex    = index,
         nonce         = State.NextSwingNonce(),
         def           = def,
         startEye      = eye or { 0, 0, 0 },
         startForward  = fwd or { 0, 0, 1 },
-        activeStart   = nowMs() + def.windup_ms,
-        activeUntil   = nowMs() + def.windup_ms + def.active_ms,
-        recoveryUntil = nowMs() + def.windup_ms + def.active_ms + def.recovery_ms,
-        chainResetAt  = nowMs() + def.windup_ms + def.active_ms + def.combo_ms,
+        activeStart   = t + def.windup_ms,
+        activeUntil   = t + def.windup_ms + def.active_ms,
+        recoveryUntil = t + def.windup_ms + def.active_ms + def.recovery_ms,
+        readyAt       = readyAt,
+        chainResetAt  = math.max(t + def.windup_ms + def.active_ms, readyAt) + def.combo_ms,
         hitTargets    = {},
         sampling      = false,
     }
-    Log.Write(string.format("Swing: start #%d (%s) damage=%.1f reach=%.1f",
-        index, def.name, def.damage, def.reach_m))
+    Log.Write(string.format("Swing: start #%d (%s) damage=%.1f reach=%.1f cooldown=%.2fs",
+        index, def.name, def.damage, def.reach_m, cooldownS))
     -- Play the animation (server-authoritative). The hit sampling is on
     -- our client ticks; the animation is cosmetic.
     -- fix3: real attack clip from the animation scan (Anims.lua). The old
@@ -139,8 +151,9 @@ end
 
 -- 2026-10-09: a swing can't start before the previous one's recovery
 -- ends (recovery_ms in the weapon data was never enforced, so LMB spam
--- restarted the animation every click). One early click is buffered and
--- fires the moment recovery ends.
+-- restarted the animation every click). 2026-10-13: nor before the melee
+-- cooldown ends (readyAt). One click in the last buffer_s is buffered and
+-- fires the moment the next swing is allowed.
 local buffered = false
 
 local function advance()
@@ -160,10 +173,18 @@ end
 
 function M.OnLMB()
     local s = State.currentSwing
-    if s and nowMs() < s.recoveryUntil then
-        if not buffered then
-            buffered = true
-            Log.Write("Swing: LMB buffered until recovery ends")
+    local now = nowMs()
+    if s and now < s.readyAt then
+        local left = s.readyAt - now
+        if left <= MeleeCooldown.Buffer() * 1000 then
+            if not buffered then
+                buffered = true
+                Log.Write(string.format("Swing: LMB buffered, swings in %d ms (melee cooldown)", math.floor(left)))
+            end
+        elseif not s.cooldownLogged then
+            -- Once per swing: spam clicks would flood the log.
+            s.cooldownLogged = true
+            Log.Write(string.format("Swing: LMB ignored, melee cooldown %.2fs left", left / 1000))
         end
         return
     end
@@ -176,7 +197,7 @@ local function tick()
     -- A BG3 panel opened: a click buffered before it must not fire later.
     if State.uiPaused and buffered then buffered = false; Log.Write("Swing: buffered LMB dropped (a BG3 panel opened)") end
     local now = nowMs()
-    if buffered and now >= s.recoveryUntil then
+    if buffered and now >= s.readyAt then
         buffered = false
         advance()
         s = State.currentSwing
@@ -196,7 +217,15 @@ function M.Register()
     Anims.Register()
     Aim.Register()
     Ext.Events.Tick:Subscribe(function() pcall(tick) end)
-    Log.Write("Swing: registered (longsword, " .. #longsword.chain .. " swings)")
+    -- !dag_melee_cooldown <s>: here and on the server (HitValidator), which
+    -- rejects hits from swings faster than its own value.
+    ConsoleForward.Local("dag_melee_cooldown", function(_, v)
+        MeleeCooldown.Set(v)
+        Log.Write(string.format("Swing: melee cooldown %.2fs (longsword %.2fs; data/combat.lua melee.cooldown_s)",
+            MeleeCooldown.Base(), MeleeCooldown.Seconds(longsword)))
+    end)
+    Log.Write(string.format("Swing: registered (longsword, %d swings, melee cooldown %.2fs)",
+        #longsword.chain, MeleeCooldown.Seconds(longsword)))
 end
 
 return M

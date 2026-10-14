@@ -79,12 +79,20 @@ using SyncResetFn = void(__fastcall*)(void* sys, void* character, uint8_t flag);
 SyncResetFn volatile g_origSyncReset = nullptr;
 std::atomic<bool> g_syncGuard{ true };
 long g_syncSeen = 0, g_syncSkipped = 0;
+bool g_refusedAirborne = false;   // Start's last refusal: already in the air
+int  g_refusedLogSeq = 0;         // Pov retries a refused jump every frame: log it once
 char       g_why[128] = "not installed";
 
 std::atomic<void*> g_char{ nullptr };
 float g_camFwd[2] = { 0.f, 1.f };
 float g_strafeSign = 1.f;
 float g_landSpeed = 3.f;
+// BG3's landing animation holds the fall in its landed state (+0x54 = 2)
+// through +0x40 (set and released by animation events, vtable slot 8
+// 0x141bd7dc0): the "recover" after a jump, 150-230 ms in playtest 8, with
+// WASD and the next hop blocked. false = clear the hold after our jumps
+// (data jump.land_hold, 2026-10-13).
+std::atomic<bool> g_landHold{ false };
 float g_wallH = 1.3f;
 
 // Physics scene from the falling Update's ground probe call.
@@ -135,6 +143,8 @@ struct Jump {
     float    wrote[3] = {};      // Start we wrote (re-seed detection)
     int      walls = 0;          // frames the sideways move was blocked
     bool     bonked = false;
+    bool     holdSkipped = false; // BG3's landing hold cleared after this jump
+    bool     offLogged = false;   // "fall state off the machine" logged
 } g_j;
 
 // Horizontal velocity of the character, measured per frame (for inertia).
@@ -241,9 +251,30 @@ float Curve(float u)
     return g_j.h * (1.f - std::pow(std::fabs(2.f * u - 1.f), g_j.k));
 }
 
+// After our jump (from take-off to 2 s after its planned end): clear BG3's
+// landing hold before the engine's Update, so the landed state ends at once
+// (state 3 pops layer 1 on the next Update) and you move / hop right away.
+void SkipLandHold(uint8_t* st)
+{
+    if (g_landHold.load(std::memory_order_relaxed) || !g_j.seq || st != g_j.state) return;
+    LARGE_INTEGER now; QueryPerformanceCounter(&now);
+    const double sinceEnd = Seconds(g_j.t0, now) - g_j.durMs / 1000.0;
+    if (sinceEnd > 2.0) return;
+    if (*reinterpret_cast<int*>(st + 0x54) != 2 || st[0x40] == 0) return;
+    st[0x40] = 0;
+    if (!g_j.holdSkipped) {
+        g_j.holdSkipped = true;
+        dag::log::Writef("RJUMP landing hold skipped seq=%d %.0f ms after the jump's end (BG3's landing animation held the fall)",
+                         g_j.seq, sinceEnd * 1000.0);
+    }
+}
+
 uint64_t __fastcall HookUpdate(uint8_t* st, uint8_t* gameTime)
 {
-    if (!g_j.active || st != g_j.state) return g_origUpdate(st, gameTime);
+    if (!g_j.active || st != g_j.state) {
+        __try { SkipLandHold(st); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        return g_origUpdate(st, gameTime);
+    }
 
     float dt = 0.016f;
     __try { dt = *reinterpret_cast<float*>(gameTime + 8); } __except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -498,6 +529,13 @@ void ForgetCharacter()
 void SetStrafeSign(float s) { g_strafeSign = s < 0.f ? -1.f : 1.f; }
 void SetLandSpeed(float vmax) { if (vmax > 0.1f && vmax < 50.f) g_landSpeed = vmax; }
 void SetWallHeight(float h) { if (h > 0.2f && h < 3.f) g_wallH = h; }
+bool RefusedAirborne() { return g_refusedAirborne; }
+
+void SetLandHold(bool on)
+{
+    if (g_landHold.exchange(on) != on) dag::log::Writef("RJUMP: BG3's landing hold after a jump %s", on ? "kept" : "skipped");
+}
+
 void SetSyncGuard(bool on)
 {
     if (g_syncGuard.exchange(on) != on) dag::log::Writef("RJUMP: sync guard %s", on ? "ON" : "off");
@@ -506,6 +544,17 @@ void SetSyncGuard(bool on)
 void MeasureFrame()
 {
     Active();   // notices a jump taken off the machine, every frame
+    // How long after our jump the fall state stays on the machine (the
+    // recover: WASD and the next hop wait for it). Logged once per jump.
+    if (g_j.seq && !g_j.active && !g_j.offLogged && g_j.machine) {
+        void* l1 = nullptr;
+        if (dag::safemem::ReadPtr(g_j.machine, 0x40, l1) && l1 != g_j.state) {
+            g_j.offLogged = true;
+            LARGE_INTEGER n; QueryPerformanceCounter(&n);
+            dag::log::Writef("RJUMP landing: fall state off the machine %.0f ms after the jump's end (hold %s)",
+                             (Seconds(g_j.t0, n) - g_j.durMs / 1000.0) * 1000.0, g_j.holdSkipped ? "skipped" : "not seen");
+        }
+    }
     // Inertia: measured horizontal velocity of the WASD character.
     void* c = g_char.load(std::memory_order_relaxed);
     if (!c) return;
@@ -550,10 +599,49 @@ bool Start(float durMs, float h, float k, const float camFwdXZ[2], int seq)
     }
     if (!st || !VtIs(st, kFallVtRva)) { dag::log::Writef("RJUMP: Falling state not found/validated -> visual lift"); return false; }
     if (!HookVtable(st)) return false;
+    g_refusedAirborne = false;
+    // Bunny hop: a hop right after our last jump keeps that jump's momentum
+    // (the landing stops the measured velocity; playtest 8 hops took off at
+    // 0 m/s and were steered at the 2.5 m/s floor).
+    float carry[2] = { 0.f, 0.f };
+    {
+        LARGE_INTEGER n; QueryPerformanceCounter(&n);
+        const double sinceLast = g_j.seq && g_j.t0.QuadPart ? Seconds(g_j.t0, n) - g_j.durMs / 1000.0 : 1e9;
+        if (!g_j.active && sinceLast > -0.3 && sinceLast < 0.35) { carry[0] = g_j.vel[0]; carry[1] = g_j.vel[1]; }
+    }
     __try {
         if (*reinterpret_cast<uint8_t**>(machine + 0x40) == st) {
-            dag::log::Writef("RJUMP: already falling -> no jump");
-            return false;
+            // The fall is still on the machine. After our jump that is its
+            // landing phase (state >= 2) or the short drop after the curve
+            // handed back; hopping right after a landing hit it every other
+            // jump (playtest 7), and the jump fell back to the visual lift:
+            // you stayed on the ground and BG3's walk carried you on ("the
+            // direction changes"). Take the state over for the new jump:
+            // exit it, clear layer 1, push it again below.
+            const int fallState = *reinterpret_cast<int*>(st + 0x54);
+            LARGE_INTEGER now; QueryPerformanceCounter(&now);
+            const double sinceEnd = g_j.seq && g_j.t0.QuadPart ? Seconds(g_j.t0, now) - g_j.durMs / 1000.0 : 1e9;
+            // Our jump's tail: the curve handed back at the take-off height
+            // and the engine hasn't registered the landing yet. Lower than
+            // that is a real fall (off a ledge): no take-over mid-air (the
+            // bunny-hop grace would make that a double jump); Pov waits for
+            // the landing instead.
+            const float drop = g_j.seq ? g_j.start[1] - pos[1] : 0.f;
+            const bool ourTail = !g_j.active && sinceEnd > -0.05 && sinceEnd < 0.8 && drop < 0.25f;
+            if (fallState < 2 && !ourTail) {
+                g_refusedAirborne = true;
+                if (seq != g_refusedLogSeq) {
+                    g_refusedLogSeq = seq;
+                    dag::log::Writef("RJUMP: already in the air (fall state %d, %s, %.2f m under the last take-off) -> no jump yet",
+                                     fallState, g_j.active ? "our jump still steers" : "not our jump's landing", drop);
+                }
+                return false;
+            }
+            auto exitFn = reinterpret_cast<VoidStateFn>(VtSlot(st, 6));
+            if (exitFn) exitFn(st);
+            *reinterpret_cast<uint8_t**>(machine + 0x40) = nullptr;
+            dag::log::Writef("RJUMP: re-arming the last fall for a new jump (fall state %d, %.0f ms after the last jump's end)",
+                             fallState, sinceEnd * 1000.0);
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 
@@ -563,6 +651,8 @@ bool Start(float durMs, float h, float k, const float camFwdXZ[2], int seq)
     std::memcpy(g_j.start, pos, 12);
     std::memcpy(g_j.pos, pos, 12);
     g_j.vel[0] = g_measVel[0]; g_j.vel[1] = g_measVel[1];
+    const bool carried = carry[0] * carry[0] + carry[1] * carry[1] > g_j.vel[0] * g_j.vel[0] + g_j.vel[1] * g_j.vel[1];
+    if (carried) { g_j.vel[0] = carry[0]; g_j.vel[1] = carry[1]; }
     QueryPerformanceCounter(&g_j.t0);
 
     // Fill the state like the engine's own push, with the preset flag.
@@ -577,8 +667,9 @@ bool Start(float durMs, float h, float k, const float camFwdXZ[2], int seq)
     uint8_t* idle = nullptr;
     __try { idle = g_getState(machine, 4); } __except (EXCEPTION_EXECUTE_HANDLER) {}
     const bool idleOk = idle && PushLayer(machine, 0x38, idle, "idle");
-    dag::log::Writef("RJUMP start seq=%d char=%p machine=%p state=%p pos=(%.2f,%.2f,%.2f) vel=(%.2f,%.2f) dur=%.0fms h=%.2f k=%.1f layer0 idle=%d",
-                     seq, c, machine, st, pos[0], pos[1], pos[2], g_j.vel[0], g_j.vel[1], g_j.durMs, h, g_j.k, idleOk ? 1 : 0);
+    dag::log::Writef("RJUMP start seq=%d char=%p machine=%p state=%p pos=(%.2f,%.2f,%.2f) vel=(%.2f,%.2f)%s dur=%.0fms h=%.2f k=%.1f layer0 idle=%d",
+                     seq, c, machine, st, pos[0], pos[1], pos[2], g_j.vel[0], g_j.vel[1],
+                     carried ? " (the last jump's momentum)" : "", g_j.durMs, h, g_j.k, idleOk ? 1 : 0);
     return true;
 }
 
