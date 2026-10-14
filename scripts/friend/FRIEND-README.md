@@ -26,20 +26,27 @@ You need a free Nexus Mods account to download. If the version below isn't the m
 
 ## 2. Run INSTALL.bat
 
-1. Right-click the zip > **Extract All...**
-2. Close the game. Double-click **INSTALL.bat** in the extracted folder. If Windows says "Windows protected your PC", click **More info** > **Run anyway**.
-3. It copies the Dark and Gate files into place and checks everything from step 1. Anything red has a link next to it: fix it and run INSTALL.bat again.
+1. Start the game once to the main menu and quit, if you never have (that creates your player profile).
+2. Right-click the zip > **Extract All...**
+3. Close the game. Double-click **INSTALL.bat** in the extracted folder. If Windows says "Windows protected your PC", click **More info** > **Run anyway**.
+4. It finds the game by itself (any Steam library, on any drive) and:
+   - copies the Dark and Gate files into place, plus the host's settings for Native Camera Tweaks, WASD and the Script Extender (console and logging on);
+   - checks your game version (it must be the host's: `bg3_dx11.exe` **4.1.1.7631656**) and every mod from step 1;
+   - checks the load order (**Mod Configuration Menu > AnimationUnlocker > DarkAndGate**). If yours differs, it asks **"Fix it now?"**: press Enter (or Y) and it sets it for you. Any other mods you had active are turned off for co-op; the backup keeps your old list.
+5. At the end it says a green **READY**, or a red list of what's missing with a link for each. Fix those and run INSTALL.bat again until it says READY.
    - The "Installed files" section must say **MATCH**: that means you have exactly the host's build.
    - If it says "access denied", right-click INSTALL.bat > **Run as administrator**.
-4. If you install or update WASD or Native Camera Tweaks **after** this, run INSTALL.bat again. Their own settings file replaces ours.
+   - If it can't find the game, it asks for the folder. In Steam: right-click Baldur's Gate 3 > Manage > Browse local files, and copy the path from the address bar.
+6. If you install or update WASD or Native Camera Tweaks **after** this, run INSTALL.bat again. Their own settings file replaces ours.
 
-Before replacing anything, INSTALL.bat backs it up to `%LOCALAPPDATA%\Larian Studios\Baldur's Gate 3\DarkAndGate-backup-<date>\`.
+Before replacing anything (including your `ScriptExtenderSettings.json`, the camera settings and your load order), INSTALL.bat backs it up to `%LOCALAPPDATA%\Larian Studios\Baldur's Gate 3\DarkAndGate-backup-<date>\`.
 
-## 3. Turn the mods on (load order)
+## 3. The load order (INSTALL.bat does this for you)
 
-1. Start the game once to the main menu and quit, if you never have.
-2. Open **BG3 Mod Manager** and click **Refresh**.
-3. Drag these from **Inactive** to **Active**, in this order, exactly like the host. Leave every other mod inactive:
+INSTALL.bat sets it when you answer Y. If it couldn't (it tells you why), do it by hand:
+
+1. Open **BG3 Mod Manager** and click **Refresh**.
+2. Drag these from **Inactive** to **Active**, in this order, exactly like the host. Leave every other mod inactive:
 
 <!-- HOST-LOAD-ORDER:BEGIN -->
 1. **Mod Configuration Menu** (version 1.41.0.0)
@@ -47,13 +54,13 @@ Before replacing anything, INSTALL.bat backs it up to `%LOCALAPPDATA%\Larian Stu
 3. **DarkAndGate** (version 1.0.0.0)
 <!-- HOST-LOAD-ORDER:END -->
 
-4. **File > Export Order to Game** (Ctrl+E). Close the Mod Manager.
+3. **File > Export Order to Game** (Ctrl+E). Close the Mod Manager.
 
-Run INSTALL.bat again afterwards if you want to check: its "Load order" list should be all green.
+Run INSTALL.bat again afterwards: its "Load order" list should be all green and it should end with READY.
 
 ## 4. Launch and check the console
 
-1. Launch from Steam and pick **DirectX 11** in the Larian launcher. The host plays DX11, and Vulkan is untested.
+1. Launch from Steam and pick **DirectX 11** in the Larian launcher (the box next to PLAY). **Not Vulkan:** the host plays DX11, and Dark and Gate's native part only works in the DirectX 11 game.
 2. A black **Script Extender console** window opens next to the game. If it doesn't, hold **Shift** while the game starts.
 3. To type a command: click the console window and press **Enter**. You'll see `S >>`. Type `client` and press Enter, and it changes to `C >>`. Now type the command. Alt+Tab switches between the game and the console.
 
@@ -79,5 +86,5 @@ After playing (it also works with the game still open), double-click **COLLECT-L
 ## 9. Uninstall
 
 1. In BG3 Mod Manager, move DarkAndGate back to Inactive and **Export Order to Game** again.
-2. Open the newest `DarkAndGate-backup-<date>` folder in `%LOCALAPPDATA%\Larian Studios\Baldur's Gate 3\`. `RESTORE.txt` there lists every file the installer touched: copy the backed-up ones back, and delete the ones marked NEW (`DarkAndGate.pak`, `DarkAndGate.dll`, and `ScriptExtenderSettings.json` if it was created).
+2. Open the `DarkAndGate-backup-<date>` folders in `%LOCALAPPDATA%\Larian Studios\Baldur's Gate 3\`, newest first (each run of INSTALL.bat that changed something made one). `RESTORE.txt` in each lists every file that run touched: copy the backed-up ones back (`ScriptExtenderSettings.json`, the `.toml` files, `modsettings.lsx`), and delete the ones marked NEW (`DarkAndGate.pak`, `DarkAndGate.dll`).
 3. The other mods: delete their files the same way you added them. Steam's **Verify integrity of game files** won't remove extra files, so this step is manual.

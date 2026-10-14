@@ -18,8 +18,8 @@
 2. `scripts\pov-build-deploy.ps1` (already done for this build), then `scripts\make-friend-package.ps1`. Send `Desktop\DarkAndGate-friend-<sha>.zip` to your friend.
 
 **CLIENT (friend):**
-1. Install the third-party mods from `FRIEND-README.md` (SE, the loader, BG3WASD 1.9.9, NCT 2.4.5, MCM, AnimationUnlocker), then run `INSTALL.bat`. It checks versions and prints the pak and DLL SHA-256.
-2. Enable the mods in the same load order as the host (README). Launch DirectX 11.
+1. Install the third-party mods from `FRIEND-README.md` (SE, the loader, BG3WASD 1.9.9, NCT 2.4.5, MCM 1.41, AnimationUnlocker 1.0.5.5), then run `INSTALL.bat`. It finds the game in any Steam library, installs our files plus the host's NCT/WASD tomls and `ScriptExtenderSettings.json` (backing up theirs), checks the game version (`bg3_dx11.exe` 4.1.1.7631656) and every mod, and offers to set the load order (MCM > AnimationUnlocker > DarkAndGate, after a backup).
+2. Repeat until it ends with a green **READY**. Launch in **DirectX 11**.
 3. Defender may flag the loader on your PC too (see the README).
 
 ## 1. Install check, solo sanity, joining

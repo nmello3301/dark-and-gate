@@ -10,6 +10,10 @@
     NativeMods\DarkAndGate.dll         tools\native\out\build\Release\DarkAndGate.dll
     NativeMods\BG3WASD.toml            the host's bin\NativeMods copy (our movement config)
     NativeMods\BG3NativeCameraTweaks.toml  the host's copy (scripts\install-camera-config.ps1)
+    ScriptExtenderSettings.json        the host's bin copy (console + logging on); install.ps1
+                                       puts it in the friend's bin after a backup
+    host-modsettings.lsx               the host's load order file; install.ps1 copies it over
+                                       the friend's (after a backup) when the orders differ
     INSTALL.bat, install.ps1           scripts\friend\
     COLLECT-LOGS.bat, mp-collect-logs.ps1
     FRIEND-README.md                   scripts\friend\, with the host's live load order filled in
@@ -235,6 +239,24 @@ try {
     $configs[$name] = $src
   }
 
+  # Script Extender settings (console + logging): the host's own file.
+  $seLive = Join-Path $bin 'ScriptExtenderSettings.json'
+  $seStage = Join-Path $stage 'ScriptExtenderSettings.json'
+  if (Test-Path -LiteralPath $seLive) {
+    Copy-Item -LiteralPath $seLive -Destination $seStage
+    try {
+      $sj = Get-Content -LiteralPath $seLive -Raw | ConvertFrom-Json
+      if ($sj.CreateConsole -ne $true -or $sj.EnableLogging -ne $true) { Warn "The host's ScriptExtenderSettings.json has CreateConsole or EnableLogging off; the friend gets the same." }
+    } catch { Warn "The host's ScriptExtenderSettings.json is not valid JSON: $($_.Exception.Message)" }
+  } else {
+    Warn "Host has no bin\ScriptExtenderSettings.json; shipping a default one (console + logging on)."
+    Write-Ascii $seStage "{`r`n    ""CreateConsole"": true,`r`n    ""EnableLogging"": true,`r`n    ""LogRuntime"": true`r`n}`r`n"
+  }
+
+  # The host's load order, for install.ps1's load-order fix.
+  if (Test-Path -LiteralPath $hostLoad) { Copy-Item -LiteralPath $hostLoad -Destination (Join-Path $stage 'host-modsettings.lsx') }
+  else { Warn "No host modsettings.lsx ($hostLoad): the friend's installer can't fix the load order, only explain it." }
+
   # Scripts. .bat files get CRLF line endings whatever git did to them.
   foreach ($f in 'INSTALL.bat', 'COLLECT-LOGS.bat') {
     $t = (Get-Content -LiteralPath (Join-Path $friendDir $f) -Raw) -replace "`r?`n", "`r`n"
@@ -323,13 +345,19 @@ try {
   $exe = Join-Path $bin 'bg3_dx11.exe'
   if (Test-Path -LiteralPath $exe) {
     $ei = Get-Item -LiteralPath $exe
-    $exeFp = [ordered]@{ file = $ei.Name; size = $ei.Length; sha256 = (Get-Sha $exe); file_version = $(if ($ei.VersionInfo.FileVersion) { $ei.VersionInfo.FileVersion.Trim() } else { $null }) }
+    # ProductVersion is the game build ("4.1.1.7631656"); FileVersion is just "1.0.0.0".
+    $exeFp = [ordered]@{ file = $ei.Name; size = $ei.Length; sha256 = (Get-Sha $exe)
+      product_version = $(if ($ei.VersionInfo.ProductVersion) { $ei.VersionInfo.ProductVersion.Trim() } else { $null })
+      file_version = $(if ($ei.VersionInfo.FileVersion) { $ei.VersionInfo.FileVersion.Trim() } else { $null }) }
+    if (-not $exeFp.product_version) { Warn "bg3_dx11.exe has no ProductVersion: install.ps1 falls back to its built-in game version." }
+  } else {
+    Warn "No bin\bg3_dx11.exe on the host: the friend's game version can't be checked against it."
   }
 
   $files = [ordered]@{}
   foreach ($f in (Get-ChildItem -LiteralPath $stage -Recurse -File)) {
     $rel = $f.FullName.Substring((Get-Item -LiteralPath $stage).FullName.TrimEnd('\').Length + 1)
-    if ($rel -notmatch '\.(pak|dll|toml)$') { continue }
+    if ($rel -notmatch '\.(pak|dll|toml)$' -and $rel -ne 'ScriptExtenderSettings.json') { continue }
     $dest = $(if ($rel -like '*.pak') { 'Mods\' + $f.Name } else { 'bin\' + $rel })
     $files[$rel] = [ordered]@{ installs_to = $dest; size = $f.Length; sha256 = (Get-Sha $f.FullName) }
   }
@@ -391,6 +419,8 @@ foreach ($t in $tp) {
   Write-Host ("    {0,-38} {1}" -f $t.name, $hv)
 }
 Write-Host "  Host load order: $((@($loadOrder | ForEach-Object { $_.name })) -join ' > ')"
+if ($exeFp) { Write-Host "  Game: bg3_dx11.exe $($exeFp.product_version)" }
+Write-Host "  Configs shipped: $((@($configs.Keys) + 'ScriptExtenderSettings.json') -join ', ')$(if (Test-Path -LiteralPath $hostLoad) { ', host-modsettings.lsx' })"
 if ($warnings.Count -gt 0) {
   Write-Host "`n$($warnings.Count) warning(s) above." -ForegroundColor Yellow
 }

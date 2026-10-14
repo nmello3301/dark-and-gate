@@ -5,26 +5,36 @@
 
 .DESCRIPTION
   Run it through INSTALL.bat (double-click). It:
-    1. finds Baldur's Gate 3 (Steam library folders, GOG, the default path;
-       or -GameRoot; asks if it can't find it),
+    1. finds Baldur's Gate 3 by itself: every Steam library (Steam's registry
+       keys + libraryfolders.vdf), Steam's uninstall entry, GOG, then the
+       usual folders on every fixed drive (or -GameRoot; it asks if all of
+       that fails), and %LOCALAPPDATA% for the Mods folder and load order,
     2. refuses while the game is running,
     3. backs up every file it will replace into
        %LOCALAPPDATA%\Larian Studios\Baldur's Gate 3\DarkAndGate-backup-<time>\
-    4. copies DarkAndGate.pak into the Mods folder and DarkAndGate.dll + our
-       .toml configs into <game>\bin\NativeMods,
-    5. creates bin\ScriptExtenderSettings.json ONLY if it doesn't exist
-       (turns the Script Extender console and its log on),
-    6. checks the other mods (Script Extender, Ch4nKyy's Mod Loader, WASD,
-       Native Camera Tweaks, MCM, AnimationUnlocker, Party Limit Begone),
-       the game version and the load order against manifest.json,
-       and prints what to fix.
-  It touches nothing else.
+    4. copies DarkAndGate.pak into the Mods folder, DarkAndGate.dll and the
+       host's .toml configs into <game>\bin\NativeMods, and the host's
+       ScriptExtenderSettings.json (console + logging on) into <game>\bin,
+    5. checks the other mods (Script Extender, Ch4nKyy's Mod Loader, WASD,
+       Native Camera Tweaks, MCM, AnimationUnlocker, Party Limit Begone) and
+       the game version (bg3_dx11.exe) against manifest.json,
+    6. checks the load order (the host's: MCM > AnimationUnlocker >
+       DarkAndGate) and offers to fix modsettings.lsx (backed up first),
+    7. reminds that the game must run in DirectX 11, and ends with a green
+       READY or a red list of what is still missing.
+  It touches nothing else. RESTORE.txt in the backup folder says how to undo it.
 
 .PARAMETER GameRoot
   The Baldur's Gate 3 folder (the one that contains "bin"), if it isn't found.
 
 .PARAMETER WhatIf
-  Dry run: show what would be copied and backed up, change nothing.
+  Dry run: show what would be copied, backed up and fixed; change nothing.
+
+.PARAMETER NoPrompt
+  Never ask: fail if the game isn't found, fix the load order without asking.
+
+.PARAMETER FindOnly
+  Print the game folder and the %LOCALAPPDATA% paths it finds, then stop.
 
 .PARAMETER TargetRoot
   Testing only: treat <TargetRoot>\Baldurs Gate 3 as the game folder and
@@ -33,33 +43,30 @@
 .EXAMPLE
   INSTALL.bat
   INSTALL.bat -GameRoot "D:\SteamLibrary\steamapps\common\Baldurs Gate 3"
+  INSTALL.bat -FindOnly
   powershell -ExecutionPolicy Bypass -File install.ps1 -WhatIf
 #>
 param(
   [string]$GameRoot,
   [string]$TargetRoot,
   [switch]$WhatIf,
-  [switch]$NoPrompt
+  [switch]$NoPrompt,
+  [switch]$FindOnly
 )
 
 $ErrorActionPreference = 'Stop'
 $pkg = $PSScriptRoot
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 
-# ---------------------------------------------------------------- paths
+# The host's game build (bg3_dx11.exe ProductVersion). manifest.json's
+# host_game_exe.product_version overrides it.
+$defaultGameVersion = '4.1.1.7631656'
 
-if ($TargetRoot) {
-  $TargetRoot = [System.IO.Path]::GetFullPath($TargetRoot)
-  $localAppData = Join-Path $TargetRoot 'LocalAppData'
-  if (-not $GameRoot) { $GameRoot = Join-Path $TargetRoot 'Baldurs Gate 3' }
-  Write-Host "TEST MODE: everything happens under $TargetRoot" -ForegroundColor Magenta
-} else {
-  $localAppData = $env:LOCALAPPDATA
-}
-$larian     = Join-Path $localAppData "Larian Studios\Baldur's Gate 3"
-$modsDir    = Join-Path $larian 'Mods'
-$loadOrderF = Join-Path $larian 'PlayerProfiles\Public\modsettings.lsx'
-$backupDir  = Join-Path $larian "DarkAndGate-backup-$stamp"
+# The host's load order when manifest.json has none.
+$defaultOrder = @(
+  [pscustomobject]@{ order = 1; name = 'Mod Configuration Menu'; uuid = '755a8a72-407f-4f0d-9a33-274ac0f0b53d'; version = '1.41.0.0' },
+  [pscustomobject]@{ order = 2; name = 'AnimationUnlocker'; uuid = '7131033f-821a-3993-dad4-5bc235cbeb3b'; version = '1.0.5.5' },
+  [pscustomobject]@{ order = 3; name = 'DarkAndGate'; uuid = 'd5d298fd-ba29-4dc1-8346-6ac96b8c2cd7'; version = '1.0.0.0' })
 
 $nexus = 'https://www.nexusmods.com/baldursgate3/mods/'
 $links = @{
@@ -79,13 +86,24 @@ function Get-Ver3([string]$v) {
   return (($parts | Select-Object -First 3) -join '.')
 }
 
+function Get-LocalAppData {
+  foreach ($p in @($env:LOCALAPPDATA, [Environment]::GetFolderPath('LocalApplicationData'))) {
+    if ($p -and (Test-Path -LiteralPath $p)) { return $p }
+  }
+  if ($env:USERPROFILE) { return (Join-Path $env:USERPROFILE 'AppData\Local') }
+  return $null
+}
+
 function Test-GameRoot([string]$p) {
   if (-not $p) { return $false }
   return ((Test-Path -LiteralPath (Join-Path $p 'bin\bg3_dx11.exe')) -or (Test-Path -LiteralPath (Join-Path $p 'bin\bg3.exe')))
 }
 
+# Every place Baldur's Gate 3 can be, in order: each Steam library (Steam's
+# registry keys + libraryfolders.vdf + the game's appmanifest), Steam's
+# uninstall entry, GOG, then the usual folders on every fixed drive.
 function Find-GameRoot {
-  $cands = New-Object System.Collections.Generic.List[string]
+  $cands = New-Object System.Collections.Generic.List[object]
   $steamRoots = New-Object System.Collections.Generic.List[string]
   foreach ($k in @(@('HKCU:\Software\Valve\Steam', 'SteamPath'),
                    @('HKLM:\SOFTWARE\WOW6432Node\Valve\Steam', 'InstallPath'),
@@ -99,29 +117,51 @@ function Find-GameRoot {
   $steamRoots.Add('C:\Program Files\Steam')
   $libs = New-Object System.Collections.Generic.List[string]
   foreach ($s in $steamRoots) {
-    $libs.Add($s)
+    if ($libs -notcontains $s) { $libs.Add($s) }
     foreach ($vdf in @((Join-Path $s 'steamapps\libraryfolders.vdf'), (Join-Path $s 'config\libraryfolders.vdf'))) {
       if (-not (Test-Path -LiteralPath $vdf)) { continue }
-      $text = Get-Content -LiteralPath $vdf -Raw
+      try { $text = Get-Content -LiteralPath $vdf -Raw } catch { continue }
       foreach ($m in [regex]::Matches($text, '"(?:path|\d+)"\s+"([A-Za-z]:[^"]*)"')) {
-        $libs.Add(($m.Groups[1].Value -replace '\\\\', '\').TrimEnd('\'))
+        $l = ($m.Groups[1].Value -replace '\\\\', '\').TrimEnd('\')
+        if ($libs -notcontains $l) { $libs.Add($l) }
       }
     }
   }
   foreach ($lib in $libs) {
     $acf = Join-Path $lib 'steamapps\appmanifest_1086940.acf'
     if (Test-Path -LiteralPath $acf) {
-      $m = [regex]::Match((Get-Content -LiteralPath $acf -Raw), '"installdir"\s+"([^"]+)"')
-      if ($m.Success) { $cands.Add((Join-Path $lib ('steamapps\common\' + $m.Groups[1].Value))) }
+      try {
+        $m = [regex]::Match((Get-Content -LiteralPath $acf -Raw), '"installdir"\s+"([^"]+)"')
+        if ($m.Success) { $cands.Add([pscustomobject]@{ Path = (Join-Path $lib ('steamapps\common\' + $m.Groups[1].Value)); How = "Steam library $lib" }) }
+      } catch { }
     }
-    $cands.Add((Join-Path $lib 'steamapps\common\Baldurs Gate 3'))
+    $cands.Add([pscustomobject]@{ Path = (Join-Path $lib 'steamapps\common\Baldurs Gate 3'); How = "Steam library $lib" })
+  }
+  foreach ($k in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Steam App 1086940',
+                   'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Steam App 1086940')) {
+    try {
+      $p = (Get-ItemProperty -Path $k -Name InstallLocation -ErrorAction Stop).InstallLocation
+      if ($p) { $cands.Add([pscustomobject]@{ Path = $p.TrimEnd('\'); How = "Steam's uninstall entry" }) }
+    } catch { }
   }
   foreach ($k in @('HKLM:\SOFTWARE\WOW6432Node\GOG.com\Games\1456460669', 'HKLM:\SOFTWARE\GOG.com\Games\1456460669')) {
-    try { $p = (Get-ItemProperty -Path $k -Name path -ErrorAction Stop).path; if ($p) { $cands.Add($p) } } catch { }
+    try {
+      $p = (Get-ItemProperty -Path $k -Name path -ErrorAction Stop).path
+      if ($p) { $cands.Add([pscustomobject]@{ Path = $p.TrimEnd('\'); How = 'GOG' }) }
+    } catch { }
   }
-  $cands.Add("C:\GOG Games\Baldur's Gate 3")
-  $cands.Add("C:\Program Files (x86)\GOG Galaxy\Games\Baldur's Gate 3")
-  foreach ($c in $cands) { if (Test-GameRoot $c) { return $c } }
+  $drives = @()
+  try { $drives = @([System.IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq [System.IO.DriveType]::Fixed -and $_.IsReady }) } catch { }
+  foreach ($d in $drives) {
+    $r = $d.RootDirectory.FullName
+    foreach ($sub in 'SteamLibrary', 'Steam', 'Games\SteamLibrary', 'Games\Steam', 'Program Files (x86)\Steam', 'Program Files\Steam') {
+      $cands.Add([pscustomobject]@{ Path = (Join-Path $r "$sub\steamapps\common\Baldurs Gate 3"); How = "searched drive $r" })
+    }
+    foreach ($sub in "GOG Games\Baldur's Gate 3", "Games\Baldur's Gate 3", "Program Files (x86)\GOG Galaxy\Games\Baldur's Gate 3") {
+      $cands.Add([pscustomobject]@{ Path = (Join-Path $r $sub); How = "searched drive $r" })
+    }
+  }
+  foreach ($c in $cands) { if (Test-GameRoot $c.Path) { return $c } }
   return $null
 }
 
@@ -147,10 +187,19 @@ function Read-LoadOrder([string]$path) {
   return $out
 }
 
+# Everything red ends up in $missing (the final list); yellow counts as a warning.
+$missing = New-Object System.Collections.Generic.List[object]
+$warnCount = 0
+function Add-Missing([string]$name, [string]$detail, [string]$link) {
+  $missing.Add([pscustomobject]@{ Name = $name; Detail = $detail; Link = $link })
+}
+
 $rows = New-Object System.Collections.Generic.List[object]
 function Add-Row([string]$name, [string]$status, [string]$detail, [string]$link) {
   $rows.Add([pscustomobject]@{ Name = $name; Status = $status; Detail = $detail; Link = $link })
 }
+$problemStatus = @('MISSING', 'WRONG VERSION', 'MISMATCH', 'FAILED', 'NOT ACTIVE')
+$goodStatus = @('OK', 'MATCH', 'INSTALLED', 'CREATED', 'UP TO DATE', 'WOULD INSTALL')
 function Show-Rows([string]$title) {
   Write-Host ""
   Write-Host $title -ForegroundColor Cyan
@@ -165,21 +214,71 @@ function Show-Rows([string]$title) {
     Write-Host ("  {0,-34} " -f $r.Name) -NoNewline
     Write-Host ("{0,-14}" -f $r.Status) -ForegroundColor $color -NoNewline
     Write-Host (" " + $r.Detail)
-    if ($r.Link -and @('OK', 'MATCH', 'INSTALLED', 'CREATED', 'UP TO DATE', 'WOULD INSTALL') -notcontains $r.Status) {
+    if ($r.Link -and $goodStatus -notcontains $r.Status) {
       Write-Host ("  {0,-34} {1,-14}  get it: {2}" -f '', '', $r.Link) -ForegroundColor Cyan
     }
+    if ($problemStatus -contains $r.Status) { Add-Missing $r.Name $r.Detail $r.Link }
+    if ($r.Status -eq 'WARN') { $script:warnCount++ }
   }
-  $script:problems += @($rows | Where-Object { @('MISSING', 'WRONG VERSION', 'MISMATCH', 'FAILED', 'NOT ACTIVE') -contains $_.Status }).Count
-  $script:warnCount += @($rows | Where-Object { $_.Status -eq 'WARN' }).Count
   $rows.Clear()
 }
-$problems = 0
-$warnCount = 0
 
-# ---------------------------------------------------------------- 0. package + manifest
+# ---------------------------------------------------------------- 1. paths + find the game
 
 Write-Host "Dark and Gate - friend installer" -ForegroundColor Cyan
 if ($WhatIf) { Write-Host "DRY RUN (-WhatIf): nothing will be changed." -ForegroundColor Magenta }
+
+if ($TargetRoot) {
+  $TargetRoot = [System.IO.Path]::GetFullPath($TargetRoot)
+  $localAppData = Join-Path $TargetRoot 'LocalAppData'
+  if (-not $GameRoot) { $GameRoot = Join-Path $TargetRoot 'Baldurs Gate 3' }
+  Write-Host "TEST MODE: everything happens under $TargetRoot" -ForegroundColor Magenta
+} else {
+  $localAppData = Get-LocalAppData
+  if (-not $localAppData) { throw "Could not find your %LOCALAPPDATA% folder (C:\Users\<you>\AppData\Local)." }
+}
+$larian     = Join-Path $localAppData "Larian Studios\Baldur's Gate 3"
+$modsDir    = Join-Path $larian 'Mods'
+$loadOrderF = Join-Path $larian 'PlayerProfiles\Public\modsettings.lsx'
+$profileDir = Split-Path -Parent $loadOrderF
+$backupDir  = Join-Path $larian "DarkAndGate-backup-$stamp"
+
+$gameHow = 'given with -GameRoot'
+if ($GameRoot) {
+  $GameRoot = $GameRoot.Trim().Trim('"').TrimEnd('\')
+  if ((Split-Path -Leaf $GameRoot) -eq 'bin') { $GameRoot = Split-Path -Parent $GameRoot }
+  if ($TargetRoot) { $gameHow = 'test folder' }
+  elseif (-not (Test-GameRoot $GameRoot)) { throw "No bin\bg3_dx11.exe or bin\bg3.exe under: $GameRoot" }
+} else {
+  $found = Find-GameRoot
+  if ($found) {
+    $GameRoot = $found.Path; $gameHow = $found.How
+  } else {
+    if ($NoPrompt -or $FindOnly) { throw "Baldur's Gate 3 not found. Run again with -GameRoot ""<the folder that contains bin>""." }
+    Write-Host ""
+    Write-Host "I couldn't find Baldur's Gate 3." -ForegroundColor Yellow
+    Write-Host "In Steam: right-click Baldur's Gate 3 > Manage > Browse local files, then copy that folder's path from the address bar."
+    $answer = Read-Host "Paste the Baldur's Gate 3 folder here and press Enter"
+    $GameRoot = "$answer".Trim().Trim('"').TrimEnd('\')
+    if ((Split-Path -Leaf $GameRoot) -eq 'bin') { $GameRoot = Split-Path -Parent $GameRoot }
+    if (-not (Test-GameRoot $GameRoot)) { throw "That folder has no bin\bg3_dx11.exe or bin\bg3.exe: $GameRoot" }
+    $gameHow = 'typed in'
+  }
+}
+$bin = Join-Path $GameRoot 'bin'
+$nativeDir = Join-Path $bin 'NativeMods'
+Write-Host "Game folder: $GameRoot  ($gameHow)"
+Write-Host "Mods folder: $modsDir"
+Write-Host "Load order:  $loadOrderF"
+
+if ($FindOnly) {
+  foreach ($p in @($bin, $nativeDir, $larian, $modsDir, $loadOrderF)) {
+    Write-Host ("  {0,-7} {1}" -f $(if (Test-Path -LiteralPath $p) { 'exists' } else { 'MISSING' }), $p)
+  }
+  exit 0
+}
+
+# ---------------------------------------------------------------- 2. package + manifest
 
 $manifest = $null
 $manifestPath = Join-Path $pkg 'manifest.json'
@@ -192,43 +291,23 @@ if (Test-Path -LiteralPath $manifestPath) {
 
 $payload = @()
 foreach ($p in @(Get-ChildItem -LiteralPath $pkg -Filter '*.pak' -File)) {
-  $payload += [pscustomobject]@{ Rel = $p.Name; Src = $p.FullName; Kind = 'mods' }
+  $payload += [pscustomobject]@{ Rel = $p.Name; Leaf = $p.Name; Src = $p.FullName; Kind = 'mods' }
 }
 $nmSrc = Join-Path $pkg 'NativeMods'
 if (Test-Path -LiteralPath $nmSrc) {
   foreach ($f in @(Get-ChildItem -LiteralPath $nmSrc -File)) {
-    $payload += [pscustomobject]@{ Rel = "NativeMods\$($f.Name)"; Src = $f.FullName; Kind = 'native' }
+    $payload += [pscustomobject]@{ Rel = "NativeMods\$($f.Name)"; Leaf = $f.Name; Src = $f.FullName; Kind = 'native' }
   }
+}
+$seSrc = Join-Path $pkg 'ScriptExtenderSettings.json'
+if (Test-Path -LiteralPath $seSrc) {
+  $payload += [pscustomobject]@{ Rel = 'ScriptExtenderSettings.json'; Leaf = 'ScriptExtenderSettings.json'; Src = $seSrc; Kind = 'bin' }
 }
 if (-not ($payload | Where-Object { $_.Rel -eq 'DarkAndGate.pak' }) -or -not ($payload | Where-Object { $_.Rel -eq 'NativeMods\DarkAndGate.dll' })) {
   throw "DarkAndGate.pak or NativeMods\DarkAndGate.dll is not next to this script ($pkg). Extract the WHOLE zip first (right-click > Extract All), then run INSTALL.bat from the extracted folder."
 }
 
-# ---------------------------------------------------------------- 1. find the game
-
-if ($GameRoot) {
-  $GameRoot = $GameRoot.Trim().Trim('"').TrimEnd('\')
-  if ((Split-Path -Leaf $GameRoot) -eq 'bin') { $GameRoot = Split-Path -Parent $GameRoot }
-  if (-not $TargetRoot -and -not (Test-GameRoot $GameRoot)) { throw "No bin\bg3_dx11.exe or bin\bg3.exe under: $GameRoot" }
-} else {
-  $GameRoot = Find-GameRoot
-  if (-not $GameRoot) {
-    if ($NoPrompt) { throw "Baldur's Gate 3 not found. Run again with -GameRoot ""<the folder that contains bin>""." }
-    Write-Host ""
-    Write-Host "I couldn't find Baldur's Gate 3." -ForegroundColor Yellow
-    Write-Host "In Steam: right-click Baldur's Gate 3 > Manage > Browse local files, then copy that folder's path from the address bar."
-    $answer = Read-Host "Paste the Baldur's Gate 3 folder here and press Enter"
-    $GameRoot = "$answer".Trim().Trim('"').TrimEnd('\')
-    if ((Split-Path -Leaf $GameRoot) -eq 'bin') { $GameRoot = Split-Path -Parent $GameRoot }
-    if (-not (Test-GameRoot $GameRoot)) { throw "That folder has no bin\bg3_dx11.exe or bin\bg3.exe: $GameRoot" }
-  }
-}
-$bin = Join-Path $GameRoot 'bin'
-$nativeDir = Join-Path $bin 'NativeMods'
-Write-Host "Game folder: $GameRoot"
-Write-Host "Mods folder: $modsDir"
-
-# ---------------------------------------------------------------- 2. game must be closed
+# ---------------------------------------------------------------- 3. game must be closed
 
 $running = Get-Process -Name bg3, bg3_dx11 -ErrorAction SilentlyContinue
 if ($running) {
@@ -239,9 +318,9 @@ if ($running) {
   }
 }
 
-# ---------------------------------------------------------------- 3 + 4. back up and install
+# ---------------------------------------------------------------- 4. back up and install
 
-$installed = New-Object System.Collections.Generic.List[object]   # Dest, Src, Backup (null = new file)
+$installed = New-Object System.Collections.Generic.List[object]   # Dest, Backup (null = new file)
 $changed = $false
 
 function Ensure-Dir([string]$d) {
@@ -263,13 +342,14 @@ try {
   Ensure-Dir $nativeDir
 
   foreach ($p in $payload) {
-    if ($p.Kind -eq 'mods') { $dest = Join-Path $modsDir (Split-Path -Leaf $p.Rel); $backRel = 'Mods\' + (Split-Path -Leaf $p.Rel) }
-    else { $dest = Join-Path $nativeDir (Split-Path -Leaf $p.Rel); $backRel = 'bin\NativeMods\' + (Split-Path -Leaf $p.Rel) }
+    if ($p.Kind -eq 'mods') { $dest = Join-Path $modsDir $p.Leaf; $backRel = 'Mods\' + $p.Leaf }
+    elseif ($p.Kind -eq 'native') { $dest = Join-Path $nativeDir $p.Leaf; $backRel = 'bin\NativeMods\' + $p.Leaf }
+    else { $dest = Join-Path $bin $p.Leaf; $backRel = 'bin\' + $p.Leaf }
     $srcSha = Get-Sha $p.Src
     $backup = $null
     if (Test-Path -LiteralPath $dest) {
       if ((Get-Sha $dest) -eq $srcSha) {
-        Add-Row (Split-Path -Leaf $p.Rel) 'UP TO DATE' "already installed: $dest" $null
+        Add-Row $p.Leaf 'UP TO DATE' "already installed: $dest" $null
         continue
       }
       $backup = Join-Path $backupDir $backRel
@@ -283,33 +363,31 @@ try {
     }
     if ($WhatIf) {
       Write-Host "  [dry run] would copy $($p.Rel) -> $dest" -ForegroundColor DarkGray
-      Add-Row (Split-Path -Leaf $p.Rel) 'WOULD INSTALL' $(if ($backup) { "replaces your copy (backed up first)" } else { "new file" }) $null
+      Add-Row $p.Leaf 'WOULD INSTALL' $(if ($backup) { "replaces your copy (backed up first)" } else { "new file" }) $null
       continue
     }
     Copy-Item -LiteralPath $p.Src -Destination $dest -Force
     try { Unblock-File -LiteralPath $dest -ErrorAction Stop } catch { }
     if ((Get-Sha $dest) -ne $srcSha) {
-      Add-Row (Split-Path -Leaf $p.Rel) 'FAILED' "copy does not match the package: $dest" $null
+      Add-Row $p.Leaf 'FAILED' "copy does not match the package: $dest" $null
     } else {
-      Add-Row (Split-Path -Leaf $p.Rel) 'INSTALLED' $(if ($backup) { "replaced (old copy backed up): $dest" } else { $dest }) $null
+      Add-Row $p.Leaf 'INSTALLED' $(if ($backup) { "replaced (old copy backed up): $dest" } else { $dest }) $null
     }
     $installed.Add([pscustomobject]@{ Dest = $dest; Backup = $backup })
     $changed = $true
   }
 
-  # Script Extender settings: create ONLY if missing (the one bin file we may write).
+  # Older packages had no ScriptExtenderSettings.json: create one only if missing.
   $seSettings = Join-Path $bin 'ScriptExtenderSettings.json'
-  $seCreated = $false
-  if (-not (Test-Path -LiteralPath $seSettings)) {
-    $json = "{`r`n    ""CreateConsole"": true,`r`n    ""LogRuntime"": true`r`n}`r`n"
+  if (-not (Test-Path -LiteralPath $seSrc) -and -not (Test-Path -LiteralPath $seSettings)) {
+    $json = "{`r`n    ""CreateConsole"": true,`r`n    ""EnableLogging"": true,`r`n    ""LogRuntime"": true`r`n}`r`n"
     if ($WhatIf) {
-      Write-Host "  [dry run] would create $seSettings (console + runtime log on)" -ForegroundColor DarkGray
       Add-Row 'ScriptExtenderSettings.json' 'WOULD INSTALL' 'new file: turns the Script Extender console and its log on' $null
     } else {
       [System.IO.File]::WriteAllText($seSettings, $json, (New-Object System.Text.UTF8Encoding $false))
       $installed.Add([pscustomobject]@{ Dest = $seSettings; Backup = $null })
-      $seCreated = $true; $changed = $true
-      Add-Row 'ScriptExtenderSettings.json' 'CREATED' 'console + runtime log on' $null
+      $changed = $true
+      Add-Row 'ScriptExtenderSettings.json' 'CREATED' 'console + logging on' $null
     }
   }
 } catch [System.UnauthorizedAccessException] {
@@ -325,20 +403,7 @@ try {
 }
 Show-Rows 'Dark and Gate files'
 
-# RESTORE.txt: how to undo exactly this install.
-if (-not $WhatIf) {
-  $lines = @("Dark and Gate install of $(Get-Date -Format 'yyyy-MM-dd HH:mm')", "Package: $(if ($manifest) { $manifest.package } else { '?' })", "",
-             "To uninstall: close the game, then for each line below either copy the backup back or delete the new file.", "")
-  foreach ($i in $installed) {
-    if ($i.Backup) { $lines += "REPLACED  $($i.Dest)`r`n          restore it by copying back: $($i.Backup)" }
-    else { $lines += "NEW       $($i.Dest)`r`n          (did not exist before: delete it)" }
-  }
-  if ($installed.Count -eq 0) { $lines += "(nothing was changed: everything was already up to date)" }
-  $lines += @("", "Also untick DarkAndGate in BG3 Mod Manager and export the load order again.")
-  [System.IO.File]::WriteAllText((Join-Path $backupDir 'RESTORE.txt'), ($lines -join "`r`n"), (New-Object System.Text.UTF8Encoding $false))
-}
-
-# ---------------------------------------------------------------- 5. checks
+# ---------------------------------------------------------------- 5. other mods + the game
 
 function Get-Expected([string]$key) {
   if ($manifest -and $manifest.third_party) { foreach ($t in $manifest.third_party) { if ($t.key -eq $key) { return $t } } }
@@ -360,20 +425,21 @@ if (Test-Path -LiteralPath $dw) {
   else { Add-Row 'Script Extender' 'WARN' "bin\DWrite.dll is not the Script Extender ('$pn'); another mod uses that name" $links.se }
 } else { Add-Row 'Script Extender' 'MISSING' "put DWrite.dll from the BG3SE-Updater zip into $bin" $links.se }
 
-# SE console
+# SE console + logging (ScriptExtenderSettings.json, installed above)
 $seSettings = Join-Path $bin 'ScriptExtenderSettings.json'
+if ($WhatIf -and (Test-Path -LiteralPath $seSrc)) { $seSettings = $seSrc }   # dry run: judge the copy that would be installed
 if (Test-Path -LiteralPath $seSettings) {
-  $cc = $null; $lr = $null
-  try { $sj = Get-Content -LiteralPath $seSettings -Raw | ConvertFrom-Json; $cc = $sj.CreateConsole; $lr = $sj.LogRuntime } catch { }
+  $cc = $null; $el = $null
+  try { $sj = Get-Content -LiteralPath $seSettings -Raw | ConvertFrom-Json; $cc = $sj.CreateConsole; $el = $sj.EnableLogging } catch { }
   if ($cc -eq $true) {
-    $d = 'CreateConsole is on: a console window opens with the game'
-    if ($lr -ne $true) { $d += ' (LogRuntime is off, so there is less to send back)' }
+    $d = 'console on: a console window opens with the game'
+    if ($el -ne $true) { $d += ' (EnableLogging is off, so there is less to send back)' }
     Add-Row 'Script Extender console' 'OK' $d $null
   } else {
     Add-Row 'Script Extender console' 'WARN' "CreateConsole is off in $seSettings. Hold SHIFT while the game starts to get the console, or set ""CreateConsole"": true in that file" $null
   }
 } elseif ($WhatIf) {
-  Add-Row 'Script Extender console' 'WOULD INSTALL' 'ScriptExtenderSettings.json will be created with the console on' $null
+  Add-Row 'Script Extender console' 'WOULD INSTALL' 'ScriptExtenderSettings.json will turn the console and logging on' $null
 }
 
 # Ch4nKyy's Mod Loader. Only stat'ed, never opened: Windows Defender's cloud
@@ -430,10 +496,12 @@ foreach ($d in @(@{ key = 'wasd'; name = 'WASD Character Movement'; file = 'BG3W
   } else { Add-Row $d.name 'WARN' 'installed, version unknown' $links[$d.key] }
 }
 
-# Pak mods: same file as the host (SHA256), else the version in the load order
+# Pak mods: same file as the host (SHA256), else the version in the load order.
+# $pakOk[key] = the friend has the host's version (the load-order fix needs it).
 $myOrder = @(Read-LoadOrder $loadOrderF)
 $myPaks = @()
 if (Test-Path -LiteralPath $modsDir) { $myPaks = @(Get-ChildItem -LiteralPath $modsDir -Filter '*.pak' -File) }
+$pakOk = @{}
 function Check-Pak([string]$key, [string]$name, [string]$uuid, [string[]]$patterns, [bool]$optional) {
   $t = Get-Expected $key
   if ($t -and $t.patterns) { $patterns = @($t.patterns) }
@@ -441,7 +509,11 @@ function Check-Pak([string]$key, [string]$name, [string]$uuid, [string[]]$patter
   $ev = Expected-Version $key
   if ($t -and $t.host -and $t.host.sha256) {
     foreach ($p in ($myPaks | Where-Object { $_.Length -eq $t.host.size })) {
-      if ((Get-Sha $p.FullName) -eq $t.host.sha256) { Add-Row $name 'OK' ("same file as the host ({0}{1})" -f $p.Name, $(if ($ev) { ", $ev" } else { '' })) $links[$key]; return }
+      if ((Get-Sha $p.FullName) -eq $t.host.sha256) {
+        Add-Row $name 'OK' ("same file as the host ({0}{1})" -f $p.Name, $(if ($ev) { ", $ev" } else { '' })) $links[$key]
+        $script:pakOk[$key] = $true
+        return
+      }
     }
   }
   $found = $null
@@ -458,98 +530,229 @@ function Check-Pak([string]$key, [string]$name, [string]$uuid, [string[]]$patter
     return
   }
   if ($mine -and $mine.version -and $ev) {
-    if ($mine.version -eq $ev) { Add-Row $name 'OK' "version $ev (from your load order)" $links[$key] }
+    if ($mine.version -eq $ev) { Add-Row $name 'OK' "version $ev (from your load order)" $links[$key]; $script:pakOk[$key] = $true }
     else { Add-Row $name 'WRONG VERSION' "you have $($mine.version), the host has $ev" $links[$key] }
     return
   }
-  if ($t -and $t.host) { Add-Row $name 'WRONG VERSION' ("found {0}, but it is not the host's file{1}" -f $(if ($found) { $found.Name } else { 'it in your load order' }), $(if ($ev) { " (host: $ev)" } else { '' })) $links[$key] }
-  else { Add-Row $name 'OK' "found $(if ($found) { $found.Name } else { 'it in your load order' })" $links[$key] }
+  if ($t -and $t.host) { Add-Row $name 'WRONG VERSION' ("found {0}, but it is not the host's file{1}" -f $found.Name, $(if ($ev) { " (host: $ev)" } else { '' })) $links[$key] }
+  else { Add-Row $name 'OK' "found $($found.Name)" $links[$key]; $script:pakOk[$key] = $true }
 }
 Check-Pak 'mcm' 'Mod Configuration Menu' '755a8a72-407f-4f0d-9a33-274ac0f0b53d' @('Mod Configuration Menu*.pak', '*MCM*.pak') $false
 Check-Pak 'animunlock' 'AnimationUnlocker' '7131033f-821a-3993-dad4-5bc235cbeb3b' @('AnimationUnlocker*.pak') $false
 $plb = Get-Expected 'plb'
 Check-Pak 'plb' 'Party Limit Begone (SE pak)' $null @('*PartyLimitBegone*.pak', '*Party Limit Begone*.pak', '*PartyLimit*.pak') (-not ($plb -and $plb.required))
 
-# Game version
+# Game version: bg3_dx11.exe's ProductVersion must be the host's.
 $exe = Join-Path $bin 'bg3_dx11.exe'
 $he = $null; if ($manifest) { $he = $manifest.host_game_exe }
-if ($he -and $he.sha256 -and (Test-Path -LiteralPath $exe)) {
-  if ((Get-Sha $exe) -eq $he.sha256) { Add-Row 'Game version (bg3_dx11.exe)' 'MATCH' 'same game build as the host' $null }
-  else { Add-Row 'Game version (bg3_dx11.exe)' 'WARN' 'your game build differs from the host''s: update the game in Steam (both of you), or the native part may not work' $null }
-} elseif (-not (Test-Path -LiteralPath $exe)) {
-  Add-Row 'Game version (bg3_dx11.exe)' 'WARN' 'bin\bg3_dx11.exe not found: the host plays the DirectX 11 version' $null
+$wantVer = $defaultGameVersion
+if ($he -and $he.product_version) { $wantVer = [string]$he.product_version }
+$gameOk = $false
+if (-not (Test-Path -LiteralPath $exe)) {
+  Add-Row 'Game version (bg3_dx11.exe)' 'MISSING' "no bin\bg3_dx11.exe in $bin (the DirectX 11 game). Steam > Baldur's Gate 3 > Properties > Installed Files > Verify integrity" $null
+} else {
+  $pv = "$((Get-Item -LiteralPath $exe).VersionInfo.ProductVersion)".Trim()
+  if ($pv -eq $wantVer) {
+    $gameOk = $true
+    if ($he -and $he.sha256 -and (Get-Sha $exe) -ne $he.sha256) {
+      Add-Row 'Game version (bg3_dx11.exe)' 'WARN' "version $pv like the host's, but the exe differs from the host's (patched by a tool?). Steam > Verify integrity of game files restores it" $null
+    } else {
+      Add-Row 'Game version (bg3_dx11.exe)' 'MATCH' "version $pv, same as the host" $null
+    }
+  } else {
+    $older = $null
+    try { $older = ([version]$pv) -lt ([version]$wantVer) } catch { }
+    if ($older -eq $true) { $how = "update the game: Steam > Library > Baldur's Gate 3 > Update (restart Steam if no update shows)" }
+    elseif ($older -eq $false) { $how = "your game is newer than the host's: tell the host (the host must update too and send a new package)" }
+    else { $how = 'both must run the same game version' }
+    Add-Row 'Game version (bg3_dx11.exe)' 'WRONG VERSION' ("you have {0}, the host has {1}: {2}" -f $(if ($pv) { $pv } else { 'an unknown version' }), $wantVer, $how) $null
+  }
 }
 Show-Rows 'Other mods and the game (must match the host)'
 
 # ---------------------------------------------------------------- 6. installed files vs manifest
 
+function Get-InstallDest([string]$rel) {
+  $leaf = Split-Path -Leaf $rel
+  if ($rel -like '*.pak') { return (Join-Path $modsDir $leaf) }
+  if ($rel -notlike 'NativeMods\*') { return (Join-Path $bin $leaf) }
+  return (Join-Path $nativeDir $leaf)
+}
+$dagPakOk = $false
 if ($manifest -and $manifest.files) {
   foreach ($prop in $manifest.files.PSObject.Properties) {
     $rel = $prop.Name; $want = $prop.Value
     $leaf = Split-Path -Leaf $rel
-    if ($rel -like '*.pak') { $dest = Join-Path $modsDir $leaf } else { $dest = Join-Path $nativeDir $leaf }
+    $dest = Get-InstallDest $rel
     if ($WhatIf) {
       $src = Join-Path $pkg $rel
-      if ((Test-Path -LiteralPath $src) -and (Get-Sha $src) -eq $want.sha256) { Add-Row $leaf 'MATCH' "package copy OK, SHA256 $($want.sha256) (dry run: not installed)" $null }
-      else { Add-Row $leaf 'MISMATCH' 'the package file is damaged or was changed: download the zip again' $null }
+      if ((Test-Path -LiteralPath $src) -and (Get-Sha $src) -eq $want.sha256) {
+        Add-Row $leaf 'MATCH' "package copy OK, SHA256 $($want.sha256) (dry run: not installed)" $null
+        if ($leaf -eq 'DarkAndGate.pak') { $dagPakOk = $true }
+      } else { Add-Row $leaf 'MISMATCH' 'the package file is damaged or was changed: download the zip again' $null }
       continue
     }
     if (-not (Test-Path -LiteralPath $dest)) { Add-Row $leaf 'MISSING' "not at $dest" $null; continue }
     $have = Get-Sha $dest
-    if ($have -eq $want.sha256) { Add-Row $leaf 'MATCH' "SHA256 $have" $null }
-    else { Add-Row $leaf 'MISMATCH' "SHA256 $have, the host's is $($want.sha256)" $null }
+    if ($have -eq $want.sha256) {
+      Add-Row $leaf 'MATCH' "SHA256 $have" $null
+      if ($leaf -eq 'DarkAndGate.pak') { $dagPakOk = $true }
+    } else { Add-Row $leaf 'MISMATCH' "SHA256 $have, the host's is $($want.sha256)" $null }
   }
   Show-Rows 'Installed files vs the host''s build (manifest.json)'
+} else {
+  $dagPakOk = Test-Path -LiteralPath (Join-Path $(if ($WhatIf) { $pkg } else { $modsDir }) 'DarkAndGate.pak')
 }
 
 # ---------------------------------------------------------------- 7. load order
 
 Write-Host ""
-Write-Host "Load order (BG3 Mod Manager)" -ForegroundColor Cyan
+Write-Host "Load order (modsettings.lsx)" -ForegroundColor Cyan
 $hostOrder = @()
 if ($manifest -and $manifest.host_load_order) { $hostOrder = @($manifest.host_load_order) }
-if ($hostOrder.Count -gt 0) {
+if ($hostOrder.Count -eq 0) { $hostOrder = $defaultOrder }
+$hostIds = @($hostOrder | ForEach-Object { $_.uuid })
+$hostNames = (@($hostOrder | ForEach-Object { $_.name }) -join ' > ')
+$howTo = "by hand: open BG3 Mod Manager ($($links.bg3mm)), click Refresh, drag $hostNames from Inactive to Active in that order (everything else Inactive), then File > Export Order to Game (Ctrl+E)"
+
+function Show-LoadOrder($mineList) {
   Write-Host ("  {0,-3} {1,-28} {2,-12} {3}" -f '#', 'Host mod', 'Host ver.', 'Yours') -ForegroundColor DarkGray
   foreach ($h in $hostOrder) {
-    $mine = $myOrder | Where-Object { $_.uuid -eq $h.uuid } | Select-Object -First 1
-    if (-not $mine) { $txt = 'NOT ACTIVE'; $col = 'Red'; $script:problems++ }
-    elseif ($mine.version -ne $h.version) { $txt = "active, version $($mine.version) (different)"; $col = 'Yellow'; $script:warnCount++ }
+    $mine = $mineList | Where-Object { $_.uuid -eq $h.uuid } | Select-Object -First 1
+    if (-not $mine) { $txt = 'NOT ACTIVE'; $col = 'Red' }
+    elseif ($mine.version -ne $h.version) { $txt = "active (#$($mine.order)), version $($mine.version) (different)"; $col = 'Yellow' }
+    elseif ($mine.order -ne $h.order) { $txt = "active, but #$($mine.order) (wrong place)"; $col = 'Red' }
     else { $txt = "active (#$($mine.order))"; $col = 'Green' }
     Write-Host ("  {0,-3} {1,-28} {2,-12} " -f $h.order, $h.name, $h.version) -NoNewline
     Write-Host $txt -ForegroundColor $col
   }
-  $hostIds = @($hostOrder | ForEach-Object { $_.uuid })
-  foreach ($m in $myOrder) {
-    if ($hostIds -notcontains $m.uuid) { Write-Host "  extra: $($m.name) is active for you but not for the host: deactivate it for co-op" -ForegroundColor Yellow; $script:warnCount++ }
+  foreach ($m in $mineList) {
+    if ($hostIds -notcontains $m.uuid) { Write-Host "  extra: $($m.name) is active for you but not for the host" -ForegroundColor Yellow }
   }
-  $mineShared = @($myOrder | Where-Object { $hostIds -contains $_.uuid } | ForEach-Object { $_.uuid })
-  $hostShared = @($hostOrder | Where-Object { $mineShared -contains $_.uuid } | ForEach-Object { $_.uuid })
-  if (($mineShared -join ',') -ne ($hostShared -join ',')) { Write-Host "  order: your mods are in a different order from the host's; drag them into the order above" -ForegroundColor Yellow; $script:warnCount++ }
-  if ($myOrder.Count -eq 0 -and -not (Test-Path -LiteralPath $loadOrderF)) {
-    Write-Host "  (no load order file yet: start the game once to the main menu, close it, then use BG3 Mod Manager)" -ForegroundColor Yellow
-  }
-} else {
-  Write-Host "  manifest.json has no host load order; ask the host for the list." -ForegroundColor Yellow
 }
-Write-Host ""
-Write-Host "  To turn the mods on: open BG3 Mod Manager ($($links.bg3mm)), click Refresh," -ForegroundColor White
-Write-Host "  drag the mods above from Inactive to Active in that order, then File > Export Order to Game (Ctrl+E)." -ForegroundColor White
+function Test-SameOrder($mineList) { return ((@($mineList | ForEach-Object { $_.uuid }) -join ',') -eq ($hostIds -join ',')) }
 
-# ---------------------------------------------------------------- done
+Show-LoadOrder $myOrder
+$orderOk = Test-SameOrder $myOrder
+if ($orderOk) {
+  Write-Host "  Same mods in the same order as the host." -ForegroundColor Green
+} else {
+  $extras = @($myOrder | Where-Object { $hostIds -notcontains $_.uuid } | ForEach-Object { $_.name })
+  if (-not (Test-Path -LiteralPath $loadOrderF)) { Write-Host "  You have no modsettings.lsx yet." -ForegroundColor Yellow }
+  else { Write-Host "  Your load order differs from the host's." -ForegroundColor Yellow }
+
+  # The fix copies the host's own modsettings.lsx (shipped in the package):
+  # the same game module, the same mods, the same order. Only safe when the
+  # game and the three paks are the host's versions.
+  $hostLsx = Join-Path $pkg 'host-modsettings.lsx'
+  $blockers = @()
+  if (-not (Test-Path -LiteralPath $hostLsx)) { $blockers += 'the package has no host-modsettings.lsx' }
+  elseif (-not (Test-SameOrder @(Read-LoadOrder $hostLsx))) { $blockers += 'host-modsettings.lsx in the package does not match manifest.json' }
+  if (-not $gameOk) { $blockers += 'the game version must match the host''s first' }
+  if (-not (Test-Path -LiteralPath $profileDir)) { $blockers += 'start the game once to the main menu and quit (there is no player profile yet)' }
+  if (-not $pakOk['mcm']) { $blockers += 'Mod Configuration Menu must be the host''s version' }
+  if (-not $pakOk['animunlock']) { $blockers += 'AnimationUnlocker must be the host''s version' }
+  if (-not $dagPakOk) { $blockers += 'DarkAndGate.pak must be installed and match the host''s' }
+
+  if ($blockers.Count -gt 0) {
+    Write-Host "  INSTALL.bat can fix it once these are done: $($blockers -join '; ')." -ForegroundColor Yellow
+    Write-Host "  Or fix it $howTo." -ForegroundColor White
+    Add-Missing 'Load order' ("must be exactly $hostNames. INSTALL.bat fixes it once: $($blockers -join '; '). Or $howTo") $null
+  } else {
+    $doFix = $true
+    if ($WhatIf) {
+      Write-Host "  [dry run] would back up $loadOrderF and replace it with the host's load order ($hostNames)" -ForegroundColor Cyan
+      if ($extras.Count -gt 0) { Write-Host "  [dry run] that would deactivate: $($extras -join ', ')" -ForegroundColor Cyan }
+      $doFix = $false
+    } elseif (-not $NoPrompt) {
+      Write-Host "  Fix: replace your load order with the host's ($hostNames)." -ForegroundColor White
+      if ($extras.Count -gt 0) { Write-Host "  That deactivates: $($extras -join ', '). The backup keeps your old list." -ForegroundColor White }
+      $answer = Read-Host "  Fix it now? Your current modsettings.lsx is backed up first [Y/n]"
+      if ("$answer".Trim() -match '^[nN]') { $doFix = $false }
+    }
+    if ($doFix) {
+      try {
+        $backup = $null
+        $ro = $false
+        if (Test-Path -LiteralPath $loadOrderF) {
+          $backup = Join-Path $backupDir 'PlayerProfiles\Public\modsettings.lsx'
+          New-Item -ItemType Directory -Force -Path (Split-Path -Parent $backup) | Out-Null
+          Copy-Item -LiteralPath $loadOrderF -Destination $backup -Force
+          $item = Get-Item -LiteralPath $loadOrderF
+          if ($item.IsReadOnly) { $ro = $true; $item.IsReadOnly = $false }
+        }
+        Copy-Item -LiteralPath $hostLsx -Destination $loadOrderF -Force
+        if ($ro) { (Get-Item -LiteralPath $loadOrderF).IsReadOnly = $true }   # it was read-only on purpose: keep it so
+        $installed.Add([pscustomobject]@{ Dest = $loadOrderF; Backup = $backup })
+        $changed = $true
+        $myOrder = @(Read-LoadOrder $loadOrderF)
+        $orderOk = Test-SameOrder $myOrder
+        if ($orderOk) {
+          Write-Host "  FIXED: your load order is now the host's ($hostNames)$(if ($backup) { '; the old one is in the backup folder' })." -ForegroundColor Green
+          if ($extras.Count -gt 0) { Write-Host "  Deactivated: $($extras -join ', ')." -ForegroundColor Yellow }
+        } else {
+          Write-Host "  The new modsettings.lsx does not read back as the host's order." -ForegroundColor Red
+          Add-Missing 'Load order' "the fix did not take; fix it $howTo" $null
+        }
+      } catch {
+        Write-Host "  Could not write $loadOrderF ($($_.Exception.Message))." -ForegroundColor Red
+        Add-Missing 'Load order' "could not write modsettings.lsx ($($_.Exception.Message)). Fix it $howTo" $null
+      }
+    } elseif (-not $WhatIf) {
+      Write-Host "  Not changed. Fix it $howTo." -ForegroundColor White
+      Add-Missing 'Load order' "must be exactly $hostNames. Run INSTALL.bat again and answer Y, or $howTo" $null
+    }
+  }
+}
+if ($myOrder.Count -gt 0 -and @($myOrder | Where-Object { $hostIds -notcontains $_.uuid }).Count -gt 0) { $warnCount++ }
+
+# RESTORE.txt: how to undo exactly this install.
+if (-not $WhatIf) {
+  $lines = @("Dark and Gate install of $(Get-Date -Format 'yyyy-MM-dd HH:mm')", "Package: $(if ($manifest) { $manifest.package } else { '?' })", "",
+             "To uninstall: close the game, then for each line below either copy the backup back or delete the new file.", "")
+  foreach ($i in $installed) {
+    if ($i.Backup) { $lines += "REPLACED  $($i.Dest)`r`n          restore it by copying back: $($i.Backup)" }
+    else { $lines += "NEW       $($i.Dest)`r`n          (did not exist before: delete it)" }
+  }
+  if ($installed.Count -eq 0) { $lines += "(nothing was changed: everything was already up to date)" }
+  $lines += @("", "If you did not restore modsettings.lsx above: untick DarkAndGate in BG3 Mod Manager and export the load order again.")
+  [System.IO.File]::WriteAllText((Join-Path $backupDir 'RESTORE.txt'), ($lines -join "`r`n"), (New-Object System.Text.UTF8Encoding $false))
+}
+
+# ---------------------------------------------------------------- 8. DirectX 11 + verdict
 
 Write-Host ""
+Write-Host " DIRECTX 11 ONLY " -ForegroundColor Black -BackgroundColor Yellow
+Write-Host "  Start the game in DirectX 11: in the Larian launcher, the box next to PLAY must say DirectX 11, not Vulkan." -ForegroundColor Yellow
+Write-Host "  The host plays DX11, and Dark and Gate's native part only works in bin\bg3_dx11.exe." -ForegroundColor Yellow
+
+Write-Host ""
+if ($changed -and -not $WhatIf) { Write-Host "Backup of everything replaced + how to undo: $backupDir" -ForegroundColor DarkGray }
 if ($WhatIf) {
   Write-Host "Dry run finished: nothing was changed." -ForegroundColor Magenta
-} elseif ($changed) {
-  Write-Host "Backup of everything replaced + how to undo: $backupDir" -ForegroundColor DarkGray
-}
-if ($problems -gt 0) {
-  Write-Host "$problems thing(s) to fix above (red). Fix them, then run INSTALL.bat again." -ForegroundColor Red
-} elseif ($warnCount -gt 0) {
-  Write-Host "Installed. $warnCount warning(s) above (yellow): read them before you join." -ForegroundColor Yellow
+  if ($missing.Count -gt 0) {
+    Write-Host "A real run would still leave $($missing.Count) thing(s) missing:" -ForegroundColor Red
+  } else {
+    Write-Host "A real run would leave nothing missing." -ForegroundColor Green
+  }
+} elseif ($missing.Count -eq 0) {
+  Write-Host ""
+  Write-Host "   ===========   " -ForegroundColor Black -BackgroundColor Green
+  Write-Host "      READY      " -ForegroundColor Black -BackgroundColor Green
+  Write-Host "   ===========   " -ForegroundColor Black -BackgroundColor Green
+  Write-Host ""
+  Write-Host "Launch the game (DirectX 11) and join the host." -ForegroundColor Green
 } else {
-  Write-Host "All set. Launch the game (DirectX 11) and join the host." -ForegroundColor Green
+  Write-Host " NOT READY: $($missing.Count) thing(s) missing " -ForegroundColor White -BackgroundColor DarkRed
 }
+$n = 0
+foreach ($m in $missing) {
+  $n++
+  Write-Host ("  {0}. {1}: {2}" -f $n, $m.Name, $m.Detail) -ForegroundColor Red
+  if ($m.Link) { Write-Host "     get it: $($m.Link)" -ForegroundColor Cyan }
+}
+if ($missing.Count -gt 0 -and -not $WhatIf) { Write-Host "Fix them, then run INSTALL.bat again." -ForegroundColor Red }
+if ($warnCount -gt 0) { Write-Host "$warnCount warning(s) above (yellow): read them; they don't block you." -ForegroundColor Yellow }
 
 if (-not $WhatIf -and $transcript) { try { Stop-Transcript | Out-Null } catch { } }
 # Nothing replaced or created: drop the empty backup folder so "the newest
