@@ -131,7 +131,7 @@ ConsoleForward.Forward({
     -- The melee cooldown: the client sets its own too (Client/Combat/Swing.lua).
     "dag_melee_cooldown",
     -- Multiplayer kill switches (Server/MP.lua; host only).
-    "dag_mp_feature",
+    "dag_mp_feature", "dag_mp_rewind",
 })
 -- Forwarded commands carry the camera's forward ("ahead of you" spawns).
 local AimForCtx = Ext.Require("Client/Combat/Aim.lua")

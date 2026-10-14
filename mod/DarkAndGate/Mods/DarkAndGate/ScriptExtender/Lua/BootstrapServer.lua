@@ -43,6 +43,11 @@ Dummy.Register()
 -- Projectile system v1 (visual / impact clones + our flight) and the HUD's stats.
 Ext.Require("Shared/ProjectileSpells.lua").Register("Server")
 Ext.Require("Server/Combat/Projectiles.lua").Register()
+-- Multiplayer MP-2: positions of everyone near a player, for lag-tolerant
+-- melee checks (Server/PosHistory.lua, HitValidator; switch rewind).
+local PosHistory = Ext.Require("Server/PosHistory.lua")
+PosHistory.SetNear(Ext.Require("Server/Combat/Projectiles.lua").Near)
+PosHistory.Register()
 Ext.Require("Server/Combat/HudStats.lua").Register()
 
 -- Real-time fights: the Brawl import (Server/Brawl/, tinybike, GPL-3) wired

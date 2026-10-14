@@ -155,6 +155,9 @@ local function allowedTarget(requester, target)
 end
 
 handlers[Net.Channels.PlayAnimRequest] = function(payload, userId)
+    -- swing_sync off: the host stops playing remote players' clips (swings,
+    -- jump clips): the fallback if those clips misbehave in co-op.
+    if not MPFeatures.On("swing_sync") and ((tonumber(userId) or 0) >> 16) ~= 1 then return end
     enqueueOsi(function()
         local self = userToCharacter(userId)
         if not self then Log.Write("Net: PlayAnim no character for user " .. userId); return end

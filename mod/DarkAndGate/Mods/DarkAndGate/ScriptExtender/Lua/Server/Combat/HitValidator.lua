@@ -20,6 +20,29 @@ local Hitbox = Ext.Require("Shared/Hitbox.lua")
 local Shields = Ext.Require("Server/Combat/Shields.lua")
 local MeleeCooldown = Ext.Require("Shared/MeleeCooldown.lua")
 local ConsoleForward = Ext.Require("Shared/ConsoleForward.lua")
+local MPFeatures = Ext.Require("Shared/MPFeatures.lua")
+local PosHistory = Ext.Require("Server/PosHistory.lua")
+local mpData = Ext.Require("data/mp.lua")
+local longsword = Ext.Require("data/weapons/longsword.lua")
+
+-- The host's own weapon data decides damage and reach (multiplayer MP-2:
+-- the client's numbers were trusted). Single player: the client sends the
+-- same data, so the numbers are identical.
+local WEAPONS = { longsword = longsword }
+local function swingDef(claim)
+    local w = WEAPONS[tostring(claim.weapon or "longsword")] or longsword
+    return w.chain[tonumber(claim.swingIndex) or 1] or w.chain[1]
+end
+
+-- The eye a client sends must be near its own character (else a crafted
+-- claim could hit from anywhere).
+local function eyeOk(attacker, eye)
+    local ok, x, y, z = pcall(function() return Osi.GetPosition(attacker) end)
+    if not ok or not tonumber(x) then return true end
+    local dx, dz = eye[1] - tonumber(x), eye[3] - tonumber(z)
+    local up = eye[2] - tonumber(y)
+    return dx * dx + dz * dz <= mpData.eye_horizontal_m ^ 2 and up <= mpData.eye_up_m and up >= -mpData.eye_down_m
+end
 
 local M = {}
 
@@ -74,14 +97,28 @@ function M.Register()
             end
             -- Reach is measured to the target's cylinder hitbox (lifted if
             -- the target is mid-jump), not to its feet.
-            local cyl = Hitbox.Cylinder(target, tp)
-            local d = Hitbox.Distance(cyl, eye)
-            local maxReach = (claim.reach or 2.0) + Hitbox.ReachSlack()
-            if d > maxReach then
-                Log.Write(string.format("HitValidator: REJECT dist=%.2f reach=%.2f target=%s",
-                    d, maxReach, target))
+            if not eyeOk(attacker, eye) then
+                Log.Write(string.format("HitValidator: REJECT eye (%.1f,%.1f,%.1f) is not at the attacker %s", eye[1], eye[2], eye[3], tostring(attacker)))
                 return
             end
+            local def = swingDef(claim)
+            local cyl = Hitbox.Cylinder(target, tp)
+            local d = Hitbox.Distance(cyl, eye)
+            local maxReach = (def.reach_m or claim.reach or 2.0) + Hitbox.ReachSlack()
+            local rewound = nil
+            -- Lag tolerance: in reach at a recent host position counts too.
+            if d > maxReach and MPFeatures.On("rewind") then
+                for _, p in ipairs(PosHistory.Recent(target)) do
+                    local d2 = Hitbox.Distance(Hitbox.Cylinder(target, { p[1], p[2], p[3] }), eye)
+                    if d2 <= maxReach then d, rewound = d2, p[4]; break end
+                end
+            end
+            if d > maxReach then
+                Log.Write(string.format("HitValidator: REJECT dist=%.2f reach=%.2f target=%s%s",
+                    d, maxReach, target, MPFeatures.On("rewind") and string.format(" (rewind %d ms checked)", PosHistory.RewindMs()) or ""))
+                return
+            end
+            if rewound then Log.Write(string.format("HitValidator: in reach %d ms ago (rewind) target=%s", math.floor(rewound), target)) end
 
             -- Melee cooldown: the first hit of a new swing (new nonce) must
             -- come the cooldown (minus slack) after the last swing's first
@@ -108,7 +145,7 @@ function M.Register()
             local zone = claim.hitZone or "torso"
             if zone ~= "head" and zone ~= "torso" and zone ~= "limbs" then zone = "torso" end
             local zoneMult = Hitbox.ZoneMult(zone)
-            local dmg = math.max(1, math.floor((claim.damage or 1) * zoneMult))
+            local dmg = math.max(1, math.floor((def.damage or 1) * zoneMult))
             -- Passive shield (DECISIONS 2026-10-12): the swing's line from the
             -- eye to the hit point crosses the target's shield disc first.
             local shieldNote = ""
@@ -142,7 +179,11 @@ function M.Register()
         Log.Write(string.format("HitValidator: melee cooldown %.2fs (hits from a swing sooner than %.2fs after the last are rejected)",
             MeleeCooldown.Base(), math.max(0, MeleeCooldown.Seconds("longsword") - MeleeCooldown.ServerSlack())))
     end)
-    Log.Write(string.format("HitValidator: registered (melee cooldown %.2fs)", MeleeCooldown.Seconds("longsword")))
+    ConsoleForward.Server("dag_mp_rewind", function(_, v)
+        if tonumber(v) then PosHistory.SetRewind(tonumber(v)) end
+        Log.Write(string.format("HitValidator: rewind %d ms (switch rewind %s)", PosHistory.RewindMs(), MPFeatures.On("rewind") and "on" or "OFF"))
+    end)
+    Log.Write(string.format("HitValidator: registered (melee cooldown %.2fs, rewind %d ms)", MeleeCooldown.Seconds("longsword"), PosHistory.RewindMs()))
 end
 
 return M

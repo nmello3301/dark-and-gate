@@ -40,6 +40,7 @@ local cfg          = Ext.Require("data/bows.lua")
 local spells       = Ext.Require("data/spells.lua")
 local airAction    = Ext.Require("data/movement.lua").air_action
 local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
+local MPFeatures = Ext.Require("Shared/MPFeatures.lua")
 
 local M = {}
 
@@ -415,6 +416,8 @@ function M.Register()
     Ext.RegisterNetListener(Net.Channels.BowAnim, function(_, payload)
         local ok, p = pcall(Ext.Json.Parse, payload)
         if not ok or type(p) ~= "table" or not p.uuid or p.uuid == Aim.SelfUuid() then return end
+        -- remote_playrate off: the others' draws play at BG3's own speed here.
+        if not MPFeatures.On("remote_playrate") then return end
         if p.phase == "draw" then startOther(p.uuid, tonumber(p.drawS) or cfg.draw_s)
         elseif p.phase == "release" then releaseOther(p.uuid)
         else endOther(p.uuid, "cancelled", true) end

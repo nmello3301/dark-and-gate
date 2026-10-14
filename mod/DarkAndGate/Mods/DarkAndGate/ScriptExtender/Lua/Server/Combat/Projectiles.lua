@@ -68,7 +68,10 @@ local function len(a) return math.sqrt(a[1] * a[1] + a[2] * a[2] + a[3] * a[3]) 
 local function norm(a) local l = len(a); return l > 1e-6 and { a[1] / l, a[2] / l, a[3] / l } or { 0, 0, 1 } end
 local function fmt(p) return string.format("(%.2f,%.2f,%.2f)", p[1], p[2], p[3]) end
 
+local MPFeatures = Ext.Require("Shared/MPFeatures.lua")
 local function broadcast(channel, t)
+    -- proj_sync off: the other players see only the engine's own visual.
+    if not MPFeatures.On("proj_sync") then return end
     local msg = Ext.Json.Stringify(t)
     local ok = pcall(function() Ext.Net.BroadcastMessage(channel, msg) end)
     if not ok then pcall(function() Ext.ServerNet.BroadcastMessage(channel, msg) end) end
@@ -92,28 +95,43 @@ local function aliveOf(e)
     return not ok or tonumber(hp) == nil or tonumber(hp) > 0
 end
 
-local hostFeet = nil
+-- Around EVERY player (multiplayer MP-2, blocker B4: it was the host only).
+-- Single player: the one player = the host's controlled character.
+local playerFeet = {}
 local function stepScan()
     local t = now()
     if not scan.handles or (scan.idx > #scan.handles and t - scan.at > REFRESH_MS) then
         local ok, ents = pcall(Ext.Entity.GetAllEntitiesWithComponent, "ServerCharacter")
         scan.handles, scan.idx, scan.at = (ok and ents) or {}, 1, t
-        local okH, host = pcall(Osi.GetHostCharacter)
-        if okH and host then
-            local okE, he = pcall(Ext.Entity.Get, host)
-            hostFeet = okE and he and feetOf(he) or hostFeet
+        local feet = {}
+        for _, user in ipairs(Party.Users()) do
+            local c = Party.Controlled(user)
+            local okE, pe = pcall(Ext.Entity.Get, c)
+            local f = okE and pe and feetOf(pe)
+            if f then feet[#feet + 1] = f end
         end
+        if #feet == 0 then
+            local okH, host = pcall(Osi.GetHostCharacter)
+            local okE, he = pcall(Ext.Entity.Get, okH and host or nil)
+            local f = okE and he and feetOf(he)
+            if f then feet[1] = f end
+        end
+        if #feet > 0 then playerFeet = feet end
         return
     end
-    if not hostFeet then return end
+    if #playerFeet == 0 then return end
     local last = math.min(#scan.handles, scan.idx + SLICE - 1)
     for i = scan.idx, last do
         local e = scan.handles[i]
         local f = feetOf(e)
         local u = uuidOf(e)
         if f and u then
-            local dx, dz = f[1] - hostFeet[1], f[3] - hostFeet[3]
-            if dx * dx + dz * dz <= NEAR_M * NEAR_M and aliveOf(e) then
+            local close = false
+            for _, pf in ipairs(playerFeet) do
+                local dx, dz = f[1] - pf[1], f[3] - pf[3]
+                if dx * dx + dz * dz <= NEAR_M * NEAR_M then close = true; break end
+            end
+            if close and aliveOf(e) then
                 near[u] = near[u] or { uuid = u, ent = e }
             else
                 near[u] = nil
