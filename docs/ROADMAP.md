@@ -441,7 +441,9 @@ Principles P1-P5, the audit table, the net protocol and the test setup: [design/
 - [ ] `docs/design/multiplayer.md`: how BG3 co-op works for us, PLB compatibility, the audit table, the net protocol, the version handshake, the test setup, the pass plan.
 - [ ] PLB's exe patch checked against every DLL hook and pattern (no overlap, all still resolve).
 - [ ] Diagnostics: `!dag_mp_status`, user-tagged logs, the version handshake, the DLL's exe detection (`exe: vanilla | patched (PLB)`) with the hook self-check.
-- [ ] Solo check: single-player unchanged.
+  - Seen working in single player (2026-10-14): tagged logs (`[Client p1 host]`, `[Native p1-host]`), the handshake ("same build as the host"), `native-selfcheck.txt` (exe vanilla, 16/16 patterns unique). `!dag_mp_status` not run yet.
+- [x] Solo check: single-player unchanged. Verified 2026-10-14 (pak 9cc56b2, DLL 1a84741): the developer played the nautiloid fight in real time: "It played perfectly translated to RTC" (not winnable, as BG3 intends: you flee).
+  - One unexplained glitch the session before: MMB stopped bringing mouse-look back and Esc didn't open the game menu (nautiloid save, after arming Shocking Grasp). The logs showed no error and no blocked key; it was gone after restarting the game and reloading. Neither MMB nor Esc presses are logged yet.
 
 **MP-1: everyone in first person.**
 - [ ] Your own camera, movement, jump and crouch feel identical to single-player, as the joining player.
