@@ -2,12 +2,15 @@
 -- V cycles the companion mode (Follow -> Wait -> Go to camp; the server does
 -- it: Server/Companions.lua). V replaces BG3's Shove in first person. Also
 -- shows the server's toasts (Toast channel) through Client/HUD/Overlay.lua.
+-- The client console forwards !dag_follow (the server's follow assist) and
+-- !dag_ai_targets (the enemies' target choice, Server/Combat/NpcCombat.lua).
 
 local Log       = Ext.Require("Shared/Log.lua")
 local Net       = Ext.Require("Shared/Net.lua")
 local ClientNet = Ext.Require("Client/Net.lua")
 local Input     = Ext.Require("Client/Combat/Input.lua")
 local Overlay   = Ext.Require("Client/HUD/Overlay.lua")
+local ConsoleForward = Ext.Require("Shared/ConsoleForward.lua")
 
 local MPFeatures = Ext.Require("Shared/MPFeatures.lua")   -- multiplayer kill switches
 
@@ -27,7 +30,8 @@ function M.Register()
         local ok, p = pcall(Ext.Json.Parse, payload)
         if ok and type(p) == "table" and p.text then Overlay.Toast(p.text, p.secs) end
     end)
-    Log.Write("Companions: registered (V cycles Follow / Wait / Go to camp)")
+    ConsoleForward.Forward({ "dag_follow", "dag_ai_targets" })
+    Log.Write("Companions: registered (V cycles Follow / Wait / Go to camp; !dag_follow, !dag_ai_targets)")
 end
 
 return M

@@ -26,6 +26,14 @@ return {
         fwd_sign  = 1,      -- the Transform's local +Z is the facing; corrected
                             -- by itself if walking characters face -Z (logged)
     },
+    -- No reactions in real time (Server/Combat/NoReactions.lua): every
+    -- interrupt is switched off in BG3's own reaction settings, so nothing
+    -- asks (Tides of Chaos, Shield, Divine Smite...). !dag_rt off puts the
+    -- player's own switches back.
+    reactions = {
+        party_always = true,   -- party members' switches stay off whenever real time is on, in and out of fights (a fight's opener can ask too); false = only during real-time fights
+        guard_s      = 1.0,    -- how often the party's switches are checked again (an interrupt added mid-fight, a new party member)
+    },
     -- Downed players and companions.
     downed = {
         bleedout_s       = 180,   -- dead after this long downed (paused while revived)

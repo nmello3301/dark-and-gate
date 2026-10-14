@@ -572,7 +572,9 @@ local function getWeightedTargets(brawler, potentialTargets, bonusActionOnly, he
                             local targetHp = M.Osi.GetHitpoints(potentialTargetUuid)
                             local targetHpPct = M.Osi.GetHitpointsPercentage(potentialTargetUuid)
                             if not M.Utils.isPlayerOrAlly(brawler.uuid) then
-                                weightedTarget = M.Pick.getOffenseWeightedTarget(distanceToTarget, targetHp, targetHpPct, canSeeTarget, isHealer, isHostile, isMelee, hasPathToTarget)
+                                -- DAG: the enemies weigh our effective distance (nearest, who attacked them, how many are already on it; Server/Combat/NpcCombat.lua)
+                                local weighedDistance = (isHostile and DAG_TargetDistance) and DAG_TargetDistance(brawler, potentialTargetUuid, distanceToTarget) or distanceToTarget
+                                weightedTarget = M.Pick.getOffenseWeightedTarget(weighedDistance, targetHp, targetHpPct, canSeeTarget, isHealer, isHostile, isMelee, hasPathToTarget)
                                 debugPrint(brawler.displayName, "Got offense weighted target", M.Utils.getDisplayName(potentialTargetUuid), weightedTarget)
                                 if brawler.combatGroupId ~= nil then
                                     BrawlState.Session.ActiveCombatGroups[brawler.combatGroupId] = true

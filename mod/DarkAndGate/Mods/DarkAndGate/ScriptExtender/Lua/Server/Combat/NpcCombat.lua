@@ -46,8 +46,18 @@
 -- with its weapon (data/ai.lua side); why one did nothing is logged; one
 -- whose AI pulse stopped in a fight is logged with its state and restarted.
 -- A fight roster (who is on which side, at what pace) is logged 2.5 s in.
+-- The enemies' target choice (data/ai.lua targets; playtest 2026-10-14):
+-- Brawl kept an enemy's first pick for as long as it stayed within 12 m
+-- (AI.act "Remaining on target"), whoever came closer or hit it meanwhile.
+-- Now every enemy action re-checks every opponent in the fight (each
+-- player, companion and NPC ally) by an effective distance (nearest, who
+-- attacked it lately, how many enemies are already on it, the current
+-- target a little closer); Brawl's own weighing gets that distance (DAG
+-- patch in Pick.getWeightedTargets) and picks again when a better opponent
+-- shows up. Each pick and switch is logged with the distances and why.
 --
 --   !dag_ai on|off   !dag_ai_aim <deg>   !dag_ai_react <ms>   !dag_ai_debug on|off
+--   !dag_ai_targets on|off
 --   (server console, or the client console: Shared/ConsoleForward.lua)
 
 local Log         = Ext.Require("Shared/Log.lua")
@@ -89,6 +99,8 @@ local pulseSeen = {}    -- uuid -> ms of its last AI pulse (the stall watch)
 local stalled = {}      -- uuid -> true once its stall was logged this fight
 local idleWhy = {}      -- uuid -> { why, at }: the last "did nothing" logged
 local sides = {}        -- uuid -> { v, at }
+local threat = {}       -- uuid -> { attacker uuid -> ms it last attacked uuid } (this fight)
+local picking = {}      -- uuid -> its target before this AI.act (false = none), while Brawl picks again
 local watch = { at = -1e9, fightAt = nil }
 local watchSide         -- the stall watch (below, with the sides); the tick calls it
 
@@ -855,6 +867,123 @@ function watchSide(t)
 end
 
 -- ---------------------------------------------------------------------
+-- The enemies' target choice (data/ai.lua targets)
+-- ---------------------------------------------------------------------
+local function targetsOn() return cfg.enabled ~= false and type(cfg.targets) == "table" and cfg.targets.enabled ~= false end
+
+-- How many fighters on u's side (u not counted) are on each opponent now.
+local function attackersOn(list, u)
+    local n, mine = {}, onPlayersSide(u)
+    for raw, b in pairs(list) do
+        local a = Party.Norm(raw)
+        if a and a ~= u and type(b) == "table" and b.targetUuid and not isHelper(raw) and onPlayersSide(a) == mine then
+            local t = Party.Norm(b.targetUuid)
+            if t then n[t] = (n[t] or 0) + 1 end
+        end
+    end
+    return n
+end
+
+-- u's effective distance to opponent t, d metres away (lower = better), and why.
+local function effective(u, t, d, cur, counts, at)
+    local T = cfg.targets or {}
+    local s, why = d, {}
+    local hit = threat[u] and threat[u][t]
+    if hit and at - hit <= (T.threat_s or 8) * 1000 then
+        s = s - (T.threat_m or 0)
+        why[#why + 1] = string.format("attacked it %.0f s ago", (at - hit) / 1000)
+    end
+    local n = math.min(counts[t] or 0, T.spread_max or 3)
+    if n > 0 then
+        s = s + n * (T.spread_m or 0)
+        why[#why + 1] = string.format("%d other%s already on it", n, n == 1 and "" or "s")
+    end
+    if cur ~= nil and t == cur then s = s - (T.stick_m or 0) end
+    return math.max(0, s), why
+end
+
+-- Every opponent in the fight u could pick now (players, companions and NPC
+-- allies alike: Brawl's roster), best first: { t, d, s, why }.
+local function rankTargets(u, cur)
+    local okB, list = pcall(function() return Roster.getBrawlers() end)
+    if not okB or type(list) ~= "table" then return {} end
+    local T = cfg.targets or {}
+    local counts, at, out = attackersOn(list, u), now(), {}
+    for raw in pairs(list) do
+        local t = Party.Norm(raw)
+        if t and t ~= u and not isHelper(raw) and alive(t) and isEnemy(u, t) then
+            local okD, d = pcall(Osi.GetDistanceTo, u, t)
+            d = okD and tonumber(d) or nil
+            if d and d <= (T.max_m or 40) then
+                local okV, vis = pcall(function() return Utils.isVisible(u, t) end)
+                local okS, sees = pcall(Osi.CanSee, u, t)
+                if (not okV or vis ~= false) and (t == cur or (okS and tonumber(sees) == 1)) then
+                    local s, why = effective(u, t, d, cur, counts, at)
+                    out[#out + 1] = { t = t, d = d, s = s, why = why }
+                end
+            end
+        end
+    end
+    table.sort(out, function(a, b) return a.s < b.s end)
+    return out
+end
+
+-- Brawl's Pick.getWeightedTargets (DAG patch): the distance it weighs for an
+-- enemy's hostile candidate. While AI.act re-picks, the target it had keeps
+-- its stick bonus.
+local function targetDistance(brawler, target, d)
+    local u, t = Party.Norm(brawler.uuid), Party.Norm(target)
+    if not targetsOn() or not u or not t or onPlayersSide(u) then return d end
+    local cur = picking[u]
+    if cur == nil then cur = brawler.targetUuid and Party.Norm(brawler.targetUuid) or nil end
+    if cur == false then cur = nil end
+    local okB, list = pcall(function() return Roster.getBrawlers() end)
+    local s = effective(u, t, tonumber(d) or 0, cur, (okB and type(list) == "table") and attackersOn(list, u) or {}, now())
+    return s
+end
+
+local function describe(r)
+    return string.format("%s %.1f m%s", name(r.t), r.d, #r.why > 0 and (" (" .. table.concat(r.why, ", ") .. ")") or "")
+end
+
+-- After AI.act: the enemy's new target, with the distances and why.
+local function logPick(brawler, u, before, ranked)
+    if (cfg.targets or {}).log == false then return end
+    local after = brawler.targetUuid and Party.Norm(brawler.targetUuid) or nil
+    if not after or after == before then return end
+    local mine, nearest, prev, others = nil, nil, nil, {}
+    for _, r in ipairs(ranked or {}) do
+        if not nearest or r.d < nearest.d then nearest = r end
+        if r.t == after then mine = r end
+        if r.t == before then prev = r end
+    end
+    for _, r in ipairs(ranked or {}) do
+        if r.t ~= after and #others < 3 then others[#others + 1] = describe(r) end
+    end
+    local why
+    if mine then
+        local tags = {}
+        if nearest and nearest.t == after then tags[#tags + 1] = "nearest" end
+        for _, w in ipairs(mine.why) do tags[#tags + 1] = w end
+        if nearest and nearest.t ~= after and #nearest.why > 0 then
+            tags[#tags + 1] = string.format("%s is nearer but %s", name(nearest.t), table.concat(nearest.why, ", "))
+        end
+        if #tags == 0 then tags[1] = "best weight (distance, wounds, sight)" end
+        why = string.format("%.1f m, %s", mine.d, table.concat(tags, ", "))
+    else
+        local okD, d = pcall(Osi.GetDistanceTo, u, after)
+        why = string.format("%s m, %s", (okD and tonumber(d)) and string.format("%.1f", tonumber(d)) or "?",
+            isEnemy(u, after) and "Brawl's pick, not in sight" or "a friend: Brawl's heal / support pick")
+    end
+    local was = ""
+    if before then
+        was = prev and string.format("; was %s, %.1f m", name(before), prev.d) or string.format("; was %s, now down, gone or out of sight", name(before))
+    end
+    log(string.format("AI: %s %s %s (%s%s) | %s", name(u), before and "switches to" or "targets", name(after), why, was,
+        #others > 0 and ("others: " .. table.concat(others, "; ")) or "no other opponent in sight"))
+end
+
+-- ---------------------------------------------------------------------
 -- Brawl wiring
 -- ---------------------------------------------------------------------
 -- The arrow's hit (Projectiles impact_mode "weapon"): ranged weapon dice.
@@ -920,6 +1049,27 @@ local function wire()
                 local giveUp = onFailed
                 onFailed = function(why) return sideIdle(brawler, u, why, onSubmitted, onCompleted, giveUp) end
             end
+            -- The enemies' target choice: a better opponent than the current
+            -- one clears it, so Brawl picks again (weighing our distance).
+            if targetsOn() and not bonusActionOnly and not onPlayersSide(u) then
+                local before = brawler.targetUuid and Party.Norm(brawler.targetUuid) or nil
+                local ranked = rankTargets(u, before)
+                if before and not brawler.lockedOnTarget and ranked[1] and ranked[1].t ~= before then
+                    for _, r in ipairs(ranked) do
+                        if r.t == before then
+                            if ranked[1].s < r.s then brawler.targetUuid = nil end
+                            break
+                        end
+                    end
+                end
+                picking[u] = before or false
+                local res = table.pack(pcall(origAct, brawler, bonusActionOnly, onSubmitted, onCompleted, onFailed))
+                picking[u] = nil
+                local okL, errL = pcall(logPick, brawler, u, before, ranked)
+                if not okL then dbg("AI: target log failed: " .. tostring(errL)) end
+                if not res[1] then error(res[2], 0) end
+                return table.unpack(res, 2, res.n)
+            end
         end
         return origAct(brawler, bonusActionOnly, onSubmitted, onCompleted, onFailed)
     end
@@ -930,6 +1080,25 @@ function M.Register()
     Projectiles.SetWeaponHandler(arrowHit)
     wire()
     DAG_SkipDownedTargets = cfg.skip_downed_targets ~= false   -- Brawl's Pick / Utils (DAG patches)
+    -- Brawl's Pick.getWeightedTargets (DAG patch): the enemies' effective distance.
+    DAG_TargetDistance = function(brawler, target, d)
+        local ok, s = pcall(targetDistance, brawler, target, d)
+        return (ok and tonumber(s)) or d
+    end
+    -- Who attacked whom this fight: the target choice's threat (our hits go
+    -- through Osi.ApplyDamage, BG3's casts through its own attacks; both
+    -- raise AttackedBy, 7 args as Brawl's Listeners register it).
+    Ext.Osiris.RegisterListener("AttackedBy", 7, "after", function(defender, attackerOwner, attacker)
+        if not Brawl.InFight() then return end
+        local d = Party.Norm(defender)
+        if not d then return end
+        local t = now()
+        threat[d] = threat[d] or {}
+        for _, a in ipairs({ Party.Norm(attackerOwner), Party.Norm(attacker) }) do
+            if a and a ~= d then threat[d][a] = t end
+        end
+    end)
+    Brawl.Hook("CombatStarted", function() threat, picking = {}, {} end)
     Brawl.Hook("CombatStarted", function() Ext.Timer.WaitFor(2500, roster) end)
     Ext.Events.Tick:Subscribe(TickBudget.Wrap("NpcCombat", tick))
     ConsoleForward.Server("dag_ai", function(_, a)
@@ -953,12 +1122,24 @@ function M.Register()
         debugOn = (a ~= "off" and a ~= "0")
         Log.Write("AI: debug lines " .. (debugOn and "ON" or "OFF"))
     end)
+    local function targetsLine()
+        local T = cfg.targets or {}
+        if not targetsOn() then return "AI: enemies' target choice OFF (Brawl's first pick, kept while within 12 m)" end
+        return string.format("AI: enemies' target choice ON: every action re-checks every opponent within %.0f m by distance, -%.1f m if it attacked them in the last %.0f s, +%.1f m per other enemy already on it (max %.0f), -%.1f m for the current target (!dag_ai_targets on|off)",
+            T.max_m or 40, T.threat_m or 0, T.threat_s or 8, T.spread_m or 0, T.spread_max or 3, T.stick_m or 0)
+    end
+    ConsoleForward.Server("dag_ai_targets", function(_, a)
+        if type(cfg.targets) ~= "table" then cfg.targets = {} end
+        if a == "on" or a == "off" then cfg.targets.enabled = (a == "on") end
+        Log.Write(targetsLine())
+    end)
     Log.Write(string.format("AI: registered (your side's pace %.1f s, enemies' by BG3's difficulty; %s; aim error %.1f deg, reaction %d+%d ms, lead skill %.2f, melee %s, cast time %.1f s; your side %s)",
         tonumber(rtCfg.action_interval_s) or 4, DAG_SkipDownedTargets and "downed characters are no targets" or "downed characters are targets",
         cfg.ranged.aim_error_deg, cfg.ranged.reaction_ms, cfg.ranged.reaction_jitter_ms,
         cfg.ranged.lead_skill, cfg.melee.weapon, cfg.cast_time_s,
         (cfg.side and cfg.side.fallback == false) and "on Brawl only" or string.format("falls back to weapon attacks within %d m",
             (cfg.side and cfg.side.fallback_range_m) or 25)))
+    Log.Write(targetsLine())
 end
 
 return M

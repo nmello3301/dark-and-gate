@@ -16,7 +16,7 @@ All reactions are **disabled** in fights for now (Server/Combat/NoReactions.lua)
 | Counterspell | disabled | First to return: needs enemy cast bars (M4) so a player can see what to counter, then a key during the enemy's cast time. |
 | Hellish Rebuke | disabled | Automatic retaliation on being hit, with a cooldown? |
 | Other reaction interrupts (Uncanny Dodge, Deflect Missiles, Cutting Words, Sentinel, Mage Slayer, Warding Flare…) | disabled | One by one. Most become an "on hit" choice that real time can't pause for: either automatic with a cooldown, or a key in a short window. |
-| Interrupts that cost no reaction (Divine Smite prompts, Lucky, Portent, Bardic / Combat Inspiration, Tides of Chaos…) | as is | Not blocked by `DAG_NO_REACTIONS` (148 of the 253 interrupts cost no reaction). Our hits (`Osi.ApplyDamage`, impact clones) never trigger on-hit interrupts, so these should stay silent; revisit if a prompt shows up in a fight. |
+| Interrupts that cost no reaction (Divine Smite prompts, Lucky, Portent, Bardic / Combat Inspiration, Tides of Chaos…) | switched off (2026-10-14) | `DAG_NO_REACTIONS` doesn't block them (148 of the 253 interrupts cost no reaction), and enemy AI casts real BG3 spells, so they did prompt: Tides of Chaos on an Acid Splash save in the gate fight. Now every interrupt's switch in BG3's reaction settings is off in real time (`Server/Combat/NoReactions.lua`, DECISIONS 2026-10-14). Class by class later, e.g. Wild Magic. |
 
 How it's done: every fighter in a real-time fight gets the hidden status `DAG_NO_REACTIONS` (`Public/DarkAndGate/Stats/Generated/Data/DAG_Combat.txt`): `ActionResourceBlock(ReactionActionPoint)`, BG3's own "can't take reactions" lever (Shocking Grasp), plus `ActionResourceBlock(SneakAttack_Charge)`.
 

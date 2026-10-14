@@ -132,6 +132,8 @@ ConsoleForward.Forward({
     "dag_melee_cooldown",
     -- Multiplayer kill switches (Server/MP.lua; host only).
     "dag_mp_feature", "dag_mp_rewind",
+    -- Reaction / interrupt switches per character (Server/Combat/NoReactions.lua).
+    "dag_reactions",
 })
 -- Forwarded commands carry the camera's forward ("ahead of you" spawns).
 local AimForCtx = Ext.Require("Client/Combat/Aim.lua")

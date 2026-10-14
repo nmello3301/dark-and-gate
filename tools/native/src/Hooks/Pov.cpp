@@ -28,6 +28,7 @@
 #include "../SafeMem.h"
 #include "../Watchdog.h"
 #include "VisualLift.h"
+#include "Mouselook.h"
 #include "AnimRate.h"
 #include "GenomeCapture.h"
 #include "MoveSpeed.h"
@@ -187,6 +188,14 @@ struct LuaState {
     float     jumpWaitMs = 250.f; // bunny-hop grace: a jump that comes while still in the air waits this long for the landing
     bool      landHold = false;   // RealJump: keep BG3's landing hold (recover) after a jump
     bool      menu = false;        // a BG3 panel is open (Lua, Client/HUD): mouse-look off, cursor free
+    // Foreign camera (see Foreign below; data/camera.lua foreign_camera):
+    // follow 1 = the view keeps following your mouse, 0 = it holds the last
+    // direction (the 2026-10-12 behaviour); BG3's camera turning counts as
+    // yours only within foreignMouseMs of a mouse movement (0 = always);
+    // back on you, ease foreignEaseMs onto BG3's camera (0 = snap).
+    bool      foreignFollow = true;
+    float     foreignMouseMs = 300.f;
+    float     foreignEaseMs = 150.f;
     // Crouch = sneaking (Client/Crouch.lua): the head bone lowers by itself;
     // the eye-height calibration must not run while crouched.
     bool      crouch = false;
@@ -343,6 +352,13 @@ void PollLuaFile()
         dag::log::SetTag(std::strcmp(tag, "-") == 0 ? "" : tag);
     }
     s.menu = ValI(buf, "menu", 0) != 0;
+    s.foreignFollow = ValI(buf, "foreign_follow", 1) != 0;
+    s.foreignMouseMs = ValF(buf, "foreign_mouse_ms", 300.f);
+    if (s.foreignMouseMs < 0.f) s.foreignMouseMs = 0.f;
+    if (s.foreignMouseMs > 5000.f) s.foreignMouseMs = 5000.f;
+    s.foreignEaseMs = ValF(buf, "foreign_ease_ms", 150.f);
+    if (s.foreignEaseMs < 0.f) s.foreignEaseMs = 0.f;
+    if (s.foreignEaseMs > 2000.f) s.foreignEaseMs = 2000.f;
     s.crouch = ValI(buf, "crouch", 0) != 0;
     s.noCombatCam = ValI(buf, "nocombatcam", 1) != 0;
     s.combatWasd = ValI(buf, "combat_wasd", 1) != 0;
@@ -1083,20 +1099,34 @@ SDL_GetTicksF       g_ticks        = nullptr;
 bool                g_filterInstalled = false;
 DWORD               g_lastFilterTry   = 0;
 
+constexpr uint32_t kMouseMotion = 0x400;   // SDL_MOUSEMOTION: which @12, xrel @28, yrel @32
 constexpr uint32_t kMouseDown = 0x401;
 constexpr uint32_t kMouseUp   = 0x402;
 constexpr uint8_t  kMiddle    = 2;
+constexpr uint32_t kTouchMouseId = 0xFFFFFFFFu;   // SDL_TOUCH_MOUSEID: touch, not a mouse
 
 std::atomic<bool> g_mlWanted { false };   // POV on + gameplay active
 std::atomic<bool> g_toggled  { false };   // we are holding Camera Rotate
 std::atomic<int>  g_synthDown{ 0 };
 std::atomic<int>  g_synthUp  { 0 };
+// GetTickCount() of the last real mouse motion event SDL queued (0 = none
+// yet). Queued before BG3 reads it, so the frame BG3 turns its camera for a
+// movement already sees it (the foreign-camera follow, HandleCommit).
+std::atomic<DWORD> g_mouseMoveTick{ 0 };
 
 int __cdecl OurFilter(void* userdata, void* ev)
 {
     (void)userdata;
     uint32_t type = 0;
     std::memcpy(&type, ev, 4);
+    if (type == kMouseMotion) {
+        const uint8_t* m = static_cast<const uint8_t*>(ev);
+        uint32_t which = 0; int32_t xrel = 0, yrel = 0;
+        std::memcpy(&which, m + 12, 4);
+        std::memcpy(&xrel, m + 28, 4);
+        std::memcpy(&yrel, m + 32, 4);
+        if (which != kTouchMouseId && (xrel != 0 || yrel != 0)) g_mouseMoveTick.store(GetTickCount());
+    }
     if (type == kMouseDown || type == kMouseUp) {
         uint8_t* e = static_cast<uint8_t*>(ev);
         if (e[16] == kMiddle) {
@@ -1208,23 +1238,121 @@ uint32_t g_rotOff      = 0x70;
 // flight line, under the ground -> black screen, and the view turned with
 // it). A camera whose pivot is more than kForeignM from the character (Lua's
 // root) is "foreign": first person keeps the head (checked against the
-// character, not that pivot) and the last view direction of a camera that
-// was on you, until the pivot comes back.
+// character, not that pivot) until the pivot comes back.
+//
+// The view direction meanwhile (playtest 2026-10-14, brains fight at the
+// crashed nautiloid): BG3's gameplay camera kept dropping its follow target
+// (cam+0x13C target count != 1, so cam+0xC4 "camera position" is zeroed,
+// FUN_141e155e0) and stayed on a fixed point or on someone else for up to
+// ~4 s. Holding the last direction froze mouse-look that long, then the
+// view snapped to where BG3's camera had turned with the mouse. That camera
+// still turns with your mouse (its yaw at +0xAC is turned by the rotate
+// input whatever it follows, FUN_141e18270), so the view now follows the
+// slot camera's frame-to-frame turn on the same camera object; a turn while
+// the mouse has been still for foreignMouseMs is BG3's own and is ignored.
+// Back on you, the view eases foreignEaseMs onto BG3's camera. Lua's
+// foreign_follow 0 brings back the old hold.
 void* g_mainScene = nullptr;   // the render view the gameplay camera commits to
 constexpr float kForeignM = 4.0f;
 constexpr float kForeignUpM = 12.0f;
 constexpr float kPivotAboveFeet = 1.9f;   // the gameplay pivot's height over the feet (PhaseProbe)
+constexpr uint32_t kCamTargetCount = 0x13C;   // u32: BG3 camera's follow-target count (FUN_141e155e0)
+constexpr float kTurnEpsDeg = 0.001f;         // smaller turns are float noise
+constexpr float kMaxTurnDegPerFrame = 60.f;   // more in one frame is a camera swap / copy, not a mouse
+constexpr DWORD kSrcStaleMs = 250;            // a rotation sample older than this is no baseline
+constexpr DWORD kForeignGapMs = 250;          // a hold interrupted longer (dialogue, load) ends without an ease
+constexpr float kEaseMinDeg = 0.5f;           // closer than this: no ease needed
+constexpr float kEaseMaxDeg = 150.f;          // farther: a lerp would pass near zero, snap instead
+constexpr int   kForeignLogPeriods = 150;     // holds logged per session (start + end line each)
+constexpr int   kForeignSwapLogs = 3;         // camera swaps logged per hold (the rest are counted)
 struct Foreign {
     bool  on = false;
     void* cam = nullptr;
-    float goodRot[3] = { 0.f, 0.f, 1.f };
+    float goodRot[3] = { 0.f, 0.f, 1.f };   // the direction first person shows (held / followed while foreign)
     bool  goodRotOk = false;
-    int   frames = 0;
-    int   logs = 0;
+    int   frames = 0;          // frames on the current camera object
+    int   logs = 0;            // holds logged so far
+    // One hold: from the first frame on a foreign camera until one is on you again.
+    bool  logged = false;      // this hold's lines are written
+    bool  follow = true;       // follow mode when it started
+    int   periodFrames = 0;
+    int   swaps = 0;           // camera objects BG3 swapped in during it
+    LARGE_INTEGER t0 = {};
+    DWORD lastTick = 0;        // GetTickCount() of its latest frame
+    float followDeg = 0.f;     // the view turned with your mouse
+    float ignoredDeg = 0.f;    // BG3's camera turned with the mouse still (or in hold mode)
+    // Rotation source: the gameplay slot camera's rotation at the last commit.
+    void* srcCam = nullptr;
+    float srcRot[3] = { 0.f, 0.f, 1.f };
+    bool  srcOk = false;
+    DWORD srcTick = 0;
+    // Back on you: ease from the followed direction onto BG3's camera.
+    bool  easing = false;
+    float easeFrom[3] = { 0.f, 0.f, 1.f };
+    LARGE_INTEGER easeT0 = {};
 } g_foreign;
 int      g_rotVotes70  = 0;
 int      g_rotVotes74  = 0;
 bool     g_rotLogged   = false;
+
+// Unit rotation (pivot -> eye) of a camera object, at the calibrated offset.
+bool ReadUnitRot(const void* cam, float out[3])
+{
+    if (!cam || !ReadVec(cam, g_rotOff, out)) return false;
+    const float l = Len3(out);
+    if (l < 0.5f || l > 1.5f) return false;
+    out[0] /= l; out[1] /= l; out[2] /= l;
+    return true;
+}
+
+// Angle between two unit vectors; atan2(|a x b|, a.b) stays exact for the
+// hundredths of a degree a slow mouse turns per frame (acos would round them to 0).
+float AngleDeg(const float a[3], const float b[3])
+{
+    const float cx = a[1] * b[2] - a[2] * b[1];
+    const float cy = a[2] * b[0] - a[0] * b[2];
+    const float cz = a[0] * b[1] - a[1] * b[0];
+    const float d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    return std::atan2(std::sqrt(cx * cx + cy * cy + cz * cz), d) * 57.29578f;
+}
+
+// Turns `held` by the yaw / pitch change from `from` to `to` (all unit
+// rotations in the engine's convention: pivot -> eye, y up).
+void ApplyTurn(float held[3], const float from[3], const float to[3])
+{
+    constexpr float kPi = 3.14159265f;
+    constexpr float kPitchMax = 1.5533f;   // 89 deg: keep yaw defined
+    auto pitchOf = [](const float r[3]) { return std::asin(r[1] > 1.f ? 1.f : (r[1] < -1.f ? -1.f : r[1])); };
+    float dYaw = 0.f;
+    // Straight up / down the yaw is undefined: take only the pitch change.
+    if (std::fabs(from[1]) < 0.999f && std::fabs(to[1]) < 0.999f) {
+        dYaw = std::atan2(to[0], to[2]) - std::atan2(from[0], from[2]);
+        while (dYaw > kPi) dYaw -= 2.f * kPi;
+        while (dYaw < -kPi) dYaw += 2.f * kPi;
+    }
+    const float dPitch = pitchOf(to) - pitchOf(from);
+    const float yaw = std::atan2(held[0], held[2]) + dYaw;
+    float pitch = pitchOf(held) + dPitch;
+    if (pitch > kPitchMax) pitch = kPitchMax;
+    if (pitch < -kPitchMax) pitch = -kPitchMax;
+    const float cp = std::cos(pitch);
+    held[0] = cp * std::sin(yaw);
+    held[1] = std::sin(pitch);
+    held[2] = cp * std::cos(yaw);
+}
+
+// Did the mouse move within the last `ms`? Two sources: the SDL motion
+// events (this frame's, queued before BG3 turns its camera) and SDL's
+// relative-mouse delta (Mouselook::Tick, last frame's). 0 = no gate.
+bool MouseMovedWithin(float ms)
+{
+    if (ms <= 0.f) return true;
+    const DWORD now = GetTickCount();
+    const DWORD lim = static_cast<DWORD>(ms);
+    const DWORD a = g_mouseMoveTick.load();
+    const DWORD b = static_cast<DWORD>(dag::hooks::mouselook::LastMoveTick());
+    return (a != 0 && now - a <= lim) || (b != 0 && now - b <= lim);
+}
 
 struct Status {
     const char* src = "none";
@@ -1277,7 +1405,7 @@ void WriteStatus()
         "headName=%s headBone=%d headCal=%d eyeUpAuto=%.3f lift=%.3f liftMode=%s jumpSeq=%d animRate=%.2f rateHook=%s rateHits=%ld "
         "anchor=%s delta=%.4f deltaMax=%.4f jerk=%.4f smooth=%.2f "
         "move=%s walkX=%.2f runX=%.2f tmplStroll=%.2f tmplRun=%.2f walkT=%.3f outStroll=%.2f outRun=%.2f moveCalls=%ld "
-        "orbit=%d crouch=%d levelSeq=%d cwasd=%s foreignCam=%d %s locoHits=%ld t=%u\n",
+        "orbit=%d crouch=%d levelSeq=%d cwasd=%s foreignCam=%d foreignFollow=%d %s locoHits=%ld t=%u\n",
         g_lua.on ? 1 : 0, g_lua.active ? 1 : 0, g_status.applied ? 1 : 0, g_status.src,
         g_rotOff, g_rotLogged ? 1 : 0, g_sel.valid ? 1 : 0, g_sel.bone,
         g_sel.fromSocket ? "(socket)" : "(top)", g_sel.meshIdx, g_sel.poseSlot + 1, g_sel.layout,
@@ -1294,7 +1422,7 @@ void WriteStatus()
         g_lua.anchor ? "head" : "pivot", g_cam.lastAvg, g_cam.lastMax, g_cam.lastJerk, g_lua.smooth,
         dag::movespeed::State(), g_lua.moveWalk, g_lua.moveRun, ms0, mr0, mt0, mso, mro, mc,
         g_lua.orbit ? 1 : 0, g_lua.crouch ? 1 : 0, g_lua.levelSeq,
-        dag::combatwasd::State(), g_foreign.on ? 1 : 0, mf, dag::animrate::LocoHits(),
+        dag::combatwasd::State(), g_foreign.on ? 1 : 0, g_lua.foreignFollow ? 1 : 0, mf, dag::animrate::LocoHits(),
         (unsigned)now);
     WriteSmallFile(L"native-pov-status.txt", line, len);
 }
@@ -1344,6 +1472,21 @@ void OnFrame(void* gameplayCam)
     if (g_lua.crouch != s_crouch) {
         s_crouch = g_lua.crouch;
         dag::log::Writef("POV: crouch %s (eye calibration %s)", s_crouch ? "ON" : "OFF", s_crouch ? "paused" : "allowed");
+    }
+    // Foreign-camera settings (Lua foreign_*): logged at the first read and on change.
+    static int s_ffollow = -1;
+    static float s_fmouse = -1.f, s_fease = -1.f;
+    if (g_lua.on && ((g_lua.foreignFollow ? 1 : 0) != s_ffollow || g_lua.foreignMouseMs != s_fmouse ||
+                     g_lua.foreignEaseMs != s_fease)) {
+        s_ffollow = g_lua.foreignFollow ? 1 : 0;
+        s_fmouse = g_lua.foreignMouseMs;
+        s_fease = g_lua.foreignEaseMs;
+        if (g_lua.foreignFollow)
+            dag::log::Writef("POV: foreign camera -> the view follows your mouse (BG3's own turns ignored once the mouse is still %.0f ms; back on you: ease %.0f ms)",
+                             g_lua.foreignMouseMs, g_lua.foreignEaseMs);
+        else
+            dag::log::Writef("POV: foreign camera -> the view holds your last direction (foreign_follow 0; back on you: ease %.0f ms)",
+                             g_lua.foreignEaseMs);
     }
 
     if (g_lua.on && g_lua.numMeshes > 0) {
@@ -1564,14 +1707,41 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
     bool badRot = !ReadVec(cam, g_rotOff, rot);
     const float rl = badRot ? 0.f : Len3(rot);
     if (rl < 0.5f || rl > 1.5f) badRot = true;
+    if (!badRot) { rot[0] /= rl; rot[1] /= rl; rot[2] /= rl; }
+
+    // Where mouse-look lives this frame: the gameplay slot camera's rotation
+    // (BG3 turns it with the mouse whatever it looks at). Its turn since the
+    // last commit on the same camera object drives the view while a foreign
+    // camera holds it (Foreign above). A second commit in the same frame
+    // sees no turn, so commits are never counted twice.
+    float srcNow[3] = { 0.f, 0.f, 1.f };
+    void* srcCam = nullptr;
+    bool  srcNowOk = false;
+    if (slotCam) {
+        srcCam = cam;
+        srcNowOk = !badRot;
+        if (srcNowOk) std::memcpy(srcNow, rot, sizeof(srcNow));
+    } else if (g_gameplayCam) {
+        srcCam = g_gameplayCam;
+        srcNowOk = ReadUnitRot(g_gameplayCam, srcNow);
+    }
+    const DWORD nowTick = GetTickCount();
+    const bool srcTurnOk = srcNowOk && g_foreign.srcOk && srcCam == g_foreign.srcCam &&
+                           nowTick - g_foreign.srcTick <= kSrcStaleMs;
+    float srcPrev[3];
+    std::memcpy(srcPrev, g_foreign.srcRot, sizeof(srcPrev));
+    g_foreign.srcCam = srcCam;
+    g_foreign.srcOk = srcNowOk;
+    g_foreign.srcTick = nowTick;
+    if (srcNowOk) std::memcpy(g_foreign.srcRot, srcNow, sizeof(srcNow));
+    const float srcTurnDeg = srcTurnOk ? AngleDeg(srcPrev, srcNow) : 0.f;
+
     if (badRot) {
         if (!g_foreign.goodRotOk) return false;
         std::memcpy(rot, g_foreign.goodRot, sizeof(rot));
-    } else {
-        rot[0] /= rl; rot[1] /= rl; rot[2] /= rl;
     }
 
-    float pivot[3];
+    float pivot[3] = { 0.f, 0.f, 0.f };
     bool pivotOk = ReadVec(cam, 0x24, pivot);
     // The gameplay camera always has a camera position; BG3's attack and
     // projectile cameras had none (0,0,0) in the playtest log.
@@ -1592,15 +1762,75 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
     if (!g_lua.orbit && (noPos || badRot)) foreign = true;
     if (slotCam && !foreign) g_mainScene = self;
     if (foreign != g_foreign.on || (foreign && cam != g_foreign.cam)) {
-        if (g_foreign.logs < 60) {
-            ++g_foreign.logs;
-            if (foreign)
-                dag::log::Writef("POV: camera %p (%s) pivot (%.1f,%.1f,%.1f) %.1f m from you%s%s -> first person keeps your head and your last view direction%s",
+        if (foreign) {
+            const bool starting = !g_foreign.on;
+            if (starting) {
+                // A new hold: fresh counters; logged while the session cap lasts.
+                g_foreign.logged = g_foreign.logs < kForeignLogPeriods;
+                if (g_foreign.logged) ++g_foreign.logs;
+                g_foreign.follow = g_lua.foreignFollow;
+                g_foreign.periodFrames = 0;
+                g_foreign.swaps = 0;
+                g_foreign.followDeg = 0.f;
+                g_foreign.ignoredDeg = 0.f;
+                g_foreign.easing = false;
+                QueryPerformanceCounter(&g_foreign.t0);
+            } else {
+                ++g_foreign.swaps;
+            }
+            if (g_foreign.logged && (starting || g_foreign.swaps <= kForeignSwapLogs)) {
+                // BG3's follow-target count: 1 = following someone (you, or
+                // the one it looks at), 0 = following nobody (a fixed point),
+                // 2+ = framing several.
+                uint32_t nT = 0;
+                char targets[16];
+                if (dag::safemem::ReadBytes(cam + kCamTargetCount, &nT, sizeof(nT)) && nT < 64)
+                    std::snprintf(targets, sizeof(targets), "%u", nT);
+                else
+                    std::snprintf(targets, sizeof(targets), "?");
+                char swapTag[40] = "";
+                if (!starting) std::snprintf(swapTag, sizeof(swapTag), " [camera swap %d in this hold]", g_foreign.swaps);
+                const char* what = g_foreign.follow
+                    ? " -> first person keeps your head; the view follows your mouse"
+                    : " -> first person keeps your head and your last view direction";
+                dag::log::Writef("POV: camera %p (%s) pivot (%.1f,%.1f,%.1f) %.1f m from you%s%s, BG3 camera targets %s%s%s%s",
                                  static_cast<void*>(cam), slotCam ? "gameplay slot" : "other camera on the main view",
                                  pivot[0], pivot[1], pivot[2], farM, noPos ? ", no camera position" : "",
-                                 badRot ? ", no rotation" : "", g_foreign.goodRotOk ? "" : " (none yet: its own)");
-            else
-                dag::log::Writef("POV: camera %p is on you again after %d frame(s)", static_cast<void*>(cam), g_foreign.frames);
+                                 badRot ? ", no rotation" : "", targets, what,
+                                 g_foreign.goodRotOk ? "" : " (none yet: its own)", swapTag);
+            }
+        } else {
+            // Back on you. Ease from the direction first person showed onto
+            // BG3's camera, unless they already agree, the hold was cut off
+            // (dialogue, load) or they are too far apart for a lerp.
+            const float off = g_foreign.goodRotOk ? AngleDeg(g_foreign.goodRot, rot) : 0.f;
+            const bool fresh = nowTick - g_foreign.lastTick <= kForeignGapMs;
+            const char* how = "already on BG3's camera";
+            char howBuf[96];
+            if (off >= kEaseMinDeg) {
+                if (g_lua.foreignEaseMs > 0.f && fresh && off <= kEaseMaxDeg && !g_lua.orbit) {
+                    g_foreign.easing = true;
+                    std::memcpy(g_foreign.easeFrom, g_foreign.goodRot, sizeof(g_foreign.easeFrom));
+                    QueryPerformanceCounter(&g_foreign.easeT0);
+                    std::snprintf(howBuf, sizeof(howBuf), "easing %.1f deg onto BG3's camera over %.0f ms", off, g_lua.foreignEaseMs);
+                } else {
+                    std::snprintf(howBuf, sizeof(howBuf), "snapped %.1f deg onto BG3's camera (%s)", off,
+                                  g_lua.foreignEaseMs <= 0.f ? "ease 0" : (!fresh ? "hold was interrupted" : (g_lua.orbit ? "orbit" : "too far for an ease")));
+                }
+                how = howBuf;
+            }
+            if (g_foreign.logged) {
+                const double ms = MsSince(g_foreign.t0);
+                if (g_foreign.follow)
+                    dag::log::Writef("POV: camera %p is on you again after %d frame(s) (%.0f ms, %d camera swap(s)); the view followed your mouse %.0f deg, ignored %.0f deg BG3 turned by itself; %s",
+                                     static_cast<void*>(cam), g_foreign.periodFrames, ms, g_foreign.swaps,
+                                     g_foreign.followDeg, g_foreign.ignoredDeg, how);
+                else
+                    dag::log::Writef("POV: camera %p is on you again after %d frame(s) (%.0f ms, %d camera swap(s)); the view held while BG3's camera turned %.0f deg; %s",
+                                     static_cast<void*>(cam), g_foreign.periodFrames, ms, g_foreign.swaps,
+                                     g_foreign.ignoredDeg, how);
+            }
+            g_foreign.logged = false;
         }
         g_foreign.on = foreign;
         g_foreign.cam = cam;
@@ -1608,12 +1838,44 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
     }
     if (foreign) {
         ++g_foreign.frames;
+        ++g_foreign.periodFrames;
+        g_foreign.lastTick = nowTick;
+        // Follow the slot camera's turn while it is your mouse's (see
+        // Foreign above); a jump bigger than any mouse turn in one frame,
+        // or a turn with the mouse still, is BG3's own and is left out.
+        if (srcTurnDeg > kTurnEpsDeg && g_foreign.goodRotOk) {
+            const bool mouse = srcTurnDeg <= kMaxTurnDegPerFrame && MouseMovedWithin(g_lua.foreignMouseMs);
+            if (g_foreign.follow && mouse) {
+                ApplyTurn(g_foreign.goodRot, srcPrev, srcNow);
+                g_foreign.followDeg += srcTurnDeg;
+            } else {
+                g_foreign.ignoredDeg += srcTurnDeg;
+            }
+        }
         if (g_foreign.goodRotOk) std::memcpy(rot, g_foreign.goodRot, sizeof(rot));
         // Every check below compares against this point: the character's
         // own (Lua root, raised to where the gameplay pivot sits).
         pivot[0] = g_lua.root[0]; pivot[1] = g_lua.root[1] + kPivotAboveFeet; pivot[2] = g_lua.root[2];
         pivotOk = true;
     } else {
+        if (g_foreign.easing) {
+            const double w = g_lua.foreignEaseMs > 0.f ? MsSince(g_foreign.easeT0) / g_lua.foreignEaseMs : 1.0;
+            if (g_lua.orbit || w >= 1.0) {
+                g_foreign.easing = false;
+            } else {
+                // The ease start turns with the mouse too, so only the
+                // leftover offset fades; mouse-look stays live throughout.
+                if (srcTurnOk && srcTurnDeg > kTurnEpsDeg && srcTurnDeg <= kMaxTurnDegPerFrame)
+                    ApplyTurn(g_foreign.easeFrom, srcPrev, srcNow);
+                const float a = static_cast<float>(w);
+                float e[3] = { g_foreign.easeFrom[0] + (rot[0] - g_foreign.easeFrom[0]) * a,
+                               g_foreign.easeFrom[1] + (rot[1] - g_foreign.easeFrom[1]) * a,
+                               g_foreign.easeFrom[2] + (rot[2] - g_foreign.easeFrom[2]) * a };
+                const float el = Len3(e);
+                if (el > 0.1f) { rot[0] = e[0] / el; rot[1] = e[1] / el; rot[2] = e[2] / el; }
+                else g_foreign.easing = false;
+            }
+        }
         std::memcpy(g_foreign.goodRot, rot, sizeof(rot));
         g_foreign.goodRotOk = true;
     }

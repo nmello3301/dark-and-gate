@@ -43,4 +43,9 @@ float GetPitchRad();
 void SetPaused(bool paused);
 bool IsPaused();
 
+// GetTickCount() of the last Tick() whose SDL relative-mouse delta was not
+// zero (0 = never). Pov.cpp's foreign-camera follow uses it, with its own
+// SDL motion-event time, to tell your mouse turns from BG3's own.
+unsigned long LastMoveTick();
+
 }  // namespace dag::hooks::mouselook

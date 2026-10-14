@@ -22,4 +22,16 @@ return {
     Dwarf        = 1.12,
     Halfling     = 0.90,
     Gnome        = 0.88,
+
+    -- Not a race tag (Shared/NativeBridge.lua only looks races up by tag).
+    -- Foreign camera (FullPov.lua -> tools/native Pov.cpp): in fights BG3
+    -- sometimes renders through a camera that follows nobody or looks at
+    -- someone else (brains fight at the crashed nautiloid, 2026-10-14: up to
+    -- ~4 s). First person stays on your head; this is what the view
+    -- direction does meanwhile. !dag_pov_foreign changes it for a session.
+    foreign_camera = {
+        follow   = true,   -- true: keep following your mouse; false: hold the last direction (the old freeze)
+        mouse_ms = 300,    -- BG3's camera turning counts as your mouse only this long after it moved (0 = always)
+        ease_ms  = 150,    -- back on you: ease this long onto BG3's camera instead of snapping (0 = snap)
+    },
 }

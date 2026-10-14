@@ -20,10 +20,13 @@
 --   !dag_pov_down <m>           extra forward shift when looking straight down (default 0.20)
 --   !dag_pov_dump               DLL logs every pose candidate to native.log
 --   !dag_pov_status             print the DLL's POV status line
+--   !dag_pov_foreign [follow|hold] [mouse_ms] [ease_ms]
+--                               view direction while BG3's camera is not on you
 
 local Log = Ext.Require("Shared/Log.lua")
 local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 local MPState = Ext.Require("Shared/MPState.lua")
+local FOREIGN = Ext.Require("data/camera.lua").foreign_camera or {}
 
 local M = {}
 
@@ -114,6 +117,13 @@ local S = {
     orbit = 0, orbit_seq = 0, orbit_dist = 3.5, orbit_up = 0.6, orbit_pmin = -10, orbit_pmax = 70,
     orbit_spin = 0, orbit_tilt = 0, orbit_rate = 120, orbit_tilt_rate = 60, orbit_vis = "0",
     orbit_x = 0, orbit_y = 0, orbit_z = 0,
+    -- Foreign camera (data/camera.lua foreign_camera, Pov.cpp Foreign): while
+    -- BG3 renders through a camera that is not on you, 1 = the view keeps
+    -- following your mouse, 0 = it holds the last direction; mouse window
+    -- and ease back, ms.
+    foreign_follow = (FOREIGN.follow == false) and 0 or 1,
+    foreign_mouse_ms = tonumber(FOREIGN.mouse_ms) or 300,
+    foreign_ease_ms = tonumber(FOREIGN.ease_ms) or 150,
 }
 
 -- Level loads and teleports (2026-10-12, fast travel): first person goes
@@ -344,10 +354,11 @@ local function writeState()
     if S.on and USE_BONE_ANCHOR then refreshCache(e, now) end
 
     local line = string.format(
-        "orbit=%d orbit_seq=%d orbit_dist=%.2f orbit_up=%.2f orbit_pmin=%.1f orbit_pmax=%.1f orbit_spin=%d orbit_tilt=%d orbit_rate=%.1f orbit_tilt_rate=%.1f orbit_vis=%s orbit_x=%.3f orbit_y=%.3f orbit_z=%.3f crouch=%d level_seq=%d on=%d active=%d menu=%d anim_inst=%s anim_rate=%.3f clip_inst=%s clip_rates=%s nclips=%s nocombatcam=%d combat_wasd=%d rec_inst=%s lift_objects=%d jump_mode=%d genome_capture=%d strafe_sign=%d rj_land_speed=%.2f rj_wall_h=%.2f rj_sync_guard=%d jump_wait_ms=%d rj_land_hold=%d mp_tag=%s mp_remote=%d head_smooth=%.2f move_walk=%.3f move_run=%.3f move_mode=%d move_accel=%.3f move_decel=%.3f move_turn=%.1f move_raw=%d move_hold=%d move_metrics=%d move_face_idle=%.1f move_face_air=%d loco_inst=%s loco_rate=%.2f loco_skip=%s visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
+        "orbit=%d orbit_seq=%d orbit_dist=%.2f orbit_up=%.2f orbit_pmin=%.1f orbit_pmax=%.1f orbit_spin=%d orbit_tilt=%d orbit_rate=%.1f orbit_tilt_rate=%.1f orbit_vis=%s orbit_x=%.3f orbit_y=%.3f orbit_z=%.3f crouch=%d level_seq=%d on=%d active=%d menu=%d foreign_follow=%d foreign_mouse_ms=%d foreign_ease_ms=%d anim_inst=%s anim_rate=%.3f clip_inst=%s clip_rates=%s nclips=%s nocombatcam=%d combat_wasd=%d rec_inst=%s lift_objects=%d jump_mode=%d genome_capture=%d strafe_sign=%d rj_land_speed=%.2f rj_wall_h=%.2f rj_sync_guard=%d jump_wait_ms=%d rj_land_hold=%d mp_tag=%s mp_remote=%d head_smooth=%.2f move_walk=%.3f move_run=%.3f move_mode=%d move_accel=%.3f move_decel=%.3f move_turn=%.1f move_raw=%d move_hold=%d move_metrics=%d move_face_idle=%.1f move_face_air=%d loco_inst=%s loco_rate=%.2f loco_skip=%s visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
         S.orbit, S.orbit_seq, S.orbit_dist, S.orbit_up, S.orbit_pmin, S.orbit_pmax, S.orbit_spin, S.orbit_tilt, S.orbit_rate,
         S.orbit_tilt_rate, S.orbit_vis, S.orbit_x, S.orbit_y, S.orbit_z, S.crouch, S.level_seq,
-        S.on and 1 or 0, active and 1 or 0, S.menu and 1 or 0, S.anim_inst, S.anim_rate, S.clip_inst, S.clip_rates, S.nclips, S.nocombatcam, S.combat_wasd, S.rec_inst, S.lift_objects, S.jump_mode, S.genome_capture, S.strafe_sign, S.rj_land_speed, S.rj_wall_h, S.rj_sync_guard, math.floor(S.jump_wait_ms + 0.5), S.rj_land_hold, S.mp_tag, S.mp_remote, S.head_smooth, S.move_walk, S.move_run, S.move_mode, S.move_accel, S.move_decel, S.move_turn, S.move_raw, S.move_hold, S.move_metrics, S.move_face_idle, S.move_face_air, S.loco_inst, S.loco_rate, S.loco_skip, (S.on and cache.visual) or "0", S.anchor, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
+        S.on and 1 or 0, active and 1 or 0, S.menu and 1 or 0,
+        S.foreign_follow, math.floor(S.foreign_mouse_ms + 0.5), math.floor(S.foreign_ease_ms + 0.5), S.anim_inst, S.anim_rate, S.clip_inst, S.clip_rates, S.nclips, S.nocombatcam, S.combat_wasd, S.rec_inst, S.lift_objects, S.jump_mode, S.genome_capture, S.strafe_sign, S.rj_land_speed, S.rj_wall_h, S.rj_sync_guard, math.floor(S.jump_wait_ms + 0.5), S.rj_land_hold, S.mp_tag, S.mp_remote, S.head_smooth, S.move_walk, S.move_run, S.move_mode, S.move_accel, S.move_decel, S.move_turn, S.move_raw, S.move_hold, S.move_metrics, S.move_face_idle, S.move_face_air, S.loco_inst, S.loco_rate, S.loco_skip, (S.on and cache.visual) or "0", S.anchor, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
         S.jump_seq, math.floor(S.jump_ms + 0.5), S.jump_h, S.jump_k,
         S.dump, cache.sock or -1, cache.skel or 0, x, y, z,
         (S.on and #cache.meshes > 0) and table.concat(cache.meshes, ",") or "0",
@@ -737,7 +748,24 @@ function M.Register()
         Log.Write("FullPov A/B: " .. abLine())
     end)
 
-    Log.Write("FullPov: registered !dag_full_pov / !dag_pov_eye / !dag_pov_anchor / !dag_pov_smooth / !dag_pov_down / !dag_pov_dump / !dag_pov_status")
+    -- While BG3 renders through a camera that is not on you (Pov.cpp
+    -- "foreign" camera): follow = the view keeps following your mouse,
+    -- hold = the last direction (the old behaviour). Session only; the
+    -- defaults live in data/camera.lua foreign_camera.
+    Ext.RegisterConsoleCommand("dag_pov_foreign", function(_, mode, mouseMs, easeMs)
+        if mode == "follow" or mode == "on" or mode == "1" then S.foreign_follow = 1
+        elseif mode == "hold" or mode == "off" or mode == "0" then S.foreign_follow = 0 end
+        if tonumber(mouseMs) then S.foreign_mouse_ms = math.max(0, tonumber(mouseMs)) end
+        if tonumber(easeMs) then S.foreign_ease_ms = math.max(0, tonumber(easeMs)) end
+        lastWrite = 0
+        pcall(writeState)
+        Log.Write(string.format("FullPov: foreign camera -> %s (mouse window %d ms, ease back %d ms; DLL foreignCam=%s)",
+            S.foreign_follow == 1 and "the view follows your mouse" or "the view holds your last direction",
+            math.floor(S.foreign_mouse_ms + 0.5), math.floor(S.foreign_ease_ms + 0.5),
+            tostring(M.StatusValue("foreignCam"))))
+    end)
+
+    Log.Write("FullPov: registered !dag_full_pov / !dag_pov_eye / !dag_pov_anchor / !dag_pov_smooth / !dag_pov_down / !dag_pov_dump / !dag_pov_status / !dag_pov_foreign")
 end
 
 return M

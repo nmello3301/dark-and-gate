@@ -50,6 +50,7 @@ std::atomic<float> _yawRad  { 0.0f };
 std::atomic<float> _pitchRad{ 0.0f };
 std::atomic<bool>  _paused  { true };
 std::atomic<bool>  _initialised{ false };
+std::atomic<DWORD> _lastMoveTick{ 0 };   // GetTickCount() of the last non-zero delta
 
 constexpr float kPitchClampRad = 1.396263f;  // 80° in radians — keeps
 // lookAt clear of the vertical singularity (±90° makes forward colinear
@@ -93,6 +94,7 @@ float GetPitchRad() { return _pitchRad.load(std::memory_order_relaxed); }
 void  SetPaused(bool p) { _paused.store(p, std::memory_order_relaxed); }
 bool  IsPaused()        { return _paused.load(std::memory_order_relaxed); }
 bool  IsInitialised()   { return _initialised.load(std::memory_order_relaxed); }
+unsigned long LastMoveTick() { return _lastMoveTick.load(std::memory_order_relaxed); }
 
 void MaybeInitFromForward(float fx, float fy, float fz)
 {
@@ -141,6 +143,7 @@ void Tick() {
     static int   _frameCount = 0;
     _dxSum += dx; _dySum += dy; ++_frameCount;
     const DWORD now = GetTickCount();
+    if (dx != 0 || dy != 0) _lastMoveTick.store(now, std::memory_order_relaxed);
     if (now - _lastDeltaLogMs > 1000) {
         _lastDeltaLogMs = now;
         dag::log::Writef(
