@@ -33,6 +33,7 @@ Estimate changes vs. 2026-10-07 originals:
 - Everything after M3 unchanged.
 - **2026-10-12 check-in:** the player side of M1b took four days, much faster than estimated, because BG3's own systems (genome events, class casting sets, the falling state) carried it. What's left is real-time AI (step 1) and the projectile system (step 4). Both carry engine unknowns, so the 5–8 week M1b estimate stays for now.
 - **2026-10-12 (late):** real-time fights, bows, cast cameras and the test kit are in; the developer set the AI pace (4 s for everyone) and the spell ranges (70 m / 30 m). Next focus after this round: multiplayer, then game balancing.
+- **2026-10-13 check-in:** a movement-feel day. The direct WASD controller, the real jump's flicker and bunny-hop fixes are verified. The melee cooldown and the body following the camera are built. M1b's remaining time is mostly playtest sign-off of the 2026-10-12 real-time pass, then Pass D (melee feel) and the Gate 1 fight. See the M1b status.
 
 The biggest risk to these numbers is animation work in M1 and M2, not code.
 
@@ -117,14 +118,65 @@ See **Archived (future)** below for bone reads, anim speed/cancel and ragdoll pu
 - goblins that fight back;
 - and it has to feel tight.
 
-### Status (2026-10-12): the player side works; the enemy side doesn't exist yet
+### Status (2026-10-13): fights run in real time; the backlog is sign-off, then melee feel
 
-What works in first person:
-- Gale walks, runs and jumps for real.
-- He swings a 3-hit chain.
-- He channels spells with BG3's own class casting animations, VFX and sounds, aims them along the crosshair, and pays mana for them.
+Fights no longer drop into turn-based. Brawl's loop drives every hostile group, and goblins act on our rules at their own pace. The player side has gone through several feel rounds. Most of what's left before Gate 1 is built but not yet signed off in a playtest, plus the melee feel pass (Pass D).
 
-What doesn't: as soon as the goblins turn hostile, BG3's turn-based combat takes over. The Brawl import (`Server/Brawl/`) is still quarantined (nothing requires it), so every test so far has been against idle goblins or spawned dummies. Real-time fights (Pass B) come right after the HUD + projectiles pass (developer, 2026-10-12).
+**Verified in-game:**
+- **Movement:**
+  - the direct WASD controller: full speed and a stop almost at once, the body facing the way you move;
+  - walk / run;
+  - the real jump: no take-off flicker, hops right after a landing, the bunny-hop grace, no recover after landing ("Works great!").
+- **Melee:** the 3-swing chain, the interim arc hit check, server-validated damage, BG3's hit reactions.
+- **Spells:**
+  - the hotbar on 1–0 and the mana pool;
+  - channelled casting with the class casting animations;
+  - Fire Bolt, Fireball and Misty Step at the crosshair;
+  - casting in a fight no longer moves the camera.
+- **Fights** (2026-10-12 evening):
+  - real time;
+  - WASD at exploration speed;
+  - bows and crossbows, goblin archers drawing too;
+  - the test kit (`!dag_chest`, `!dag_goblins`, `!dag_god`).
+- **Campaign:**
+  - F interaction fixes on the nautiloid: the vine climbs once, "[F]" only where BG3 allows a use, Myrnath talks;
+  - our HUD standing aside in the nautiloid's dialogues and cutscenes.
+
+**Built, waiting on a playtest** (the biggest block of work; each has its own playtest doc):
+- The real-time combat pass, Parts 1–11 ([playtest/realtime-combat.md](playtest/realtime-combat.md)):
+  - AI on our rules;
+  - shields, downed / revive, crouch-stealth;
+  - LookAt and F, V companions, the map;
+  - targeted and area spells.
+- Pass A leftovers: the live HUD and cast bar, server-owned projectiles (round 3), the Prepare Hotbar menu, the old step-0 checklist.
+- Later fixes:
+  - fight end;
+  - pace by difficulty;
+  - companions that stood idle;
+  - downed control, the game over and Give up;
+  - the head showing outside first person;
+  - `!dag_play`, `!dag_hp`;
+  - hardening in character creation.
+- From 2026-10-13:
+  - **the 1.5 s melee cooldown** (never swung in a session yet);
+  - **the body follows the camera** (the log looks right; feel not confirmed);
+  - the direct controller's metrics, sync and locomotion-clip checks;
+  - jumps going their full arc.
+
+**Not built yet, needed for Gate 1:**
+- Pass D, melee feel:
+  - the chain picked from the equipped weapon's family;
+  - swings stopping at walls;
+  - blood and spark at the hit point;
+  - the call on the interim arc vs the blade-path check.
+- Then the full Emerald Grove gate fight in DEV-SAVE, and the go / no-go.
+
+**Known limits:**
+- Standing on rocks was dropped (DESIGN, Campaign compatibility).
+- Enemies don't use height yet ("enemies and high ground", later).
+- The real jump, prepare VFX and casting animations are local only until M6.
+
+**After Gate 1's round** (developer, 2026-10-12): multiplayer, then game balancing.
 
 Lessons recorded:
 - `Ext.Require` only works at load time.
@@ -134,6 +186,9 @@ Lessons recorded:
 - Fire Bolt is `Projectile_FireBolt`.
 - `Osi.UseSpellAtPosition` takes 6 args.
 - Scripted `Osi.PlayAnimation` roots the walk and stalls in turn-based combat. BG3's own genome events don't.
+- A character's visible front is its Transform's local −Z (2026-10-13, body facing).
+- BG3's landing animation holds the fall state after a landing (`MSFalling +0x40`), which blocks WASD and the next jump ([spikes/real-lift.md](spikes/real-lift.md)).
+- Turn the body through BG3's own steering (the look-at state), never by writing the rotation: the steering keeps its own yaw and fights direct writes ([spikes/move-feel.md](spikes/move-feel.md)).
 
 ### Done (verified in-game)
 
@@ -352,7 +407,7 @@ Next (developer's list, 2026-10-12):
 
 ### Known issues (open)
 
-- Turn-based combat takes over when enemies turn hostile (step 1). Until then, swing animations are skipped in turn-based combat, and the camera can dip under the map while casting there.
+- Turn-based combat now only comes back with `!dag_rt off` (fights run in real time since the 2026-10-12 pass). In it, swing animations are skipped and the camera can dip under the map while casting.
 - Ending the prepare loop sound stops **all** of the caster's sounds at that moment (`Ext.Audio.Stop`).
 - Prepare VFX, casting animations and the real jump are local only; other players see none of it yet (M6).
 - Forcing the casting set rewrites `AnimationSet.Entries`, which drops the engine's hidden per-entry tag pointers until a reload. No visible effect seen so far.
