@@ -12,14 +12,17 @@ Estimates assume part-time work (evenings). They are guesses made on 2026-10-07 
 | M0 Spikes | Answers to the 11 engine questions; fork-Brawl decision | 1–3 weeks | 2026-10-07 | 2026-10-08 |
 | M1a Native plugin | C++ DLL exports: camera follow + mouselook, then bones, anim speed/cancel, hit normals | 3–5 weeks | 2026-10-07 | 2026-10-08 |
 | M1b Combat slice | Longsword chain, blade-path hits, Fire Bolt / Fireball / Misty Step, mana, hotbar, goblins on Brawl-adapted real-time AI | 5–8 weeks | 2026-10-08 | |
+| **MP Multiplayer (pulled forward)** | Co-op that feels like single-player for every player; up to 8 players / 16 party members with Party Limit Begone. MP-0 to MP-4 ([design/multiplayer.md](design/multiplayer.md)); Gate 1 / Pass D follow after MP-2 | | 2026-10-13 | |
 | **Gate 1** | **Combat feels tight** | | | |
 | M2 Combat breadth | All 10 weapon families, all spell types, blocking, ranged, first MP smoke test (spike 9 answer) | 6–10 weeks | | |
 | M3 Companion AI | Follow / Wait / Camp; archetypes on top of the Brawl adapter | 2–4 weeks | | |
 | M4 Native UI | Prepare Hotbar tab (spike 8 answer), first-person HUD, traversal highlights | 3–6 weeks | | |
 | M5 Act 1 pass | Encounter overrides, balance, saves, through Act 1 | 4–8 weeks | | |
-| M6 Multiplayer | 2–4 player co-op | 4–8 weeks | | |
+| M6 Multiplayer | ~~2–4 player co-op~~ Moved up as **MP** (DECISIONS 2026-10-13); what is left here is the Gate 2 co-op pass | 4–8 weeks | | |
 | **Gate 2** | **Act 1 in 2-player co-op** | | | |
 | M7 Acts 2–3 | Campaign pass, public release | 2–4 months | | |
+
+**2026-10-13: multiplayer moved up** (DECISIONS): it touches every system, so it's cheaper to build now than retrofit later. Gate 1 / Pass D follow after MP-2. See the MP section below.
 
 Estimate changes vs. 2026-10-07 originals:
 
@@ -232,9 +235,9 @@ HUD, using the developer's art ([design/hud.md](design/hud.md)):
   The vanilla HUD is hidden in POV and restored outside it, and in dialogue, menus and cutscenes. Commands: `!dag_hud on|off|vanilla`.
 - [ ] Spell cast bar (blue): fills over the cast time, shows READY when the loop starts, drains on cancel.
 - [ ] Bow draw bar (an amber arc around the crosshair): draw %, a 30 % marker and a full-draw tick (wired to the bows when they land).
-- [ ] **Bows (2026-10-12, built, not verified):** Q swaps melee / ranged; hold LMB = 3 s draw with BG3's draw clip stretched (`Client/Combat/Bow.lua`), release = arrow with drop through the projectile system (`Server/Combat/Bows.lua`, `data/bows.lua`); no shot below 30 %, damage and speed by draw; RMB cancels; 60 % speed while drawing; the ring fills. Crossbows: click + reload.
-- [ ] **NPC archers draw too** (3 s, the clip stretched on every client through the DLL's new multi-character clip rates `nclips`), facing the target, aiming at the release for lead + drop + error (`Server/Combat/NpcCombat.lua`).
-- [ ] **Test kit:** `!dag_chest` (every weapon type + shield + special arrows), `!dag_goblins [kind [n]...] [idle] | clear | list` (default scimitar, greataxe, archer, caster), `!dag_god [on|off|party|status]` (`Server/Combat/TestKit.lua`, `data/testkit.lua`).
+- [x] **Bows** (verified 2026-10-12 evening, signed off by the developer 2026-10-13): Q swaps melee / ranged; hold LMB = 3 s draw with BG3's draw clip stretched (`Client/Combat/Bow.lua`), release = arrow with drop through the projectile system (`Server/Combat/Bows.lua`, `data/bows.lua`); no shot below 30 %, damage and speed by draw; RMB cancels; 60 % speed while drawing; the ring fills. Crossbows: click + reload.
+- [x] **NPC archers draw too** (verified 2026-10-12 evening, signed off by the developer 2026-10-13) (3 s, the clip stretched on every client through the DLL's new multi-character clip rates `nclips`), facing the target, aiming at the release for lead + drop + error (`Server/Combat/NpcCombat.lua`).
+- [x] **Test kit** (verified 2026-10-12 evening, signed off by the developer 2026-10-13): `!dag_chest` (every weapon type + shield + special arrows), `!dag_goblins [kind [n]...] [idle] | clear | list` (default scimitar, greataxe, archer, caster), `!dag_god [on|off|party|status]` (`Server/Combat/TestKit.lua`, `data/testkit.lua`).
 - [ ] **Prepare Hotbar menu** (our own; DECISIONS 2026-10-12): opens beside BG3's I / Tab panels in first person, H pins it; bind any of the character's spells to 1..0, saved per character; the server checks the caster has the spell.
 - [ ] BG3 panels usable in first person: Tab (party view) and I (inventory) open their panels; the cursor is free while a panel is open; BG3's HUD comes back with it.
 
@@ -266,7 +269,7 @@ Checklist folded in from the old step 0. These items were written on 2026-10-09 
 - [ ] Swing or cast in the air: the action plays, the arc continues, and the landing waits for it.
 
 **Pass B: real-time fights (Brawl wiring), right after Pass A.**
-- [ ] Wire the Brawl import: strip Swarm Mode and Leaderboard (one commit each), add `BrawlAdapter.lua`, and run the RealTime pulse so the DEV-SAVE gate fight never drops into turn-based.
+- [x] Wire the Brawl import: strip Swarm Mode and Leaderboard (one commit each), add `BrawlAdapter.lua`, and run the RealTime pulse so the DEV-SAVE gate fight never drops into turn-based. *(fights run in real time: verified 2026-10-12 evening, signed off by the developer 2026-10-13)*
 - [ ] Goblins act on Brawl's AI as it is, with BG3 attack rolls through `Osi.UseSpell` (temporary, replaced in Pass C).
 - [ ] Our swings, spells, mana and jump keep working while the loop runs. Remove the "skip swing animations in turn-based" workaround.
 - [ ] Dialogue and cutscenes pause the fight and resume it, and the fight ends cleanly. Companions take part through Brawl; their M3 behaviour comes later.
@@ -371,7 +374,7 @@ Downed, pace and head fixes (2026-10-13, second nautiloid run: the helm fight; b
 
 Direct WASD controller (2026-10-13, DECISIONS 2026-10-13: "Replace BG3WASD's movement with our own direct controller"; [spikes/move-feel.md](spikes/move-feel.md), playtest [playtest/move-feel.md](playtest/move-feel.md); built, not verified):
 - [ ] **Metrics:** `!dag_move_metrics on|off` times start (90 % speed), stop (time + slide), reverse and strafe changes from the physical keys, logs every server correction (MOVEFEEL lines in native.log), and measures the client / server drift (MoveMetrics lines in client.log). The vanilla (BG3WASD) baseline goes in the spike note.
-- [ ] **Instant feel in first person:** full speed within about 0.06 s, stopped within 0.04 s with no slide, W↔S and W→D at once, no turn-in-place pause; diagonals not faster. The direction is the physical W/A/S/D on our own camera (`move.input raw`); the body turns with BG3's own steering (`move.turn engine`; instant facing fought BG3's steering and flickered, playtests 1–2, DECISIONS 2026-10-13).
+- [x] **Instant feel in first person** (verified 2026-10-13: "movement feels fluid", "engine is the clear winner"; signed off by the developer 2026-10-13): full speed within about 0.06 s, stopped within 0.04 s with no slide, W↔S and W→D at once, no turn-in-place pause; diagonals not faster. The direction is the physical W/A/S/D on our own camera (`move.input raw`); the body turns with BG3's own steering (`move.turn engine`; instant facing fought BG3's steering and flickered, playtests 1–2, DECISIONS 2026-10-13).
 - [ ] **No flicker:** walking and running in any direction keeps the model, camera and shadow steady (playtest 2: steady with `engine`); no twitch at the jump take-off, and every jump goes its full arc (playtest 3: 11 of 53 running jumps were cut off mid-air; build 4 holds the ground controller still under a jump and logs `RJUMP interrupted`).
 - [ ] **Everything else kept:** walls, slopes, stairs, doors, ledges and the real jump (take-off momentum, landing straight back into control); Shift walk / run, C crouch, casting ×0.7, bow draw, the speed knob; dialogue, menus, map, loot and downed release the input like before; Misty Step and other engine moves win.
 - [ ] **Sync:** 0 server corrections in 60 s of walking, drift under 0.1 m; enemies, hits and stealth see you where you are.
@@ -423,6 +426,41 @@ Next (developer's list, 2026-10-12):
 - **Auto-picked swing-1 clip was BG3's ranged attack (played nothing in melee stances) → the developer's picks (2026-10-09).**
 - **Animation recorder, first run:** the node's animation input is a FixedString, which is now decoded through the global string table.
 - **Not scheduled:** upper-body casting while walking (own blueprint with a masked layer, or an additive overlay). The full-body cast pose while walking is accepted (DECISIONS 2026-10-10).
+
+## MP — Multiplayer (co-op), pulled forward 2026-10-13
+
+"Multiplayer moved up: it touches every system, so it's cheaper to build now than retrofit later. Gate 1 / Pass D follow after MP-2." (developer, DECISIONS 2026-10-13)
+
+**Goals:**
+- co-op must feel like single-player for EVERY player, not just the host;
+- it must work with Party Limit Begone (16 party members, 8 players, including its exe patch).
+
+Principles P1-P5, the audit table, the net protocol and the test setup: [design/multiplayer.md](design/multiplayer.md). Each pass ends in `docs/playtest/mp-N.md`, every step done from the **joining** player's machine first, then as the host.
+
+**MP-0: research + architecture** (no gameplay code yet, except the diagnostics) — started 2026-10-13.
+- [ ] `docs/design/multiplayer.md`: how BG3 co-op works for us, PLB compatibility, the audit table, the net protocol, the version handshake, the test setup, the pass plan.
+- [ ] PLB's exe patch checked against every DLL hook and pattern (no overlap, all still resolve).
+- [ ] Diagnostics: `!dag_mp_status`, user-tagged logs, the version handshake, the DLL's exe detection (`exe: vanilla | patched (PLB)`) with the hook self-check.
+- [ ] Solo check: single-player unchanged.
+
+**MP-1: everyone in first person.**
+- [ ] Your own camera, movement, jump and crouch feel identical to single-player, as the joining player.
+- [ ] Each player sees the others move, jump and crouch smoothly (no hovering, sliding or ghost jumps).
+- [ ] 2 players, then a PLB party bigger than 4 if possible.
+
+**MP-2: combat per player.**
+- [ ] Melee, spells (with visible cast stages), bows, projectiles (visible to all; the host decides hits), mana and the hotbar.
+- [ ] Fights with all players + enemies; enemies target every player correctly.
+
+**MP-3:**
+- [ ] Downed / revive / bleed-out / spectate any ally (any count).
+- [ ] Stealth per player.
+- [ ] Companions split between players with per-player V cycles.
+- [ ] F interact + dialogue, map / fast travel.
+
+**MP-4: polish.**
+- [ ] Joining mid-session, reconnecting, the version check, lag tests, settings sync.
+- [ ] 5-8 players via LAN.
 
 ## M2 — Combat breadth
 

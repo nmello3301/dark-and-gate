@@ -5,7 +5,7 @@ A Baldur's Gate 3 mod that turns combat into first-person, real-time action: Dar
 - **Design:** `docs/DESIGN.md` is the source of truth. Read it before any feature work. Live version: https://claude.ai/code/artifact/d9d14ee0-9dac-4e0e-b924-4dc4b54b157a
 - **Decisions:** `docs/DECISIONS.md`. Append a line whenever a design question is settled.
 - **Progress:** `docs/ROADMAP.md`. Tick an item only after it is verified in-game, fill in milestone start and done dates, and record spike answers there. Keep it in sync whenever work finishes.
-- **Current milestone:** M1a (native plugin foundation). M0 closed 2026-10-08. The project is now GPL-3.0; the repo goes public on the first shared build. Brawl's real-time + AI subsystems are imported verbatim under `Server/Brawl/` and will be stripped + wired in during M1b.
+- **Current milestone:** MP (multiplayer, pulled forward 2026-10-13; principles and plan in `docs/design/multiplayer.md`), then Gate 1 / Pass D of M1b after MP-2. M0 closed 2026-10-08; M1a 2026-10-08. The project is now GPL-3.0; the repo goes public on the first shared build. Brawl's real-time + AI subsystems are imported verbatim under `Server/Brawl/` and will be stripped + wired in during M1b.
 
 ## Platform
 
