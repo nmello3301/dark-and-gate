@@ -9,10 +9,17 @@ local ClientNet = Ext.Require("Client/Net.lua")
 local Input     = Ext.Require("Client/Combat/Input.lua")
 local Overlay   = Ext.Require("Client/HUD/Overlay.lua")
 
+local MPFeatures = Ext.Require("Shared/MPFeatures.lua")   -- multiplayer kill switches
+
 local M = {}
 
 function M.Register()
     Input.AddKey("V", function()
+        if not MPFeatures.On("companion_v") then
+            Log.Write("Companions: V is off (host switch companion_v)")
+            pcall(Overlay.Toast, "V is off (host switch)", 2)
+            return
+        end
         ClientNet.Send(Net.Channels.CompanionMode, {})
         Log.Write("Companions: V -> next mode")
     end)

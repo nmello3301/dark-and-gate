@@ -16,6 +16,8 @@ local Log   = Ext.Require("Shared/Log.lua")
 local Net   = Ext.Require("Shared/Net.lua")
 local Party = Ext.Require("Server/Party.lua")
 
+local MPFeatures = Ext.Require("Shared/MPFeatures.lua")   -- multiplayer kill switches
+
 local M = {}
 
 local ORDER = { follow = "wait", wait = "camp", camp = "follow" }
@@ -80,6 +82,7 @@ end
 
 function M.Register()
     Ext.RegisterNetListener(Net.Channels.CompanionMode, function(_, _, peer)
+        if not MPFeatures.On("companion_v") then return end
         Ext.OnNextTick(function()
             local user = Party.UserFromPeer(peer)
             local leader = Party.Controlled(user)

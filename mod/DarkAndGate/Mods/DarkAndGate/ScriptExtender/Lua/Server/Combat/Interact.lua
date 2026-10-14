@@ -224,7 +224,8 @@ function M.Register()
                 -- A chest / corpse opens BG3's loot window: the client frees the
                 -- cursor until it closes (Osiris Closed, Esc, or walking away).
                 if okS and (kind == "open" or kind == "loot") then
-                    watching[target] = { peer = peer }
+                    watching[target] = watching[target] or { peers = {} }
+                    watching[target].peers[peer] = true
                     pcall(function() Ext.Net.PostMessageToUser(peer, Net.Channels.ContainerUI,
                         Ext.Json.Stringify({ open = true, target = target, name = name })) end)
                 end
@@ -271,8 +272,10 @@ function M.Register()
         local w = watching[u]
         if not w then return end
         watching[u] = nil
-        pcall(function() Ext.Net.PostMessageToUser(w.peer, Net.Channels.ContainerUI,
-            Ext.Json.Stringify({ open = false, target = u, why = "closed" })) end)
+        for peer in pairs(w.peers or {}) do
+            pcall(function() Ext.Net.PostMessageToUser(peer, Net.Channels.ContainerUI,
+                Ext.Json.Stringify({ open = false, target = u, why = "closed" })) end)
+        end
         Log.Write(string.format("Interact: %s closed -> first person back", tostring(displayName(u) or u)))
     end)
     Ext.RegisterNetListener(Net.Channels.InteractClassify, function(_, payload, peer)

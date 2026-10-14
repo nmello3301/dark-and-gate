@@ -26,6 +26,8 @@ local Interact  = Ext.Require("Client/Interact.lua")
 local TickBudget = Ext.Require("Shared/TickBudget.lua")
 local cfg       = Ext.Require("data/combat.lua")
 
+local MPFeatures = Ext.Require("Shared/MPFeatures.lua")   -- multiplayer kill switches
+
 local M = {}
 
 local D = cfg.downed
@@ -133,6 +135,10 @@ local function mmss(s) s = math.max(0, math.floor(s + 0.5)); return string.forma
 State.downedKey = function(key, down, rep)
     if keys[key] ~= nil then keys[key] = down; return false end
     if key == "SPACE" or key:lower():find("space", 1, true) then
+        if down and not rep and not MPFeatures.On("spectate") then
+            Log.Write("Downed: spectate is off (host switch)")
+            return true
+        end
         if down and not rep then
             local _, n = watched()
             watch = (watch % math.max(1, n)) + 1

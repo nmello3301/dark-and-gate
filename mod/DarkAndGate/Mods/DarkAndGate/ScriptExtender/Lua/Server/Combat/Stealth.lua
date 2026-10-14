@@ -30,6 +30,8 @@ local Damage      = Ext.Require("Server/Combat/Damage.lua")
 local Projectiles = Ext.Require("Server/Combat/Projectiles.lua")
 local cfg         = Ext.Require("data/stealth.lua")
 
+local MPFeatures = Ext.Require("Shared/MPFeatures.lua")   -- multiplayer kill switches
+
 local M = {}
 
 local debugOn = false
@@ -109,7 +111,7 @@ local function restore(npc)
 end
 
 local function tick()
-    if not cfg.enabled then return end
+    if not cfg.enabled or not MPFeatures.On("stealth") then return end
     local t = now()
     if t - lastTick < 1000 / cfg.update_hz then return end
     lastTick = t

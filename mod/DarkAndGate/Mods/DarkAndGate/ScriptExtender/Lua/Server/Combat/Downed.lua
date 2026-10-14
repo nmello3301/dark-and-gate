@@ -45,6 +45,8 @@ local Damage      = Ext.Require("Server/Combat/Damage.lua")
 local CastRequest = Ext.Require("Server/Combat/CastRequest.lua")
 local cfg         = Ext.Require("data/combat.lua")
 
+local MPFeatures = Ext.Require("Shared/MPFeatures.lua")   -- multiplayer kill switches
+
 local M = {}
 
 local PASSIVE = "DAG_BleedOut"
@@ -372,6 +374,7 @@ end
 
 -- Send the nearest free companion to each downed party member nobody revives.
 local function dispatchCompanions()
+    if not MPFeatures.On("revive") then return end   -- host switch: only players revive
     for target, st in pairs(downed) do
         if not st.reviver then
             local going = false
