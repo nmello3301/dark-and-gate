@@ -2,13 +2,15 @@
 # For the names of all available keys, see the bottom of this config file.
 # The ModHotkeys are region DEPENDANT!!! AZERTY keyboard users must adapt them!
 
-ToggleMovementMode = "key:capslock"
+ToggleMovementMode = ""
+# Dark and Gate: CapsLock unbound -- it cycled the camera mode and broke first-person POV. Was "key:capslock".
 # Key that toggles between Character and Camera movement mode.
 
 HoldMovementMode = ""
 # Switch between Character and Camera movement mode while you hold this key.
 
-ToggleWalkspeed = "key:insert"
+ToggleWalkspeed = "key:lshift"
+# Dark and Gate 2026-10-09: Left Shift toggles walk/run (walk is the default). Was "key:insert".
 # Toggles between walking and jogging movespeed.
 
 HoldWalkspeed = ""
@@ -18,7 +20,8 @@ HoldWalkspeed = ""
 ReloadConfig = "key:f11"
 # This will hot reload all config values and the inputconfig.
 
-ToggleAutoforward = "shift+key:w"
+ToggleAutoforward = ""
+# Dark and Gate 2026-10-09: unbound -- Shift is now the walk/run toggle, so Shift+W would also toggle autoforward. Was "shift+key:w".
 # Lets you move forward without holding Forward.
 # AZERTY users should set it to shift+key:z.
 
@@ -28,7 +31,8 @@ ToggleAutoforward = "shift+key:w"
 WalkSpeed = 0.3
 # 1.0 would be jog speed. 0.5 would be 50% of that. [0.0, 1.0]
 
-WalkingIsDefault = false
+WalkingIsDefault = true
+# Dark and Gate 2026-10-09: walk by default. Was false.
 # Whether the character walks, when the game starts up. [true, false]
 
 SwitchToWalkingAfterCombat = false
@@ -37,7 +41,8 @@ SwitchToWalkingAfterCombat = false
 
 [AutoToggleMovementMode]
 
-EnableAutoTogglingMovementMode = true
+EnableAutoTogglingMovementMode = false
+# Dark and Gate: off -- switching to Camera movement when combat starts would break WASD in first-person fights. Was true.
 # Automatically toggle movement mode depending on the context. 
 # Toggle to Camera movement, when combat starts, and back to Character movement, when combat ends.
 # [true, false]
