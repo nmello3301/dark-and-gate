@@ -159,7 +159,7 @@ if ($newestCpp -and $newestCpp.LastWriteTime -gt $dllItem.LastWriteTime.AddSecon
 }
 $dllVer = $dllItem.VersionInfo.ProductVersion
 if ($dllVer -and -not $dllVer.StartsWith($version)) {
-  Problem "DarkAndGate.dll says version $dllVer, meta.lsx says $version: set project(VERSION) in tools\native\CMakeLists.txt to match and rebuild."
+  Problem "DarkAndGate.dll says version $dllVer, meta.lsx says ${version}: set project(VERSION) in tools\native\CMakeLists.txt to match and rebuild."
 }
 
 if ($problems.Count -gt 0) {
