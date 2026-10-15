@@ -1,6 +1,6 @@
 # First-person HUD — design
 
-**Status:** design approved by the developer (2026-10-10). Replaces BG3's vanilla HUD while first person is on. The current ImGui crosshair + status line is a stand-in until this lands (M4, with the charge bars possibly earlier).
+**Status:** design approved by the developer (2026-10-10). The art in `hud/` was generated with OpenAI's image model from the developer's brief (credited in NOTICE and on the mod page). Replaces BG3's vanilla HUD while first person is on. The current ImGui crosshair + status line is a stand-in until this lands (M4, with the charge bars possibly earlier).
 
 ![Full layout](hud/hud-full-layout.png)
 

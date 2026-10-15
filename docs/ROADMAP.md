@@ -13,6 +13,7 @@ Estimates assume part-time work (evenings). They are guesses made on 2026-10-07 
 | M1a Native plugin | C++ DLL exports: camera follow + mouselook, then bones, anim speed/cancel, hit normals | 3–5 weeks | 2026-10-07 | 2026-10-08 |
 | M1b Combat slice | Longsword chain, blade-path hits, Fire Bolt / Fireball / Misty Step, mana, hotbar, goblins on Brawl-adapted real-time AI | 5–8 weeks | 2026-10-08 | |
 | **MP Multiplayer (pulled forward)** | Co-op that feels like single-player for every player; up to 8 players / 16 party members with Party Limit Begone. MP-0 to MP-4 ([design/multiplayer.md](design/multiplayer.md)); Gate 1 / Pass D follow after MP-2 | | 2026-10-13 | |
+| Release 0.1.0 alpha | First public build on Nexus Mods; repo public (DECISIONS 2026-10-15) | | 2026-10-15 | |
 | **Gate 1** | **Combat feels tight** | | | |
 | M2 Combat breadth | All 10 weapon families, all spell types, blocking, ranged, first MP smoke test (spike 9 answer) | 6–10 weeks | | |
 | M3 Companion AI | Follow / Wait / Camp; archetypes on top of the Brawl adapter | 2–4 weeks | | |
@@ -463,6 +464,17 @@ Principles P1-P5, the audit table, the net protocol and the test setup: [design/
 **MP-4: polish.**
 - [ ] Joining mid-session, reconnecting, the version check, lag tests, settings sync.
 - [ ] 5-8 players via LAN.
+
+## Release 0.1.0 alpha (Nexus Mods), started 2026-10-15
+
+The first public build (DECISIONS 2026-10-15). Steps in [release.md](release.md) "Nexus release"; page text and form values in [nexus/](nexus/upload-sheet.md).
+
+- [x] Release files built by `scripts/make-release.ps1`: mod zip, native zip, recommended settings; lint clean.
+- [ ] Smoke test with the release files on DEV-SAVE: BG3 Mod Manager imports the mod zip, the log shows `mod_version 0.1.0.0`, `!dag_play` works, one goblin fight.
+- [ ] Repo public on GitHub.
+- [ ] `DarkAndGate.dll` and the native zip submitted to Microsoft (release.md "Antivirus false positives").
+- [ ] Nexus page published; its link in README.md; `v0.1.0` tag pushed.
+- [ ] tinybike told ([tinybike-message.md](tinybike-message.md)).
 
 ## M2 — Combat breadth
 

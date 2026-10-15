@@ -26,10 +26,18 @@ This mod depends on, but does not include:
 
 - Script Extender (https://github.com/Norbyte/bg3se), by Norbyte. MIT.
 - Native Camera Tweaks (https://github.com/ersh1/BG3_NativeCameraTweaks), by ersh1.
-- Ch4nKyy's Mod Loader (version.dll).
-- WASD Character Movement, by its author.
-- Mod Configuration Menu, by Volitio.
-- AnimationUnlocker, by its author.
+- Ch4nKyy's Mod Loader (version.dll; https://github.com/Ch4nKyy/Ch4nKyys_Mod_Loader).
+- WASD Character Movement (Nexus Mods 781), by its author.
+- Mod Configuration Menu (Nexus Mods 9162), by Volitio.
+- AnimationUnlocker (Nexus Mods 16058), by its author.
+
+AI disclosure:
+
+- Dark and Gate is designed, directed and playtested by Nick. Most of its
+  code was written with Anthropic's Claude (Claude Code).
+- The HUD art (docs/design/hud/, sliced into tools/hud/out/ and the
+  DAG_HUD_Atlas texture) was generated with OpenAI's image model from the
+  developer's brief.
 
 Baldur's Gate 3 and all associated assets are property of Larian Studios.
 This mod reimplements mechanics from Dark and Darker and Blade & Sorcery

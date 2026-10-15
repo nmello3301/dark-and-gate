@@ -27,7 +27,10 @@ param(
   # Default: poll every 2s, up to 5 minutes, until BG3 exits. The pak is
   # file-locked while BG3 holds it open, so there's no point in doing anything
   # else -- waiting is strictly nicer than throwing and asking the dev to rerun.
-  [switch]$NoWait
+  [switch]$NoWait,
+  # -PackOnly: write build\DarkAndGate.pak (and the stamp) but don't install
+  # it, so BG3 may keep running (scripts\make-release.ps1 packages from it).
+  [switch]$PackOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -44,7 +47,7 @@ if (-not (Test-Path -LiteralPath $divine))    { throw "divine.exe not found at: 
 if (-not (Test-Path -LiteralPath $modSource)) { throw "Mod source folder not found: $modSource" }
 
 $bg3Running = { Get-Process -Name bg3, bg3_dx11 -ErrorAction SilentlyContinue }
-if (& $bg3Running) {
+if (-not $PackOnly -and (& $bg3Running)) {
   if ($NoWait) {
     throw "Close Baldur's Gate 3 before deploying. (-NoWait set.)"
   }
@@ -82,6 +85,11 @@ Write-Host "Mod build stamp: $modBuild" -ForegroundColor Cyan
 Write-Host "Packing $modSource -> $pakOut" -ForegroundColor Cyan
 & $divine --game bg3 --action create-package --source $modSource --destination $pakOut --loglevel warn
 if ($LASTEXITCODE -ne 0) { throw "divine.exe exited with code $LASTEXITCODE" }
+
+if ($PackOnly) {
+  Write-Host "`n-PackOnly: packed to $pakOut, not installed." -ForegroundColor Green
+  return
+}
 
 Write-Host "Installing to $installedPak" -ForegroundColor Cyan
 Copy-Item -LiteralPath $pakOut -Destination $installedPak -Force

@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Slice the developer's flattened HUD art into layers (docs/design/hud.md).
+"""Slice the flattened HUD art (the developer's design, generated with OpenAI's image
+model) into layers (docs/design/hud.md).
 
     python tools/hud/slice.py            # writes tools/hud/out/*.png, preview.png,
                                          # and mod/.../data/hud_layout.lua
 
-Sources (developer's own art, docs/design/hud/):
+Sources (docs/design/hud/; AI-generated, credited in NOTICE):
   hud-full-layout.png  2172x724: orbs, hotbar strip, potion slots, XP bar (high res)
   hud-asset-sheet.png  1536x1024: the 5 % orbs, used as the "empty" glass
 

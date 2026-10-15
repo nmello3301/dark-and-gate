@@ -1,0 +1,81 @@
+[center][size=6][b]Dark and Gate[/b][/size]
+[size=4]First-person, real-time action combat for Baldur's Gate 3[/size][/center]
+
+[quote][b]Alpha (0.1.0).[/b] This is an early, work-in-progress build. Expect bugs, rough edges and balance that changes between versions. Play on a new save or a copy of one, never on a playthrough you care about.[/quote]
+
+Swing your weapon, cast BG3's own spells at the crosshair, draw a bow, and fight enemies that move and attack in real time, in first person.
+
+[size=5][b]What it does[/b][/size]
+[list]
+[*][b]First person[/b] with mouse-look. Your body turns with the camera.
+[*][b]Real-time fights.[/b] No turns: enemies and companions act on their own clocks, on tinybike's Brawl engine.
+[*][b]Melee:[/b] left click swings a 3-hit chain, with head, torso and limb hit zones.
+[*][b]Spells:[/b] BG3's own spells on a 1–0 hotbar. Press the key to channel the spell, then left click releases it at the crosshair. A mana pool that refills over time replaces spell slots.
+[*][b]Bows and crossbows:[/b] hold to draw, release to shoot, and arrows drop over distance. Enemy archers draw the same way.
+[*][b]Movement:[/b] a real jump, walk / run, and crouch to sneak.
+[*][b]Downed and revive:[/b] bleed out at 0 HP; hold F next to an ally to revive them.
+[*][b]Companions:[/b] Follow, Wait or go to Camp (V).
+[*][b]HUD:[/b] health and mana orbs, the hotbar, and cast / draw bars.
+[*][b]Co-op[/b] (early): every player gets first person and real-time combat, and the host decides every hit.
+[/list]
+BG3's spells stay BG3's: Dark and Gate changes how they're aimed, timed and paid for, never what they do.
+
+[size=5][b]Requirements[/b][/size]
+Windows PC, Steam version, [b]DirectX 11[/b] (the native part doesn't work under Vulkan). Tested on game version 4.1.1.7631656.
+[list]
+[*][url=https://github.com/Norbyte/bg3se/releases]Script Extender[/url] (v33, the updater DWrite.dll)
+[*][url=https://www.nexusmods.com/baldursgate3/mods/25474]Ch4nKyy's Mod Loader[/url] 1.0.0. Don't install Native Mod Loader as well.
+[*][url=https://www.nexusmods.com/baldursgate3/mods/781]WASD Character Movement[/url] 1.9.9
+[*][url=https://www.nexusmods.com/baldursgate3/mods/945]Native Camera Tweaks[/url] 2.4.5 (main file)
+[*][url=https://www.nexusmods.com/baldursgate3/mods/9162]Mod Configuration Menu[/url] 1.41.0
+[*][url=https://www.nexusmods.com/baldursgate3/mods/16058]AnimationUnlocker[/url] 1.0.5.5
+[*][url=https://github.com/LaughingLeader/BG3ModManager/releases]BG3 Mod Manager[/url]
+[/list]
+
+[size=5][b]Install[/b][/size]
+Two downloads (always the same version of both), plus optional settings:
+[list=1]
+[*]Install every requirement above. The game's [b]bin[/b] folder: in Steam, right-click BG3 > Manage > Browse local files > bin. Create [b]bin\NativeMods[/b] if it isn't there.
+[*][b]Mod file:[/b] drag [i]DarkAndGate-0.1.0-mod.zip[/i] into BG3 Mod Manager. Put DarkAndGate in the Active list [b]below[/b] Mod Configuration Menu and AnimationUnlocker, then click Export Order to Game.
+[*][b]Native file:[/b] extract [i]DarkAndGate-0.1.0-native.zip[/i] into the game folder, so that you end up with [b]bin\NativeMods\DarkAndGate.dll[/b].
+[*][b]Recommended settings (optional):[/b] first back up your [b]BG3NativeCameraTweaks.toml[/b] and [b]BG3WASD.toml[/b] in bin\NativeMods. Then extract [i]DarkAndGate-0.1.0-recommended-settings.zip[/i] into the game folder.
+[*]In [b]bin\ScriptExtenderSettings.json[/b], set [b]"CreateConsole": true[/b] (create the file if it doesn't exist: [b]{ "CreateConsole": true }[/b]).
+[*]Launch with [b]DirectX 11[/b] and load a game. In the Script Extender console, press Enter, type [b]client[/b], press Enter, then type [b]!dag_play[/b]. It turns on by itself from then on.
+[/list]
+The README in the download has the controls, multiplayer notes, troubleshooting and the uninstall steps.
+
+[size=5][b]Controls[/b][/size]
+[list]
+[*]WASD move, mouse look and aim, Left Shift walk / run, Space jump, C crouch
+[*]Left click: swing, release a channelled spell, or hold to draw a bow
+[*]Right click: cancel the spell; 1–0: hotbar (the same key again cancels)
+[*]Q: swap melee / ranged; R: reload the crossbow; T / Y: health / mana potion
+[*]F: interact, or hold to revive; V: companion mode; M: map; middle mouse: free the cursor
+[*]I or Tab: BG3's panels with the Prepare Hotbar menu beside them (H pins it)
+[/list]
+
+[size=5][b]Uninstall[/b][/size]
+[b]First[/b], load your save, type [b]!dag_rt off[/b] in the console and save. The mod turns BG3's reaction prompts off and keeps your own reaction settings in the save; this gives them back. Then deactivate DarkAndGate in BG3 Mod Manager and export, and delete bin\NativeMods\DarkAndGate.dll.
+
+[size=5][b]Known issues[/b][/size]
+[list]
+[*]Only Act 1 has been played with it (the nautiloid through the Emerald Grove). Later areas are untested.
+[*]Co-op is built but has had very little testing so far; it's what's being worked on next.
+[*]Bards and Sorcerers use a default casting animation.
+[*]Windows Security can flag Ch4nKyy's loader (version.dll) as Trojan:Win32/Posilod.CA!cl, a machine-learning guess about DLL loaders, not a known virus. DarkAndGate.dll is new and unsigned, so it may be flagged too. If a file disappears, restore it from Windows Security > Protection history. Both are open source.
+[/list]
+
+[size=5][b]Bug reports[/b][/size]
+Use the Bugs tab, or [url=https://github.com/nmello3301/dark-and-gate/issues]GitHub issues[/url]. Attach [b]client.log[/b] and [b]server.log[/b] from [i]%LOCALAPPDATA%\Larian Studios\Baldur's Gate 3\Script Extender\DarkAndGate\[/i]. Type [b]!dag_note what happened[/b] in the console the moment something goes wrong, so it's easy to find in the log.
+
+[size=5][b]Credits[/b][/size]
+[list]
+[*][url=https://github.com/tinybike/Brawl]Brawl[/url] by tinybike (GPL-3.0): the real-time fight engine and AI loop are imported from it. Thank you for solving the hardest part.
+[*]Script Extender by Norbyte, Native Camera Tweaks by ersh1, Ch4nKyy's Mod Loader by Ch4nKyy, Mod Configuration Menu by Volitio, and the authors of WASD Character Movement and AnimationUnlocker.
+[*]Approaches learned from QSAT and BG3AF.
+[*]Inspired by Dark and Darker and Blade & Sorcery. No assets, animations or sounds from either game are used.
+[/list]
+[b]AI disclosure:[/b] Dark and Gate is designed, directed and playtested by Nick. Most of its code was written with Anthropic's Claude (Claude Code). The HUD art was generated with OpenAI's image model.
+
+[size=5][b]Source and license[/b][/size]
+Free and open source under GPL-3.0-or-later: [url=https://github.com/nmello3301/dark-and-gate]github.com/nmello3301/dark-and-gate[/url]. Baldur's Gate 3 and its assets are the property of Larian Studios.

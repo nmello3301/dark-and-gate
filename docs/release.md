@@ -2,6 +2,19 @@
 
 What to do with every build that leaves this PC: a friend zip (`scripts\make-friend-package.ps1`) or a public release.
 
+## Nexus release
+
+A public build goes to Nexus Mods as two plain files plus optional settings, installed by hand (DECISIONS 2026-10-15).
+
+1. **Version.** Bump `Version64` in `meta.lsx` (both places; `major<<55 | minor<<47 | revision<<31 | build`, so 0.1.0.0 = 140737488355328) and `project(VERSION)` in `tools/native/CMakeLists.txt`. Add a `CHANGELOG.md` entry naming the tested game version.
+2. **Commit, then build from the clean tree:** `scripts\pov-build-deploy.ps1` (DLL + pak), or `scripts\deploy.ps1` when only `mod/` changed. The stamps must not say `+dirty`.
+3. **Package:** `scripts\make-release.ps1` writes `build\release\`. It stops when the pak or DLL doesn't match the commit, or the DLL's version doesn't match `meta.lsx`.
+4. **Lint** the extracted zips with the universal-modder `um publish check` (no game files, keys or decompiled code).
+5. **Smoke test with the release files**, as a player would: remove the installed pak, import the mod zip in BG3 Mod Manager, export, load DEV-SAVE, `!dag_play`, one fight.
+6. **Antivirus:** submit `DarkAndGate.dll` and the native zip to Microsoft (below), before announcing.
+7. **Upload** with [nexus/upload-sheet.md](nexus/upload-sheet.md), including Nexus's AI tags. Publishing is the developer's click.
+8. **Tag** the commit (`v<version>`) and push the tag.
+
 ## Antivirus false positives
 
 **What happened (2026-10-13).** Windows Defender quarantined Ch4nKyy's Mod Loader (`bin\version.dll`) three times as `Trojan:Win32/Posilod.CA!cl`: once in `downloaded_mods\`, twice in the game's `bin`. `!cl` means a cloud machine-learning verdict, not a known-malware signature, and Posilod is Microsoft's name for DLL sideloading (a DLL named like a Windows file placed next to a program), which is how every native mod loader works. Each time the process that opened the file was `powershell.exe` (our scripts reading it); the game had loaded the same DLL for days without a detection. Our own files (`DarkAndGate.dll`, the friend zips, INSTALL.bat, the `.ps1` scripts) were never flagged.
