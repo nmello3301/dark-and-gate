@@ -37,7 +37,7 @@ A public build goes to Nexus Mods as two plain files plus optional settings, ins
    - never open `version.dll`, only stat it: opening it from a script is what triggered the detections above.
 4. Optional: look the SHA-256 up on VirusTotal by hash. Uploading a file shares it with every vendor, so only upload public builds.
 
-## Code signing (before the first public release)
+## Code signing (before the first non-alpha release; 0.1.0 alpha ships unsigned, DECISIONS 2026-10-15)
 
 An unsigned DLL starts every build with no reputation. An Authenticode signature lets SmartScreen and Defender reputation follow the publisher across builds instead.
 

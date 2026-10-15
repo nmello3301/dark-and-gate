@@ -471,7 +471,8 @@ The first public build (DECISIONS 2026-10-15). Steps in [release.md](release.md)
 
 - [x] Release files built by `scripts/make-release.ps1` (2026-10-15, git 48724bf, pak 5b4608a, DLL 1a10829): mod zip, native zip, recommended settings. `um publish check`: the pak and mod zip pass; its "copied verbatim" hits on the native and settings zips are our own DLL and configs, already installed in `bin`.
 - [ ] Smoke test with the release files on DEV-SAVE: BG3 Mod Manager imports the mod zip, the log shows `mod_version 0.1.0.0`, `!dag_play` works, one goblin fight.
-- [ ] Repo public on GitHub.
+- [x] Repo public on GitHub (2026-10-15; GitHub detects GPL-3.0). Commits pushed.
+  - First smoke-test attempt (2026-10-15) still ran the old pak (log: `mod 1.0.0.0 build 1a10829`): the mod zip wasn't imported. Redo before publishing.
 - [ ] `DarkAndGate.dll` and the native zip submitted to Microsoft (release.md "Antivirus false positives").
 - [ ] Nexus page published; its link in README.md; `v0.1.0` tag pushed.
 - [ ] tinybike told ([tinybike-message.md](tinybike-message.md)).
