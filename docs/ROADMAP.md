@@ -469,7 +469,7 @@ Principles P1-P5, the audit table, the net protocol and the test setup: [design/
 
 The first public build (DECISIONS 2026-10-15). Steps in [release.md](release.md) "Nexus release"; page text and form values in [nexus/](nexus/upload-sheet.md).
 
-- [x] Release files built by `scripts/make-release.ps1`: mod zip, native zip, recommended settings; lint clean.
+- [x] Release files built by `scripts/make-release.ps1` (2026-10-15, git 48724bf, pak 5b4608a, DLL 1a10829): mod zip, native zip, recommended settings. `um publish check`: the pak and mod zip pass; its "copied verbatim" hits on the native and settings zips are our own DLL and configs, already installed in `bin`.
 - [ ] Smoke test with the release files on DEV-SAVE: BG3 Mod Manager imports the mod zip, the log shows `mod_version 0.1.0.0`, `!dag_play` works, one goblin fight.
 - [ ] Repo public on GitHub.
 - [ ] `DarkAndGate.dll` and the native zip submitted to Microsoft (release.md "Antivirus false positives").
