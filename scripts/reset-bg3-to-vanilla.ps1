@@ -43,7 +43,7 @@ Add-Move (Join-Path $larian 'Script Extender')                              'App
 # 2. Files left in the game folder by Vortex, the old Script Extender and Native Mod Loader
 Add-Move (Join-Path $GameDir 'vortex.deployment.dinput.json') 'Game'
 Add-Move (Join-Path $GameDir 'Data\Mods')                     'Game\Data'
-foreach ($name in 'DWrite.dll', 'ScriptExtenderSettings.json', 'NativeMods', 'NativeModLoader.log',
+foreach ($name in 'DWrite.dll', 'version.dll', 'ScriptExtenderSettings.json', 'NativeMods', 'NativeModLoader.log',
                   'bink2w64_original.dll', 'bink2w64.dll.vortex_backup',
                   'bg3.exe.backup', 'bg3_dx11.exe.backup', 'steam_appid.txt') {
   Add-Move (Join-Path $bin $name) 'Game\bin'

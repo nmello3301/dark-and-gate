@@ -19,10 +19,6 @@
       bin/NativeMods/BG3NativeCameraTweaks.toml config\native\
       bin/NativeMods/BG3WASD.toml               config\native\
 
-    DarkAndGate-<ver>-installer.zip             optional file: INSTALL.bat + install.ps1 +
-                                                README.txt; installs the prerequisites and the
-                                                mod from a folder of downloads
-
     DarkAndGate-<ver>-SHA256.txt                hashes for the release notes and the
                                                 Microsoft submission (docs/release.md)
 
@@ -228,13 +224,6 @@ try {
   $zips += Join-Path $OutDir "$base-recommended-settings.zip"
   New-ZipFromFolder $s $zips[-1]
 
-  # Optional file: the one-click installer (scripts\release\installer): put
-  # it next to the downloads, run INSTALL.bat (developer 2026-10-16).
-  $s = Join-Path $tmp 'installer'
-  New-Item -ItemType Directory -Force -Path $s | Out-Null
-  foreach ($name in 'INSTALL.bat', 'install.ps1', 'README.txt') { Copy-Item -LiteralPath (Join-Path $ProjectRoot "scripts\release\installer\$name") -Destination (Join-Path $s $name) }
-  $zips += Join-Path $OutDir "$base-installer.zip"
-  New-ZipFromFolder $s $zips[-1]
 } finally {
   Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }

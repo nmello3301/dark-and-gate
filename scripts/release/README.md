@@ -36,7 +36,6 @@ Windows PC, Steam version of BG3, **DirectX 11** (the native part doesn't work u
 
 ## Install
 
-**One-click option:** download the requirements below and Dark and Gate's zips into one folder, extract `DarkAndGate-<version>-installer.zip` into that same folder, close the game and double-click `INSTALL.bat`. It installs everything, sets the load order, turns Dark and Gate on and backs up whatever it replaces (its `README.txt` has the details). Or install by hand:
 
 Dark and Gate comes as two downloads, plus optional settings. Always use the same version of both.
 
