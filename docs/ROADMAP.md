@@ -526,6 +526,13 @@ The developer asked for a v0.4 GitHub release of everything since 0.1.0 (Meta-Po
 - [x] Built from the clean commit a83f18b (DLL + pak stamps clean), packaged (`scripts\make-release.ps1`), linted (`um publish check`: mod zip PASS; the known "copied verbatim" hits on our own configs), tagged `v0.4.0`, GitHub pre-release with the three zips + SHA256: https://github.com/nmello3301/dark-and-gate/releases/tag/v0.4.0 *(2026-10-16)*
 - [ ] Developer: smoke test with the release files; Microsoft submission for the DLL; Nexus upload (docs/release.md steps 5-7).
 
+## Release 0.4.1 alpha (local, friends), 2026-10-16
+
+The developer asked for the latest build in the friends' installer folder. Not tagged, not on GitHub or Nexus.
+
+- [ ] **Hotbar kept after loading a save** (developer 2026-10-16: "every time I reload a save my hotbar gets reset"). A play-mode retry left over from before the character was known replaced the saved layout two seconds after loading it; `load()` now clears it (8f8291d).
+- [x] Version 0.4.1 (e7e5bef); DLL and pak built from it and installed on the developer's PC, `make-release.ps1` zips in `build\release`, swapped into `Desktop\DaG install test` (the 0.4.0 zips removed). The installer's dry run there: everything UP TO DATE, so the developer and friends run identical mod_build / dll_build for the multiplayer handshake. *(2026-10-16)*
+
 ## M2 — Combat breadth
 
 - [ ] All 10 weapon families with their chains
