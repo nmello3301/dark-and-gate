@@ -523,7 +523,7 @@ Built 2026-10-15 (DECISIONS); tick after it is seen in-game.
 The developer asked for a v0.4 GitHub release of everything since 0.1.0 (Meta-Points, RPG Mode, the 2026-10-15/16 fixes).
 
 - [x] Version 0.4.0 in `meta.lsx` and the DLL; CHANGELOG and Nexus docs updated.
-- [ ] Built from the clean commit, packaged (`scripts\make-release.ps1`), linted, tagged `v0.4.0`, GitHub release with the three zips + SHA256.
+- [x] Built from the clean commit a83f18b (DLL + pak stamps clean), packaged (`scripts\make-release.ps1`), linted (`um publish check`: mod zip PASS; the known "copied verbatim" hits on our own configs), tagged `v0.4.0`, GitHub pre-release with the three zips + SHA256: https://github.com/nmello3301/dark-and-gate/releases/tag/v0.4.0 *(2026-10-16)*
 - [ ] Developer: smoke test with the release files; Microsoft submission for the DLL; Nexus upload (docs/release.md steps 5-7).
 
 ## M2 — Combat breadth
