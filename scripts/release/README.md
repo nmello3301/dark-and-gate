@@ -6,7 +6,7 @@ First-person, real-time action combat for Baldur's Gate 3. Swing your weapon, ca
 
 ## What it does
 
-- **First person** with mouse-look. Your body turns with the camera.
+- **First person** with mouse-look. Your body turns with the camera. Mouse-look speed: the "Mouse-look sensitivity" slider on Dark and Gate's Camera tab in Mod Configuration Menu.
 - **Real-time fights.** No turns: enemies and companions act on their own clocks. The real-time engine is Brawl's (credits below).
 - **Melee:** left click swings a 3-hit chain. Hits are checked along your swing in front of you, with head, torso and limb zones.
 - **Spells:** BG3's own spells on a 1–0 hotbar. Press the key to channel the spell (2 seconds), then left click releases it at the crosshair. A mana pool that refills over time replaces spell slots.

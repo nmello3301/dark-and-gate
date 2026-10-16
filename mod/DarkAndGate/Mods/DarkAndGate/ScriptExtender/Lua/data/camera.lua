@@ -29,6 +29,12 @@ return {
     -- someone else (brains fight at the crashed nautiloid, 2026-10-14: up to
     -- ~4 s). First person stays on your head; this is what the view
     -- direction does meanwhile. !dag_pov_foreign changes it for a session.
+    -- Mouse-look sensitivity (developer 2026-10-16): how fast the first-person
+    -- camera turns with the mouse, x BG3's own rotation speed. The player sets
+    -- it with the slider on Dark and Gate's page in Mod Configuration Menu
+    -- (MCM_blueprint.json "look_sensitivity", same range); this is the value
+    -- without MCM. !dag_look_sens <x> overrides it for a session.
+    look_sensitivity = { default = 1.0, min = 0.1, max = 3.0 },
     foreign_camera = {
         follow   = true,   -- true: keep following your mouse; false: hold the last direction (the old freeze)
         mouse_ms = 300,    -- BG3's camera turning counts as your mouse only this long after it moved (0 = always)

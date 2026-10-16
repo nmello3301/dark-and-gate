@@ -26,7 +26,7 @@ The mod is a Windows PC-only BG3 mod installed through BG3 Mod Manager; it needs
 | --- | --- | --- |
 | [Script Extender](https://github.com/Norbyte/bg3se) | Lua runtime, client/server split, net messages | No, required install |
 | Ch4nKyy's Mod Loader + Native Camera Tweaks | Loads our DLL; first-person camera placement | No, required install |
-| Dark and Gate native plugin | Camera follow + mouse-look, real jump, direct WASD controller, animation play rate | Yes (ours) |
+| Dark and Gate native plugin | Camera follow + mouse-look (sensitivity slider in MCM), real jump, direct WASD controller, animation play rate | Yes (ours) |
 | WASD Character Movement | Keyboard movement keys, walk / run toggle, camera rotation and its other features; in first person our DLL's direct controller does the moving (DECISIONS 2026-10-13; its own movement stays as the `vanilla` mode) | No, required install |
 | AnimationUnlocker | Custom attack animations | No, required install |
 | Mod Configuration Menu (MCM) | Settings and keybinds | No, required install |

@@ -27,6 +27,8 @@ local Log = Ext.Require("Shared/Log.lua")
 local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 local MPState = Ext.Require("Shared/MPState.lua")
 local FOREIGN = Ext.Require("data/camera.lua").foreign_camera or {}
+local SENS = Ext.Require("data/camera.lua").look_sensitivity or {}
+local MCM = Ext.Require("Shared/MCM.lua")
 
 local M = {}
 
@@ -125,7 +127,32 @@ local S = {
     foreign_follow = (FOREIGN.follow == false) and 0 or 1,
     foreign_mouse_ms = tonumber(FOREIGN.mouse_ms) or 300,
     foreign_ease_ms = tonumber(FOREIGN.ease_ms) or 150,
+    -- Mouse-look sensitivity (Pov.cpp OurFilter scales the mouse motion while
+    -- Camera Rotate is held): the MCM slider, else data/camera.lua.
+    look_sens = tonumber(SENS.default) or 1.0,
 }
+
+-- The sensitivity to send: !dag_look_sens override > MCM slider > data.
+-- MCM is asked at most every SENS_POLL_MS (a slider drag shows within that).
+local sensOverride = nil
+local sensAt, sensLogged = -1e9, nil
+local SENS_POLL_MS = 250
+local function lookSens(now)
+    if now - sensAt < SENS_POLL_MS then return S.look_sens end
+    sensAt = now
+    local lo, hi = tonumber(SENS.min) or 0.1, tonumber(SENS.max) or 3.0
+    local v, src = sensOverride, "!dag_look_sens"
+    if not v then v, src = tonumber(MCM.Setting("look_sensitivity")), "MCM" end
+    if not v then v, src = tonumber(SENS.default) or 1.0, "data/camera.lua" end
+    v = math.max(lo, math.min(hi, v))
+    local key = string.format("%.3f %s", v, src)
+    if key ~= sensLogged then
+        sensLogged = key
+        Log.Write(string.format("FullPov: mouse-look sensitivity x%.2f (%s)", v, src))
+    end
+    S.look_sens = v
+    return v
+end
 
 -- Level loads and teleports (2026-10-12, fast travel): first person goes
 -- inactive while the world is (re)loading and comes back after a settle
@@ -355,11 +382,11 @@ local function writeState()
     if S.on and USE_BONE_ANCHOR then refreshCache(e, now) end
 
     local line = string.format(
-        "orbit=%d orbit_seq=%d orbit_dist=%.2f orbit_up=%.2f orbit_pmin=%.1f orbit_pmax=%.1f orbit_spin=%d orbit_tilt=%d orbit_rate=%.1f orbit_tilt_rate=%.1f orbit_vis=%s orbit_x=%.3f orbit_y=%.3f orbit_z=%.3f crouch=%d level_seq=%d on=%d active=%d menu=%d foreign_follow=%d foreign_mouse_ms=%d foreign_ease_ms=%d anim_inst=%s anim_rate=%.3f clip_inst=%s clip_rates=%s nclips=%s nocombatcam=%d combat_wasd=%d rec_inst=%s lift_objects=%d jump_mode=%d genome_capture=%d strafe_sign=%d rj_land_speed=%.2f rj_wall_h=%.2f rj_sync_guard=%d jump_wait_ms=%d rj_land_hold=%d rj_slope_deg=%.1f mp_tag=%s mp_remote=%d head_smooth=%.2f move_walk=%.3f move_run=%.3f move_mode=%d move_accel=%.3f move_decel=%.3f move_turn=%.1f move_raw=%d move_hold=%d move_metrics=%d move_face_idle=%.1f move_face_air=%d loco_inst=%s loco_rate=%.2f loco_skip=%s visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
+        "orbit=%d orbit_seq=%d orbit_dist=%.2f orbit_up=%.2f orbit_pmin=%.1f orbit_pmax=%.1f orbit_spin=%d orbit_tilt=%d orbit_rate=%.1f orbit_tilt_rate=%.1f orbit_vis=%s orbit_x=%.3f orbit_y=%.3f orbit_z=%.3f crouch=%d level_seq=%d on=%d active=%d menu=%d foreign_follow=%d foreign_mouse_ms=%d foreign_ease_ms=%d look_sens=%.3f anim_inst=%s anim_rate=%.3f clip_inst=%s clip_rates=%s nclips=%s nocombatcam=%d combat_wasd=%d rec_inst=%s lift_objects=%d jump_mode=%d genome_capture=%d strafe_sign=%d rj_land_speed=%.2f rj_wall_h=%.2f rj_sync_guard=%d jump_wait_ms=%d rj_land_hold=%d rj_slope_deg=%.1f mp_tag=%s mp_remote=%d head_smooth=%.2f move_walk=%.3f move_run=%.3f move_mode=%d move_accel=%.3f move_decel=%.3f move_turn=%.1f move_raw=%d move_hold=%d move_metrics=%d move_face_idle=%.1f move_face_air=%d loco_inst=%s loco_rate=%.2f loco_skip=%s visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
         S.orbit, S.orbit_seq, S.orbit_dist, S.orbit_up, S.orbit_pmin, S.orbit_pmax, S.orbit_spin, S.orbit_tilt, S.orbit_rate,
         S.orbit_tilt_rate, S.orbit_vis, S.orbit_x, S.orbit_y, S.orbit_z, S.crouch, S.level_seq,
         S.on and 1 or 0, active and 1 or 0, S.menu and 1 or 0,
-        S.foreign_follow, math.floor(S.foreign_mouse_ms + 0.5), math.floor(S.foreign_ease_ms + 0.5), S.anim_inst, S.anim_rate, S.clip_inst, S.clip_rates, S.nclips, S.nocombatcam, S.combat_wasd, S.rec_inst, S.lift_objects, S.jump_mode, S.genome_capture, S.strafe_sign, S.rj_land_speed, S.rj_wall_h, S.rj_sync_guard, math.floor(S.jump_wait_ms + 0.5), S.rj_land_hold, S.rj_slope_deg, S.mp_tag, S.mp_remote, S.head_smooth, S.move_walk, S.move_run, S.move_mode, S.move_accel, S.move_decel, S.move_turn, S.move_raw, S.move_hold, S.move_metrics, S.move_face_idle, S.move_face_air, S.loco_inst, S.loco_rate, S.loco_skip, (S.on and cache.visual) or "0", S.anchor, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
+        S.foreign_follow, math.floor(S.foreign_mouse_ms + 0.5), math.floor(S.foreign_ease_ms + 0.5), lookSens(now), S.anim_inst, S.anim_rate, S.clip_inst, S.clip_rates, S.nclips, S.nocombatcam, S.combat_wasd, S.rec_inst, S.lift_objects, S.jump_mode, S.genome_capture, S.strafe_sign, S.rj_land_speed, S.rj_wall_h, S.rj_sync_guard, math.floor(S.jump_wait_ms + 0.5), S.rj_land_hold, S.rj_slope_deg, S.mp_tag, S.mp_remote, S.head_smooth, S.move_walk, S.move_run, S.move_mode, S.move_accel, S.move_decel, S.move_turn, S.move_raw, S.move_hold, S.move_metrics, S.move_face_idle, S.move_face_air, S.loco_inst, S.loco_rate, S.loco_skip, (S.on and cache.visual) or "0", S.anchor, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
         S.jump_seq, math.floor(S.jump_ms + 0.5), S.jump_h, S.jump_k,
         S.dump, cache.sock or -1, cache.skel or 0, x, y, z,
         (S.on and #cache.meshes > 0) and table.concat(cache.meshes, ",") or "0",
@@ -774,7 +801,19 @@ function M.Register()
             tostring(M.StatusValue("foreignCam"))))
     end)
 
-    Log.Write("FullPov: registered !dag_full_pov / !dag_pov_eye / !dag_pov_anchor / !dag_pov_smooth / !dag_pov_down / !dag_pov_dump / !dag_pov_status / !dag_pov_foreign")
+    -- Mouse-look sensitivity for this session (players use the MCM slider):
+    -- !dag_look_sens <x> | mcm (back to the slider). Native.log's "mouse-look
+    -- sensitivity" lines show the camera's degrees per mouse count.
+    Ext.RegisterConsoleCommand("dag_look_sens", function(_, v)
+        if v == "mcm" or v == "off" then sensOverride = nil
+        elseif tonumber(v) then sensOverride = tonumber(v) end
+        sensAt = -1e9
+        lastWrite = 0
+        pcall(writeState)
+        Log.Write(string.format("FullPov: !dag_look_sens -> x%.2f (%s)", S.look_sens, sensOverride and "session override" or "MCM / data"))
+    end)
+
+    Log.Write("FullPov: registered !dag_full_pov / !dag_pov_eye / !dag_pov_anchor / !dag_pov_smooth / !dag_pov_down / !dag_pov_dump / !dag_pov_status / !dag_pov_foreign / !dag_look_sens")
 end
 
 return M

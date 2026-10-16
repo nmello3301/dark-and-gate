@@ -111,7 +111,7 @@ See **Archived (future)** below for bone reads, anim speed/cancel and ragdoll pu
 
 ### Known issues / polish
 
-- Mouse sensitivity comes from NCT's TOML (`MouseCameraRotationMult`, `MousePitchMult`); an in-game slider (MCM) later.
+- Mouse sensitivity: Native Camera Tweaks' TOML (`MouseCameraRotationMult`, `MousePitchMult`) sets the base; our MCM slider (2026-10-16, Bug fixes section) scales on top.
 - Head hiding occasionally needed an off/on toggle; fixed by resetting `hide_head` at session start (verify over a few sessions).
 - The game runs `bg3_dx11.exe`; static analysis should use the `bg3_dx11.exe` Ghidra program (now imported).
 - Old camera-override experiments (vt58 pin, instant_follow, legacy writes) are parked behind default-off switches in `native-config.toml`.
@@ -514,7 +514,9 @@ Built 2026-10-15 (DECISIONS); tick after it is seen in-game.
 
 ## Bug fixes, 2026-10-15 (late)
 
-- [ ] **Unkillable at 0 HP** (nautiloid playtest: Gale and Shadowheart). BG3 said "no longer downed" 60 ms after each down, so our bleed-out never started; HP stayed 0, hits were ignored as "on a downed player", the AI stopped targeting them. Now a "no longer downed" at 0 HP isn't an up, and anyone alive at 0 HP for 0.5 s gets our downed status and bleeds out (`Server/Combat/Downed.lua`, `data/combat.lua` `downed.zero_hp_s`). Every BG3 down / up is logged with HP and status to find BG3's trigger. Offline replay passes.
+- [x] **Unkillable at 0 HP** (nautiloid playtest: Gale and Shadowheart). *(verified 2026-10-16: "Downing works well now")* BG3 said "no longer downed" 60 ms after each down, so our bleed-out never started; HP stayed 0, hits were ignored as "on a downed player", the AI stopped targeting them. Now a "no longer downed" at 0 HP isn't an up, and anyone alive at 0 HP for 0.5 s gets our downed status and bleeds out (`Server/Combat/Downed.lua`, `data/combat.lua` `downed.zero_hp_s`). Every BG3 down / up is logged with HP and status to find BG3's trigger. Offline replay passes.
+- [ ] **Mouse-look stops at a fight's start** (playtest 2026-10-16; MMB twice brought it back). BG3 let go of the Camera Rotate our DLL holds, the DLL still thought it held it, so the first MMB only "released" it. The DLL now watches for it: sideways mouse motion with no camera turn for 0.4 s while it holds Rotate -> it presses Rotate again by itself (`Pov.cpp` RotateWatchdog, logged "BG3 let go of Camera Rotate").
+- [ ] **Mouse-look sensitivity slider** (developer 2026-10-16): "Mouse-look sensitivity" on Dark and Gate's Camera tab in Mod Configuration Menu (0.1-3.0, default 1.0; `MCM_blueprint.json`, `data/camera.lua` `look_sensitivity`, `!dag_look_sens`). The DLL scales the mouse motion BG3 gets while Rotate is held; native.log's "mouse-look sensitivity xN: ... deg per mouse count" lines confirm it takes effect.
 
 ## M2 — Combat breadth
 

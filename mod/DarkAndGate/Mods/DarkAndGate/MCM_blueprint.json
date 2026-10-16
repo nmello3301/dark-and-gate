@@ -1,0 +1,25 @@
+{
+    "SchemaVersion": 1,
+    "ModName": "Dark and Gate",
+    "Tabs": [
+        {
+            "TabId": "camera",
+            "TabName": "Camera",
+            "Settings": [
+                {
+                    "Id": "look_sensitivity",
+                    "Name": "Mouse-look sensitivity",
+                    "Type": "slider_float",
+                    "Default": 1.0,
+                    "Description": "How fast the first-person camera turns with your mouse. 1.0 is BG3's own speed; lower is slower, higher is faster.",
+                    "Tooltip": "Takes effect right away. Only the first-person camera changes; the cursor in menus moves as always.",
+                    "Options": {
+                        "Min": 0.1,
+                        "Max": 3.0,
+                        "Step": 0.05
+                    }
+                }
+            ]
+        }
+    ]
+}

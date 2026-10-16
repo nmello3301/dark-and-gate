@@ -197,6 +197,9 @@ struct LuaState {
     bool      foreignFollow = true;
     float     foreignMouseMs = 300.f;
     float     foreignEaseMs = 150.f;
+    // Mouse-look sensitivity (MCM slider / data/camera.lua look_sensitivity):
+    // mouse motion is scaled by this while we hold Camera Rotate (OurFilter).
+    float     lookSens = 1.f;
     // Crouch = sneaking (Client/Crouch.lua): the head bone lowers by itself;
     // the eye-height calibration must not run while crouched.
     bool      crouch = false;
@@ -239,6 +242,10 @@ struct LuaState {
 };
 
 LuaState g_lua;
+// g_lua.lookSens for the SDL event filter (OurFilter), which may run on another thread.
+constexpr float kLookSensMin = 0.1f;
+constexpr float kLookSensMax = 5.0f;
+std::atomic<float> g_lookSens{ 1.f };
 DWORD    g_lastPollMs = 0;
 FILETIME g_lastMtime  = {};
 int      g_lastDump   = 0;
@@ -361,6 +368,10 @@ void PollLuaFile()
     s.foreignEaseMs = ValF(buf, "foreign_ease_ms", 150.f);
     if (s.foreignEaseMs < 0.f) s.foreignEaseMs = 0.f;
     if (s.foreignEaseMs > 2000.f) s.foreignEaseMs = 2000.f;
+    s.lookSens = ValF(buf, "look_sens", 1.f);
+    if (!(s.lookSens >= kLookSensMin)) s.lookSens = kLookSensMin;   // also NaN
+    if (s.lookSens > kLookSensMax) s.lookSens = kLookSensMax;
+    g_lookSens.store(s.lookSens);
     s.crouch = ValI(buf, "crouch", 0) != 0;
     s.noCombatCam = ValI(buf, "nocombatcam", 1) != 0;
     s.combatWasd = ValI(buf, "combat_wasd", 1) != 0;
@@ -1116,6 +1127,10 @@ std::atomic<int>  g_synthUp  { 0 };
 // yet). Queued before BG3 reads it, so the frame BG3 turns its camera for a
 // movement already sees it (the foreign-camera follow, HandleCommit).
 std::atomic<DWORD> g_mouseMoveTick{ 0 };
+// Camera Rotate watchdog (RotateWatchdog below): sideways mouse motion while
+// we hold Rotate, against the gameplay camera's turn (HandleCommit).
+std::atomic<int> g_motionX{ 0 };       // sum of |xrel| of real mouse motion events
+std::atomic<int> g_turnMilliDeg{ 0 };  // the slot camera's turn, 1/1000 deg
 
 int __cdecl OurFilter(void* userdata, void* ev)
 {
@@ -1129,6 +1144,22 @@ int __cdecl OurFilter(void* userdata, void* ev)
         std::memcpy(&xrel, m + 28, 4);
         std::memcpy(&yrel, m + 32, 4);
         if (which != kTouchMouseId && (xrel != 0 || yrel != 0)) g_mouseMoveTick.store(GetTickCount());
+        if (which != kTouchMouseId && xrel != 0) g_motionX.fetch_add(xrel < 0 ? -xrel : xrel);
+        // Mouse-look sensitivity: only while we hold Camera Rotate, so the
+        // cursor in menus moves as always. The fraction carries over, so slow
+        // turns at a low setting still turn.
+        const float sens = g_lookSens.load();
+        if (which != kTouchMouseId && g_mlWanted.load() && g_toggled.load() && std::fabs(sens - 1.f) > 0.001f &&
+            (xrel != 0 || yrel != 0)) {
+            static float remX = 0.f, remY = 0.f;
+            const float fx = xrel * sens + remX, fy = yrel * sens + remY;
+            const int32_t nx = static_cast<int32_t>(std::lround(fx)), ny = static_cast<int32_t>(std::lround(fy));
+            remX = fx - nx;
+            remY = fy - ny;
+            uint8_t* w = static_cast<uint8_t*>(ev);
+            std::memcpy(w + 28, &nx, 4);
+            std::memcpy(w + 32, &ny, 4);
+        }
     }
     if (type == kMouseDown || type == kMouseUp) {
         uint8_t* e = static_cast<uint8_t*>(ev);
@@ -1227,6 +1258,56 @@ void UpdateMouselookState()
         if (g_toggled.load()) { g_toggled.store(false); PushMiddle(false); }
     }
     dag::log::Writef("POV: mouselook %s", want ? "ON (MMB toggles)" : (g_lua.on && g_lua.active && g_lua.menu ? "OFF (menu open)" : "OFF"));
+}
+
+// BG3 can let go of the Camera Rotate we hold by itself (playtest 2026-10-16:
+// at a fight's start mouse-look stopped, and MMB took two presses: the first
+// only "released" a hold BG3 had already dropped). While we hold it, the
+// mouse moving sideways must turn the gameplay camera; lots of motion and no
+// turn in one window means the hold is gone -> release and press it again.
+// (Yaw never clamps, so sideways motion always turns a held camera.)
+constexpr DWORD kStallWindowMs  = 400;    // judge this much time at once
+constexpr int   kStallMotionPx  = 40;     // at least this much sideways motion...
+constexpr int   kStallTurnMilli = 50;     // ...and the camera turned under 0.05 deg
+constexpr DWORD kStallRetryMs   = 1000;   // at most one re-press a second
+constexpr int   kStallLogs      = 20;     // re-presses logged per session
+
+constexpr DWORD kSensLogMs      = 5000;   // sensitivity line: every 5 s of mouse-look...
+constexpr int   kSensLogMinPx   = 200;    // ...with at least this much sideways motion
+constexpr int   kSensLogs       = 40;
+
+void RotateWatchdog()
+{
+    static DWORD t0 = 0, lastFix = 0, logT0 = 0;
+    static int m0 = 0, r0 = 0, fixes = 0, logM0 = 0, logR0 = 0, sensLogs = 0;
+    if (!g_mlWanted.load() || !g_toggled.load() || g_lua.orbit || !g_push) { t0 = 0; logT0 = 0; return; }
+    const DWORD now = GetTickCount();
+    const int m = g_motionX.load(), r = g_turnMilliDeg.load();
+    // For the log: how far the camera turns per raw mouse count at the current
+    // sensitivity (a second setting should scale it by the same factor).
+    if (logT0 == 0) { logT0 = now; logM0 = m; logR0 = r; }
+    else if (now - logT0 >= kSensLogMs) {
+        const int dm = m - logM0, dr = r - logR0;
+        if (dm >= kSensLogMinPx && sensLogs < kSensLogs) {
+            ++sensLogs;
+            dag::log::Writef("POV: mouse-look sensitivity x%.2f: the camera turned %.4f deg per mouse count (%d counts in %.1f s)",
+                             g_lookSens.load(), dr / 1000.0 / dm, dm, (now - logT0) / 1000.0);
+        }
+        logT0 = now; logM0 = m; logR0 = r;
+    }
+    if (t0 == 0) { t0 = now; m0 = m; r0 = r; return; }
+    if (now - t0 < kStallWindowMs) return;
+    const int motion = m - m0, turn = r - r0;
+    const DWORD span = now - t0;
+    t0 = now; m0 = m; r0 = r;
+    if (motion < kStallMotionPx || turn >= kStallTurnMilli || now - lastFix < kStallRetryMs) return;
+    lastFix = now;
+    ++fixes;
+    PushMiddle(false);
+    PushMiddle(true);
+    if (fixes <= kStallLogs)
+        dag::log::Writef("POV: BG3 let go of Camera Rotate (mouse moved %d px sideways in %lu ms, the camera turned %.3f deg) -> pressed it again (#%d)",
+                         motion, static_cast<unsigned long>(span), turn / 1000.0, fixes);
 }
 
 // ---------------------------------------------------------------------
@@ -1448,6 +1529,7 @@ void OnFrame(void* gameplayCam)
     PollLuaFile();
     TryInstallFilter();
     UpdateMouselookState();
+    RotateWatchdog();
 
     if (g_lua.on != g_lastOn) {
         g_lastOn = g_lua.on;
@@ -1738,6 +1820,8 @@ bool HandleCommit(void* self, void* slotToken, float* newPos, float* outPos, Com
     g_foreign.srcTick = nowTick;
     if (srcNowOk) std::memcpy(g_foreign.srcRot, srcNow, sizeof(srcNow));
     const float srcTurnDeg = srcTurnOk ? AngleDeg(srcPrev, srcNow) : 0.f;
+    // RotateWatchdog: is the held Camera Rotate still turning this camera?
+    if (srcTurnOk) g_turnMilliDeg.fetch_add(static_cast<int>((srcTurnDeg < 60.f ? srcTurnDeg : 60.f) * 1000.f));
 
     if (badRot) {
         if (!g_foreign.goodRotOk) return false;

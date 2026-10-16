@@ -12,6 +12,8 @@ Versions follow `meta.lsx` (`major.minor.revision`). Every release names the gam
 - Spells cast under a roof no longer hit invisible shapes right in front of you.
 - BG3's "Your turn" and other turn notices are hidden in real-time fights.
 - **RPG Mode:** a fully cleared fight leaves a flag; switched ON with F, the fight's enemies come back (fresh copies with copies of their items) once you're 100 m away for 60 s. `data/rpgmode.lua` / `rpgmode.json`; `!dag_rpg_list`, `!dag_rpg_respawn`, `!dag_rpg_delete`.
+- Mouse-look sensitivity slider on Dark and Gate's Camera tab in Mod Configuration Menu (`!dag_look_sens` without MCM).
+- Fixed: mouse-look could stop when a fight started until MMB was pressed twice; the mod now notices and turns it back on by itself.
 - Fixed: a character at 0 HP could stay on their feet, ignore every hit and never die (BG3 sometimes drops its downed state a moment after a down). 0 HP now always means downed, with the bleed-out and revive.
 - Offline checks: `scripts\test-lua.ps1` (every Lua file compiles; Meta-Points self-test).
 

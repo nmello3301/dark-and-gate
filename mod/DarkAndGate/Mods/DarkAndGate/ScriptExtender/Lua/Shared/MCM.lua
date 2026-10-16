@@ -66,6 +66,28 @@ function MCM.Set(key, value)
     Log.Write(string.format("MCM: %s = %s", key, tostring(value)))
 end
 
+-- A setting from our page in Mod Configuration Menu (BG3MCM 1.x), or nil
+-- when MCM isn't installed or doesn't know it. The page comes from
+-- Mods/DarkAndGate/MCM_blueprint.json (next to meta.lsx, MCM's JsonLayer);
+-- MCM injects an MCM table with Get(settingId) into our mod table
+-- (its GlobalTable/TableInjector.lua); MCMAPI:GetSettingValue is the same
+-- call underneath (MCMAPIImplementations.lua Get_Impl).
+local MOD_UUID = "d5d298fd-ba29-4dc1-8346-6ac96b8c2cd7"
+function MCM.Setting(id)
+    local v = nil
+    pcall(function()
+        local mine = Mods and Mods.DarkAndGate and rawget(Mods.DarkAndGate, "MCM")
+        if type(mine) == "table" and type(mine.Get) == "function" then v = mine.Get(id) end
+    end)
+    if v == nil then
+        pcall(function()
+            local api = Mods and Mods.BG3MCM and Mods.BG3MCM.MCMAPI
+            if api and api.GetSettingValue then v = api:GetSettingValue(id, MOD_UUID) end
+        end)
+    end
+    return v
+end
+
 -- Convenience: wire a console command per bool toggle so the dev can flip
 -- it even when MCM isn't up. Called by the spike modules after DefineBool.
 function MCM.RegisterToggleCommand(cmd, key)
