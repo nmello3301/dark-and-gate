@@ -539,7 +539,7 @@ The developer asked for the walk-before-cast fix and a configurable on / off key
 
 - [ ] **No walk before a cast** (developer 2026-10-16: "sometimes when aiming a fully cast spell, the left click will make the character walk a bit before throwing the spell"). A spell on one character went through `Osi.UseSpell`'s 3-arg wrapper (WithoutMove = 0), so BG3 walked the caster into its own range / line of sight first; it now goes through the cast request queue with NoMovement + IgnoreTargetChecks (`Server/Combat/SpellCast.lua` castAtTarget). The server log says `CAST cast request (NoMovement) target=...`.
 - [ ] **On / off key, Ctrl+F10** (developer 2026-10-16: "a hotkey to enable/disable the mod, let this hotkey be configureable"). MCM keybinding `toggle_mod` (Dark and Gate > General), `data/hud.lua` `toggle_key` without MCM (`Client/ToggleKey.lua`). Off = `!dag_play off` + real-time fights off once nobody plays (`Server/PlayMode.lua`); the toast shows with first person off. To check: the key off and on, mid-fight (turn-based takes over), after a reload (stays off), rebinding in MCM.
-- [ ] Version 0.5.0; built from the clean commit, packaged, linted, tagged `v0.5.0`, GitHub pre-release.
+- [x] Version 0.5.0 (23b37ac); DLL + pak built from it (stamps clean) and installed on the developer's PC, packaged (`scripts\make-release.ps1`), linted (`um publish check`: mod zip PASS; the known "copied verbatim" hits on our own DLL / configs), tagged `v0.5.0`, GitHub pre-release with the three zips + SHA256: https://github.com/nmello3301/dark-and-gate/releases/tag/v0.5.0 *(2026-10-16)*
 - [ ] Developer: smoke test with the release files; Microsoft submission for the DLL; Nexus upload (docs/release.md steps 5-7).
 
 ## M2 — Combat breadth
