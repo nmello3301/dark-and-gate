@@ -368,6 +368,7 @@ function Get-SiblingToml($cand, [string]$tomlName) {
 # ---------------------------------------------------------------- 4. back up and install
 
 $installed = New-Object System.Collections.Generic.List[object]   # Dest, Backup (null = new file)
+$loaderBlocked = $null   # the downloaded version.dll Windows Security wouldn't let us read
 
 function Backup-File([string]$dest) {
   $rel = $dest
@@ -428,7 +429,14 @@ if (-not $WhatIf) { New-Item -ItemType Directory -Force -Path $backupDir | Out-N
 function Install-Item([string]$key, [string]$label, [string]$dest, [string]$link) {
   $c = $pick[$key]
   if ($c) {
-    $st = Install-File $c.File.FullName $dest
+    # Windows Security can refuse to let anyone read a flagged file (Ch4nKyy's
+    # version.dll, a known false positive): reported, not a crash.
+    try { $st = Install-File $c.File.FullName $dest }
+    catch {
+      if ($key -eq 'loader') { $script:loaderBlocked = $c.File.FullName }
+      Add-Row $label 'BLOCKED' ("could not copy " + $c.File.Name + ": " + $_.Exception.Message + $(if ($key -eq 'loader') { ' (Windows Security, see below)' } else { '' })) $link
+      return $false
+    }
     $more = $(if ($counts[$key] -gt 1) { " ($($counts[$key]) copies in the downloads; this one is the newest)" } else { '' })
     Add-Row $label $st ("from " + $c.File.FullName.Replace($staging, '<unpacked>').Replace($Source, '<downloads>') + $more) $link
     return $true
@@ -651,14 +659,17 @@ foreach ($f in $failedArchives) {
   $problems.Add([pscustomobject]@{ Name = $f; Status = 'NOT UNPACKED'; Detail = 'right-click it > Extract All (or 7-Zip > Extract here) into this folder, then run INSTALL.bat again'; Link = $null })
 }
 
-if ($loaderGone) {
+if ($loaderGone -or $loaderBlocked) {
   Write-Host ""
   Write-Host "Windows Security and version.dll" -ForegroundColor Yellow
   Write-Host "  version.dll (Ch4nKyy's Mod Loader) is a known false positive (Trojan:Win32/Posilod.CA!cl)."
   Write-Host "  Start > type cmd > right-click Command Prompt > Run as administrator, then run these two lines"
-  Write-Host "  (the first excludes only these two files, the second lists what Windows Security quarantined):"
-  $v = $loaderDest -replace "'", "''"; $d = (Join-Path $nativeDir 'DarkAndGate.dll') -replace "'", "''"
-  Write-Host "powershell -NoProfile -Command ""Add-MpPreference -ExclusionPath '$v','$d'""" -ForegroundColor White
+  Write-Host "  (the first excludes only these files, the second lists what Windows Security quarantined),"
+  Write-Host "  restore it if it is listed, then run INSTALL.bat again:"
+  $paths = @($loaderDest, (Join-Path $nativeDir 'DarkAndGate.dll'))
+  if ($loaderBlocked) { $paths += $loaderBlocked }
+  $list = (@($paths | ForEach-Object { "'" + ($_ -replace "'", "''") + "'" }) -join ',')
+  Write-Host "powershell -NoProfile -Command ""Add-MpPreference -ExclusionPath $list""" -ForegroundColor White
   Write-Host """%ProgramFiles%\Windows Defender\MpCmdRun.exe"" -Restore -ListAll" -ForegroundColor White
   Write-Host "  If version.dll is listed, restore it:" -ForegroundColor Yellow
   Write-Host """%ProgramFiles%\Windows Defender\MpCmdRun.exe"" -Restore -Name ""Trojan:Win32/Posilod.CA!cl"" -All" -ForegroundColor White
