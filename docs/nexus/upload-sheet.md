@@ -10,7 +10,7 @@ Field names below may not match Nexus's form exactly; the form changes now and t
 | --- | --- |
 | Game | Baldur's Gate 3 |
 | Name | `Dark and Gate - First-Person Real-Time Combat (Alpha)` |
-| Version | `0.1.0` |
+| Version | `0.4.0` |
 | Language | English |
 | Author | Nick |
 | Category | Gameplay (or Overhauls / Combat, if the list has a better fit) |
@@ -44,9 +44,9 @@ Upload all three from `build\release\` (made by `scripts\make-release.ps1`).
 
 | File | Name on Nexus | Category | Version | Description |
 | --- | --- | --- | --- | --- |
-| `DarkAndGate-0.1.0-mod.zip` | Dark and Gate - mod | Main | 0.1.0 | The mod itself (pak + info.json). Drag into BG3 Mod Manager and load it below Mod Configuration Menu and AnimationUnlocker. Needs the native file below, same version. |
-| `DarkAndGate-0.1.0-native.zip` | Dark and Gate - native DLL | Main | 0.1.0 | Required. First person, camera and movement hooks. Extract into the game folder so you get bin\NativeMods\DarkAndGate.dll. Needs Ch4nKyy's Mod Loader. DirectX 11 only. |
-| `DarkAndGate-0.1.0-recommended-settings.zip` | Recommended camera + WASD settings | Optional | 0.1.0 | The Native Camera Tweaks and WASD Character Movement settings the mod is tested with. Back up your own BG3NativeCameraTweaks.toml and BG3WASD.toml first, then extract into the game folder. |
+| `DarkAndGate-0.4.0-mod.zip` | Dark and Gate - mod | Main | 0.4.0 | The mod itself (pak + info.json). Drag into BG3 Mod Manager and load it below Mod Configuration Menu and AnimationUnlocker. Needs the native file below, same version. |
+| `DarkAndGate-0.4.0-native.zip` | Dark and Gate - native DLL | Main | 0.4.0 | Required. First person, camera and movement hooks. Extract into the game folder so you get bin\NativeMods\DarkAndGate.dll. Needs Ch4nKyy's Mod Loader. DirectX 11 only. |
+| `DarkAndGate-0.4.0-recommended-settings.zip` | Recommended camera + WASD settings | Optional | 0.4.0 | The Native Camera Tweaks and WASD Character Movement settings the mod is tested with. Back up your own BG3NativeCameraTweaks.toml and BG3WASD.toml first, then extract into the game folder. |
 
 If the form asks about mod manager support: the mod file works with BG3 Mod Manager (and should work with Vortex). The native and settings files are a manual install.
 
@@ -98,4 +98,4 @@ Dark and Gate is GPL-3.0-or-later, and Brawl's code inside it is GPL-3.0, so the
 
 1. Put the Nexus link in the repo README ("Download it from Nexus Mods").
 2. Send tinybike the message in [../tinybike-message.md](../tinybike-message.md) (the repo is public now).
-3. Tick the release items in [../ROADMAP.md](../ROADMAP.md) and tag the commit: `git tag v0.1.0`, `git push origin v0.1.0`.
+3. Tick the release items in [../ROADMAP.md](../ROADMAP.md) and tag the commit: `git tag v0.4.0`, `git push origin v0.4.0`.

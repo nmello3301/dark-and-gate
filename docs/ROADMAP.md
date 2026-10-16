@@ -518,6 +518,14 @@ Built 2026-10-15 (DECISIONS); tick after it is seen in-game.
 - [ ] **Mouse-look stops at a fight's start** (playtest 2026-10-16; MMB twice brought it back). BG3 let go of the Camera Rotate our DLL holds, the DLL still thought it held it, so the first MMB only "released" it. The DLL now watches for it: sideways mouse motion with no camera turn for 0.4 s while it holds Rotate -> it presses Rotate again by itself (`Pov.cpp` RotateWatchdog, logged "BG3 let go of Camera Rotate").
 - [ ] **Mouse-look sensitivity slider** (developer 2026-10-16): "Mouse-look sensitivity" on Dark and Gate's Camera tab in Mod Configuration Menu (0.1-3.0, default 1.0; `MCM_blueprint.json`, `data/camera.lua` `look_sensitivity`, `!dag_look_sens`). The DLL scales the mouse motion BG3 gets while Rotate is held; native.log's "mouse-look sensitivity xN: ... deg per mouse count" lines confirm it takes effect.
 
+## Release 0.4.0 alpha (GitHub), 2026-10-16
+
+The developer asked for a v0.4 GitHub release of everything since 0.1.0 (Meta-Points, RPG Mode, the 2026-10-15/16 fixes).
+
+- [x] Version 0.4.0 in `meta.lsx` and the DLL; CHANGELOG and Nexus docs updated.
+- [ ] Built from the clean commit, packaged (`scripts\make-release.ps1`), linted, tagged `v0.4.0`, GitHub release with the three zips + SHA256.
+- [ ] Developer: smoke test with the release files; Microsoft submission for the DLL; Nexus upload (docs/release.md steps 5-7).
+
 ## M2 — Combat breadth
 
 - [ ] All 10 weapon families with their chains

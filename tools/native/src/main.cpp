@@ -28,7 +28,7 @@
 namespace {
 
 constexpr const char* kPluginName    = "DarkAndGate";
-constexpr const char* kPluginVersion = "0.1.0";
+constexpr const char* kPluginVersion = "0.4.0";
 constexpr const char* kBuildKind     = "scaffold";
 
 // Returns %LOCALAPPDATA%\Larian Studios\Baldur's Gate 3\Script Extender\DarkAndGate\

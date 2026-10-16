@@ -1,0 +1,46 @@
+Dark and Gate
+First-person, real-time action combat for Baldur's Gate 3
+
+Alpha (0.4.0): expect bugs and changing balance. Play on a new save or a copy, never your main playthrough.
+
+Fight in first person and in real time: swing your weapon, cast BG3's own spells at the crosshair, draw a bow, and face enemies that move and attack without waiting for turns.
+
+MAIN FEATURES
+- First person with mouse-look
+- Real-time fights for you, your companions and enemies (built on tinybike's Brawl)
+- Melee swing chains with head, torso and limb hit zones
+- BG3's spells on a 1-0 hotbar: channel, then release at the crosshair; a regenerating mana pool replaces spell slots
+- Bows and crossbows: hold to draw, release to shoot, arrows drop
+- Real jump, sneaking, downed and revive, companion Follow / Wait / Camp
+- A custom HUD: health and mana orbs, hotbar, cast and draw bars
+- Meta-Points: 8 points per level to put into STR, DEX, INT, WIS, CON and CHA, which scale damage, cooldowns, cast time, mana, block, jump and move speed (menu on P)
+- RPG Mode: a cleared fight leaves a flag; switch it on and the enemies come back once you are away
+- Mouse-look sensitivity slider in Mod Configuration Menu
+- Co-op (early, lightly tested)
+
+REQUIREMENTS
+Windows, Steam version, DirectX 11 only (not Vulkan).
+- Script Extender: https://github.com/Norbyte/bg3se/releases
+- Ch4nKyy's Mod Loader: https://www.nexusmods.com/baldursgate3/mods/25474 (not together with Native Mod Loader)
+- WASD Character Movement: https://www.nexusmods.com/baldursgate3/mods/781
+- Native Camera Tweaks: https://www.nexusmods.com/baldursgate3/mods/945
+- Mod Configuration Menu: https://www.nexusmods.com/baldursgate3/mods/9162
+- AnimationUnlocker: https://www.nexusmods.com/baldursgate3/mods/16058
+- BG3 Mod Manager: https://github.com/LaughingLeader/BG3ModManager/releases
+
+INSTALLATION
+1. Install the requirements.
+2. Mod file: drag DarkAndGate-0.4.0-mod.zip into BG3 Mod Manager, activate DarkAndGate below Mod Configuration Menu and AnimationUnlocker, then click Export Order to Game.
+3. Native file: extract DarkAndGate-0.4.0-native.zip into the game folder, so that you get bin\NativeMods\DarkAndGate.dll.
+4. Optional: back up your BG3NativeCameraTweaks.toml and BG3WASD.toml, then extract DarkAndGate-0.4.0-recommended-settings.zip into the game folder.
+5. In bin\ScriptExtenderSettings.json, set "CreateConsole": true.
+6. Launch with DirectX 11 and load a game. In the Script Extender console, press Enter, type client, press Enter, then type !dag_play. It turns on by itself from then on.
+
+Uninstalling: first type !dag_rt off in the console and save, so your save gets its reaction settings back. Then deactivate the mod and delete DarkAndGate.dll. Controls, troubleshooting and the full guide are in the README inside the download.
+
+CREDITS
+Brawl by tinybike (the real-time engine): https://github.com/tinybike/Brawl
+Norbyte, ersh1, Ch4nKyy, Volitio, and the authors of WASD Character Movement and AnimationUnlocker.
+AI disclosure: designed, directed and playtested by Nick. Most of the code was written with Anthropic's Claude; the HUD art was generated with OpenAI's image model.
+
+Free and open source (GPL-3.0): https://github.com/nmello3301/dark-and-gate

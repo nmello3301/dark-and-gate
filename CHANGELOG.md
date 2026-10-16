@@ -2,7 +2,9 @@
 
 Versions follow `meta.lsx` (`major.minor.revision`). Every release names the game version it was tested on.
 
-## Unreleased
+## 0.4.0 (alpha), 2026-10-16
+
+Built for BG3 4.1.1.7631656 (Steam, DirectX 11) with Script Extender v33. Still an alpha: play on a new save or a copy.
 
 - Jumping up a slope keeps the jump's full height over the slope instead of ending in a short hop (`data/movement.lua` `jump.slope_max_deg`, `!dag_jump_slope`).
 - **Meta-Points:** 8 points per level for every party member to put into STR, DEX, INT, WIS, CON and CHA, which scale melee / ranged / spell damage, bow draw, attack cooldown, cast time, max mana, shield block, jump height and move speed. Menu on **P**; Reset all points in camp; numbers in `Script Extender\DarkAndGate\metapoints.json` (`!dag_meta_reload`). Debug: `!dag_meta_grant`, `!dag_meta_set`, `!dag_meta_reset`, `!dag_meta_print`, `!dag_meta_selftest`, `!dag_meta_xp`.
