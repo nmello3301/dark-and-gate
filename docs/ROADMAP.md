@@ -14,6 +14,7 @@ Estimates assume part-time work (evenings). They are guesses made on 2026-10-07 
 | M1b Combat slice | Longsword chain, blade-path hits, Fire Bolt / Fireball / Misty Step, mana, hotbar, goblins on Brawl-adapted real-time AI | 5–8 weeks | 2026-10-08 | |
 | **MP Multiplayer (pulled forward)** | Co-op that feels like single-player for every player; up to 8 players / 16 party members with Party Limit Begone. MP-0 to MP-4 ([design/multiplayer.md](design/multiplayer.md)); Gate 1 / Pass D follow after MP-2 | | 2026-10-13 | |
 | Release 0.1.0 alpha | First public build on Nexus Mods; repo public (DECISIONS 2026-10-15) | | 2026-10-15 | |
+| Meta-Points | Per-character progression pool feeding the real-time knobs (DESIGN "Meta-Points") | | 2026-10-15 | |
 | **Gate 1** | **Combat feels tight** | | | |
 | M2 Combat breadth | All 10 weapon families, all spell types, blocking, ranged, first MP smoke test (spike 9 answer) | 6–10 weeks | | |
 | M3 Companion AI | Follow / Wait / Camp; archetypes on top of the Brawl adapter | 2–4 weeks | | |
@@ -476,6 +477,28 @@ The first public build (DECISIONS 2026-10-15). Steps in [release.md](release.md)
 - [ ] `DarkAndGate.dll` and the native zip submitted to Microsoft (release.md "Antivirus false positives").
 - [ ] Nexus page published; its link in README.md; `v0.1.0` tag pushed.
 - [ ] tinybike told ([tinybike-message.md](tinybike-message.md)).
+
+## Meta-Points (progression), started 2026-10-15
+
+The developer's spec (DECISIONS 2026-10-15). Built 2026-10-15; tick each line after it is seen in-game. Offline: `scripts\test-lua.ps1` passes (every Lua file compiles; the curves match the signed-off table at 0.01).
+
+- [ ] Points: 8 × level on a new game (8 at level 1) and on a mid-game save (retroactive); unspent carry over; saved per character through save / reload; a save from before loads with 0 spent.
+- [ ] Menu on P (check P does nothing in vanilla): stats, − / +, live preview, Confirm, Reset; companions' cooldown / move / jump marked *; level-up notice.
+- [ ] Reset all points: refused outside camp, works in camp; `respec_mode` anywhere / off.
+- [ ] Cast time (WIS) on the client bar and the server's check (no `REJECTED`); bow draw (STR); melee cooldown (DEX) and the faster swing below the swing's length; server cooldown check passes.
+- [ ] Melee (STR), arrow (DEX) and spell (INT) damage; the spell hook's self-check (`BEFORE-HOOK WORKS` / `IGNORED` in server.log).
+- [ ] Max mana (INT) keeps its share; shield block (CON).
+- [ ] Jump height (CON) with √ airtime.
+- [ ] **No fall damage** for the party (`DAG_NO_FALL_DAMAGE`, BG3's `IgnoreFallDamage()`): a ×10 jump and a real cliff both do nothing.
+- [ ] Move speed (CHA) in first person only; ×2.5 first, then ×4 (rubber-banding?).
+- [ ] `enemy_hp_mult` / `enemy_damage_mult` at 2.0 once.
+- [ ] Debug: `!dag_meta_grant`, `!dag_meta_set`, `!dag_meta_reset`, `!dag_meta_print`, `!dag_meta_selftest`, `!dag_meta_reload`, `!dag_meta_xp`.
+
+Same round:
+
+- [x] **Uphill jumps** follow the slope (verified 2026-10-15: "Jump feels great!"; the floor rose up to +1.93 m).
+- [ ] **Skillshots under a roof** no longer hit invisible shapes (`Shared/WorldRay.lua`; the log names the groups of every world hit).
+- [ ] **"Your turn"** and BG3's other turn notices don't show in real-time fights.
 
 ## M2 — Combat breadth
 

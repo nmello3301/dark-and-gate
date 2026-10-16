@@ -21,6 +21,25 @@ Windows PC only, DirectX 11. Requires Script Extender, Ch4nKyy's Mod
 Loader, WASD Character Movement, Native Camera Tweaks, Mod
 Configuration Menu and AnimationUnlocker.
 
+## Meta-Points
+
+Each party member gets 8 Meta-Points per level (96 at level 12) to put
+into STR, DEX, INT, WIS, CON and CHA. They're separate from BG3's
+ability scores and only scale this mod's real-time combat: melee,
+ranged and spell damage, bow draw, attack cooldown, cast time, max
+mana, shield block, jump height and move speed.
+
+- **P** opens the menu: − / + per stat with a live preview of every
+  effect, Confirm to lock the points, Reset to drop the pending ones.
+- **Reset all points** refunds everything, in camp only by default
+  (`respec_mode`: `camp`, `anywhere` or `off`).
+- The curves and knobs are in
+  `%LOCALAPPDATA%\Larian Studios\Baldur's Gate 3\Script Extender\DarkAndGate\metapoints.json`,
+  written on first launch from `data/metapoints.lua`. Edit it and type
+  `!dag_meta_reload`; delete it to get the defaults back.
+
+Full rules: [`docs/DESIGN.md`](docs/DESIGN.md) "Meta-Points".
+
 ## Documents
 
 - [`docs/DESIGN.md`](docs/DESIGN.md): design document, the source of truth.

@@ -29,6 +29,7 @@ local Actions   = Ext.Require("Client/Combat/Actions.lua")
 local airAction = Ext.Require("data/movement.lua").air_action
 local MeleeCooldown = Ext.Require("Shared/MeleeCooldown.lua")
 local ConsoleForward = Ext.Require("Shared/ConsoleForward.lua")
+local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
 
@@ -102,25 +103,31 @@ local function startSwing(index)
     if State.currentSwing then logSummary(State.currentSwing) end
     local eye, fwd = Aim.ReadInvView()
     local t = nowMs()
-    local cooldownS = MeleeCooldown.Seconds(longsword)
+    -- The character's cooldown (Meta-Points DEX). Shorter than the swing
+    -- itself: the swing (windows and clip) plays faster (MeleeCooldown.SwingRate).
+    local cooldownS = MeleeCooldown.Seconds(longsword, Me.Uuid())
+    local rate = MeleeCooldown.SwingRate(cooldownS, def.windup_ms + def.active_ms + def.recovery_ms)
+    local windup, active, recovery = def.windup_ms / rate, def.active_ms / rate, def.recovery_ms / rate
     -- Next swing allowed: the cooldown or the swing's own recovery, the later.
-    local readyAt = t + math.max(cooldownS * 1000, def.windup_ms + def.active_ms + def.recovery_ms)
+    local readyAt = t + math.max(cooldownS * 1000, windup + active + recovery)
     State.currentSwing = {
         swingIndex    = index,
         nonce         = State.NextSwingNonce(),
         def           = def,
+        rate          = rate,
         startEye      = eye or { 0, 0, 0 },
         startForward  = fwd or { 0, 0, 1 },
-        activeStart   = t + def.windup_ms,
-        activeUntil   = t + def.windup_ms + def.active_ms,
-        recoveryUntil = t + def.windup_ms + def.active_ms + def.recovery_ms,
+        activeStart   = t + windup,
+        activeUntil   = t + windup + active,
+        recoveryUntil = t + windup + active + recovery,
         readyAt       = readyAt,
-        chainResetAt  = math.max(t + def.windup_ms + def.active_ms, readyAt) + def.combo_ms,
+        chainResetAt  = math.max(t + windup + active, readyAt) + def.combo_ms,
         hitTargets    = {},
         sampling      = false,
     }
-    Log.Write(string.format("Swing: start #%d (%s) damage=%.1f reach=%.1f cooldown=%.2fs",
-        index, def.name, def.damage, def.reach_m, cooldownS))
+    Log.Write(string.format("Swing: start #%d (%s) damage=%.1f reach=%.1f cooldown=%.2fs%s",
+        index, def.name, def.damage, def.reach_m, cooldownS,
+        rate > 1.001 and string.format(" swing x%.2f faster (%.0f ms)", rate, windup + active + recovery) or ""))
     -- Play the animation (server-authoritative). The hit sampling is on
     -- our client ticks; the animation is cosmetic.
     -- fix3: real attack clip from the animation scan (Anims.lua). The old
@@ -131,12 +138,13 @@ local function startSwing(index)
     local anim = tagged and tagged.key or Anims.ForSwing(index)
     if anim then
         local clipS = tagged and tagged.dur and tagged.dur > 0 and tagged.dur or nil
-        ClientNet.PlayAnim(anim, clipS)
+        ClientNet.PlayAnim(anim, clipS and clipS / rate or nil)
         -- The swing owns the body for its clip (or the data fallback): jump
-        -- clips wait, the lift doesn't (Client/Combat/Actions.lua).
-        local timingS = (def.windup_ms + def.active_ms + def.recovery_ms) / 1000
-        local actS = math.max(clipS or airAction.swing_s, timingS)
-        Actions.Begin("swing", actS)
+        -- clips wait, the lift doesn't (Client/Combat/Actions.lua). A faster
+        -- swing plays its clip at that rate.
+        local timingS = (windup + active + recovery) / 1000
+        local actS = math.max((clipS or airAction.swing_s) / rate, timingS)
+        Actions.Begin("swing", actS, rate > 1.001 and rate or nil)
         Log.Write(string.format("Swing: #%d anim %s clip=%s action=%.2fs%s", index, tostring(anim),
             clipS and string.format("%.2fs", clipS) or "?", actS, State.jumping and " (airborne)" or ""))
         if tagged and not State["tagLogged" .. index] then

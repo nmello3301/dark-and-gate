@@ -23,6 +23,13 @@ using "INVULNERABLE"
 data "StackId" "DAG_GODMODE"
 data "StatusPropertyFlags" "IsInvulnerable;IsInvulnerableVisible;IgnoreResting"
 
+new entry "DAG_NO_FALL_DAMAGE"
+type "StatusData"
+data "StatusType" "BOOST"
+data "StackId" "DAG_NO_FALL_DAMAGE"
+data "Boosts" "IgnoreFallDamage()"
+data "StatusPropertyFlags" "DisableOverhead;DisableCombatlog;DisablePortraitIndicator;IgnoreResting"
+
 new entry "DAG_HP_BONUS_25"
 type "StatusData"
 data "StatusType" "BOOST"

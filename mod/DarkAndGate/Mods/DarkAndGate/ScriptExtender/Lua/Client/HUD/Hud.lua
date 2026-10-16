@@ -35,6 +35,7 @@ local SpellDefs  = Ext.Require("Shared/SpellDefs.lua")
 local FullPov    = Ext.Require("FullPov.lua")
 local HotbarMenu = Ext.Require("Client/HUD/HotbarMenu.lua")
 local GiveUpButton = Ext.Require("Client/HUD/GiveUpButton.lua")
+local MetaMenu = Ext.Require("Client/HUD/MetaMenu.lua")
 local WindowFlags = Ext.Require("Client/HUD/WindowFlags.lua")
 local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
@@ -553,7 +554,7 @@ local function tick()
     -- press must not land on an ImGui window still under the cursor (SE would
     -- give it to ImGui and the camera would stay stuck until MMB twice).
     -- (and while the downed screen's Give up button shows: Client/Downed.lua)
-    local free = active and (menu or HotbarMenu.Pinned() or GiveUpButton.Shown())
+    local free = active and (menu or HotbarMenu.Pinned() or GiveUpButton.Shown() or MetaMenu.Shown())
     local t0 = now()
     -- Our input capture pauses while a BG3 panel is open and for the same
     -- release tail as mouse-look (Client/Combat/Input.lua; our own pinned
@@ -569,7 +570,7 @@ local function tick()
         if not M.menuOpen then
             M.menuOpen = true
             FullPov.SetMenuOpen(true)
-            Log.Write("Hud: " .. (menu and ("menu " .. tostring(menuName)) or (GiveUpButton.Shown() and "Give up button" or "Prepare Hotbar menu"))
+            Log.Write("Hud: " .. (menu and ("menu " .. tostring(menuName)) or (GiveUpButton.Shown() and "Give up button" or (MetaMenu.Shown() and "Meta-Points menu" or "Prepare Hotbar menu")))
                 .. " open -> cursor free (mouse-look off)"
                 .. (menu and ", BG3 HUD back" or ""))
             M.probeAt, M.probeWhy = t0 + (cfg.cursor_probe_ms or 400), "menu open"

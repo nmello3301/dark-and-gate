@@ -25,6 +25,8 @@ local airAction = Ext.Require("data/movement.lua").air_action
 local Movement  = Ext.Require("Client/Movement/Movement.lua")
 local Targeting = Ext.Require("Client/Combat/Targeting.lua")
 local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
+local MetaPoints = Ext.Require("Shared/MetaPoints.lua")
+local ConsoleForward = Ext.Require("Shared/ConsoleForward.lua")
 
 local M = {}
 
@@ -82,7 +84,7 @@ function M.Cast(spellId)
         Log.Write(string.format("Spells: %s aim %s %.1f m at (%.2f,%.2f,%.2f) from eye (%.2f,%.2f,%.2f) dir (%.3f,%.3f,%.3f)%s",
             spellId, straight.via, straight.distance, p[1], p[2], p[3],
             straight.eye[1], straight.eye[2], straight.eye[3], straight.fwd[1], straight.fwd[2], straight.fwd[3],
-            straight.target and (" target " .. straight.target) or ""))
+            straight.target and (" target " .. straight.target) or (straight.via == "world" and (" groups " .. Aim.LastWorldGroups()) or "")))
     else
         local t = (kind == "target") and Aim.TargetAtCrosshair(range) or nil
         if t then
@@ -136,19 +138,26 @@ function M.CastTargets(spellId, targets)
 end
 
 -- Channelled casting. Cast time = base (data/spells.lua base_cast_s, per
--- spell override, or !dag_cast_time) x the product of the modifiers.
+-- spell override, or !dag_cast_time) x the product of the modifiers x the
+-- caster's WIS curve (Meta-Points cast_time), floored at
+-- min_action_interval. The server checks the release with its own.
+-- uuid: whose cast time (nil = the character you control).
 local castMods = {}
 local baseOverride = nil
 function M.AddCastTimeModifier(id, fn) castMods[id] = fn; Log.Write("Spells: cast-time modifier added " .. tostring(id)) end
 function M.RemoveCastTimeModifier(id) castMods[id] = nil end
-function M.CastTime(spellId)
+function M.BaseCastTime(spellId)
     local def = SpellDefs.Get(spellId)
-    local t = baseOverride or (def and (def.base_cast_s or def.cast_time_s)) or spells.base_cast_s or spells.cast_time_s or 0
+    return baseOverride or (def and (def.base_cast_s or def.cast_time_s)) or spells.base_cast_s or spells.cast_time_s or 0
+end
+function M.CastTime(spellId, uuid)
+    local t = M.BaseCastTime(spellId)
     for id, fn in pairs(castMods) do
         local ok, f = pcall(fn, spellId)
         if ok and type(f) == "number" and f > 0 then t = t * f end
     end
-    return t
+    t = t * MetaPoints.Mult(uuid or Me.Uuid(), "cast_time")
+    return MetaPoints.Floor(t)
 end
 -- Seconds until the armed spell may be released (0 = ready). armedAt
 -- comes from Hotbar.PressSlot; the cast time is fixed at arm time.
@@ -179,10 +188,11 @@ function M.Register()
     Targeting.SetCaster(M.CastTargets, M.ReadyIn)
     Targeting.Register()
     Ext.Events.Tick:Subscribe(function() pcall(tick) end)
-    Ext.RegisterConsoleCommand("dag_cast_time", function(_, s)
+    -- !dag_cast_time <s>: here and on the server (it checks releases with its own).
+    ConsoleForward.Local("dag_cast_time", function(_, s)
         local v = tonumber(s)
         baseOverride = (v and v > 0) and v or nil
-        Log.Write(string.format("Spells: base cast time = %s (Fire Bolt now %.2fs)",
+        Log.Write(string.format("Spells: base cast time = %s (Fire Bolt now %.2fs with your WIS points)",
             baseOverride and string.format("%.2fs (override)", baseOverride) or "data", M.CastTime("Projectile_FireBolt")))
     end)
     -- Casting slows the caster on the ground (data/spells.lua

@@ -20,6 +20,10 @@ Ext.Events.SessionLoaded:Subscribe(function()
     Log.Write("SessionLoaded (server).")
 end)
 
+-- Meta-Points: the user variable is registered when this loads (before any
+-- save is read, SE docs).
+Ext.Require("Shared/MetaPoints.lua")
+
 local ServerNet = Ext.Require("Server/Net.lua")
 ServerNet.Register()
 
@@ -91,6 +95,8 @@ Ext.Require("Server/Combat/AirSurfaces.lua").Register()
 Ext.Require("Server/Combat/TestKit.lua").Register()
 -- !dag_hp 50 [party]: max HP bonus (BG3's IncreaseMaxHP(N%) on a hidden status).
 Ext.Require("Server/Combat/HpBonus.lua").Register()
+-- No fall damage for the party (BG3's IgnoreFallDamage() on a hidden status).
+Ext.Require("Server/Combat/NoFallDamage.lua").Register()
 -- !dag_play from a client: the server's parts on, level / character creation info.
 Ext.Require("Server/PlayMode.lua").Register()
 -- Dialogues / cutscenes: clients hide our HUD and release input (Server/Scene.lua).
@@ -100,6 +106,25 @@ Ext.Require("Server/MP.lua").Register()
 -- !dag_move_metrics: the server's own position of a client's character, for
 -- the client/server drift (Client/Movement/MoveMetrics.lua).
 Ext.Require("Server/MoveProbe.lua").Register()
+
+-- Meta-Points: the per-character point pool (Server/MetaPoints.lua) and its
+-- damage side (Server/Combat/MetaDamage.lua: spell damage, enemy knobs, fall guard).
+Ext.Require("Server/Combat/MetaDamage.lua").Register()
+local MetaPointsServer = Ext.Require("Server/MetaPoints.lua")
+MetaPointsServer.Register()
+MetaPointsServer.AddDescriber(function(uuid)
+    local SpellCastM = Ext.Require("Server/Combat/SpellCast.lua")
+    local BowsM = Ext.Require("Server/Combat/Bows.lua")
+    local MC = Ext.Require("Shared/MeleeCooldown.lua")
+    local cd = MC.Seconds("longsword", uuid)
+    return {
+        string.format("cast time %.3f s (Fire Bolt, server), bow draw %.3f s, melee cooldown %.3f s (swing x%.2f), shield block %.0f %%",
+            SpellCastM.CastTimeFor(uuid, "Projectile_FireBolt"), BowsM.DrawTime(uuid), cd, MC.SwingRate(cd, 420),
+            Ext.Require("Server/Combat/Shields.lua").ReductionFor(uuid) * 100),
+        Ext.Require("Server/Combat/Mana.lua").Describe(uuid),
+        Ext.Require("Server/Combat/MetaDamage.lua").Describe(),
+    }
+end)
 
 -- Animation browser + gallery (server side: preview copies).
 local AnimLib = Ext.Require("Server/AnimLib.lua")

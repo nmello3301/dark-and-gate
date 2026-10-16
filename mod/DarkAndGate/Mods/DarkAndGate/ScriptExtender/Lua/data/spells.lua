@@ -14,12 +14,12 @@ return {
     -- casting (its prepare animation plays and loops); LMB releases it,
     -- but only once cast_time_s has passed. Held as long as you like.
     -- Per-spell `base_cast_s` overrides this. The effective cast time is
-    -- base x the product of Spells.AddCastTimeModifier factors (future
-    -- traits); !dag_cast_time <s> overrides the base for the session.
+    -- base x the product of Spells.AddCastTimeModifier factors x the
+    -- caster's WIS curve (Meta-Points cast_time), floored at
+    -- data/metapoints.lua min_action_interval; the server computes its own
+    -- (Server/Combat/SpellCast.lua). !dag_cast_time <s> overrides the base
+    -- for the session (client and server).
     base_cast_s = 2.0,
-    -- The server accepts the client's effective cast time down to this
-    -- (modifiers are client-side until traits exist server-side).
-    min_cast_s = 0.3,
     -- The server accepts a release this much earlier than cast_time_s
     -- (network latency between the arm and the cast messages).
     cast_time_tolerance_s = 0.25,

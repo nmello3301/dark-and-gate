@@ -309,7 +309,7 @@ end
 function M.OnRelease()
     local d = draw
     if not d then return false end
-    local f = math.min(1, (now() - d.t0) / 1000 / d.drawS)
+    local f = math.min(1, (now() - d.t0) / 1000 / math.max(d.drawS, 1e-3))
     if f < cfg.min_draw then
         M.Cancel(string.format("let go at %.0f %%, below %.0f %%", f * 100, cfg.min_draw * 100))
         return true
@@ -370,7 +370,7 @@ local function tick()
             if draw.inst then FullPov.SetClipRates(draw.inst, { [draw.step.key] = draw.step.rate }) end
             draw.step = nil
         end
-        local f = math.min(1, (t - draw.t0) / 1000 / draw.drawS)
+        local f = math.min(1, (t - draw.t0) / 1000 / math.max(draw.drawS, 1e-3))
         setHud(f)
         if f >= 1 and not draw.full then
             draw.full = true

@@ -20,6 +20,8 @@ local CastRequest = Ext.Require("Server/Combat/CastRequest.lua")
 local spells = Ext.Require("data/spells.lua")
 local projData = Ext.Require("data/projectiles.lua")
 local SpellRange = Ext.Require("Shared/SpellRange.lua")
+local MetaPoints = Ext.Require("Shared/MetaPoints.lua")
+local ConsoleForward = Ext.Require("Shared/ConsoleForward.lua")
 
 local M = {}
 
@@ -125,18 +127,30 @@ local function knows(caster, spellId)
 end
 
 -- Channelled casting: when each user armed which spell (SpellArm).
-local armed = {}   -- userId -> { spell, at = ms }
+local armed = {}   -- userId -> { spell, at = ms, castTime = s (the server's own) }
 local function nowMs() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
+
+-- The server's own cast time for a caster (Meta-Points 2026-10-15: no longer
+-- the client's number): base (per spell, data, or !dag_cast_time) x the
+-- caster's WIS curve, floored at min_action_interval.
+local castOverride = nil
+local function serverCastTime(caster, spellId)
+    local def = SpellDefs.Get(spellId)
+    local base = castOverride or (def and (def.base_cast_s or def.cast_time_s)) or spells.base_cast_s or spells.cast_time_s or 0
+    return MetaPoints.Floor(base * MetaPoints.Mult(caster, "cast_time"))
+end
+M.CastTimeFor = serverCastTime
 
 function M.Register()
     Ext.RegisterNetListener(Net.Channels.SpellArm, function(_, payload, userId)
         local ok, p = pcall(Ext.Json.Parse, payload)
         if not ok then return end
         if p.spell and p.spell ~= "" then
-            -- The client's effective cast time (modifiers), floored at min_cast_s.
-            local ct = tonumber(p.castTime)
-            if ct then ct = math.max(ct, spells.min_cast_s or 0.3) end
-            armed[userId] = { spell = p.spell, at = nowMs(), castTime = ct }
+            -- The cast time is the server's own, set below once the caster is
+            -- known (next tick); the client's number is only logged.
+            local clientCt = tonumber(p.castTime)
+            local entry = { spell = p.spell, at = nowMs(), clientCastTime = clientCt }
+            armed[userId] = entry
             -- Weapon stance like vanilla targeting: the prepare clip resolves
             -- in the active animation set, which follows the drawn weapon
             -- (vanilla Fire Bolt draws Gale's staff on select). Osiris
@@ -146,6 +160,13 @@ function M.Register()
             ServerNet.EnqueueOsi(function()
                 local caster = ServerNet.UserToCharacter(userId)
                 if not caster then return end
+                if armed[userId] == entry then
+                    entry.castTime = serverCastTime(caster, spell)
+                    if clientCt and math.abs(clientCt - entry.castTime) > 0.02 then
+                        Log.Write(string.format("SpellCast: arm %s: cast time %.2f s (server) vs %.2f s (client) -> the server's",
+                            spell, entry.castTime, clientCt))
+                    end
+                end
                 local okS, st = pcall(Ext.Stats.Get, spell)
                 local sheathing = okS and st and tostring(st.Sheathing or "") or ""
                 local U = spells.spell_anims and spells.spell_anims.unsheath or {}
@@ -162,6 +183,14 @@ function M.Register()
             armed[userId] = nil
         end
     end)
+    -- !dag_cast_time <s> (typed in the client console: the client changes its
+    -- own base too, Client/Combat/Spells.lua).
+    ConsoleForward.Server("dag_cast_time", function(_, s)
+        local v = tonumber(s)
+        castOverride = (v and v > 0) and v or nil
+        Log.Write(string.format("SpellCast: base cast time %s (the caster's WIS curve applies on top)",
+            castOverride and string.format("%.2f s (override)", castOverride) or "from data"))
+    end)
     -- Replace the Spike 5 handler at the same channel. Last subscriber wins
     -- for a given channel? SE's RegisterNetListener stacks subscribers. Guard
     -- by only letting ours accept well-formed payloads with the "withMana"
@@ -174,7 +203,10 @@ function M.Register()
         do
             local def0 = SpellDefs.Get(parsed.spell)
             local a = armed[userId]
-            local base = (a and a.castTime) or (def0 and (def0.base_cast_s or def0.cast_time_s)) or spells.base_cast_s or spells.cast_time_s or 0
+            -- The server's cast time from the arm (or, before it was computed,
+            -- the data base: never shorter than the client claimed).
+            local base = (a and a.castTime) or math.max(tonumber(a and a.clientCastTime) or 0,
+                MetaPoints.Floor((def0 and (def0.base_cast_s or def0.cast_time_s)) or spells.base_cast_s or spells.cast_time_s or 0))
             local need = base - (spells.cast_time_tolerance_s or 0)
             local held = a and a.spell == parsed.spell and (nowMs() - a.at) / 1000 or nil
             if need > 0 and (not held or held < need) then

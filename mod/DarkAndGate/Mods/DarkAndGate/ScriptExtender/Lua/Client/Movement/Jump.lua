@@ -57,6 +57,7 @@ local JumpAnims = Ext.Require("Client/Movement/JumpAnims.lua")
 local movement  = Ext.Require("data/movement.lua")
 local Actions   = Ext.Require("Client/Combat/Actions.lua")
 local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
+local MetaPoints = Ext.Require("Shared/MetaPoints.lua")
 
 local M = {}
 
@@ -245,10 +246,14 @@ function M.OnSpace()
         clipsWhy = moving and ("on, moving (policy " .. J.movingPolicy .. ")") or "on"
     end
     local base, baseSrc = baseAir(P.ascend, P.descend)
-    local T = base * cfg("duration_mult")
+    -- Meta-Points CON: the apex height x the curve. The jump sets its apex
+    -- height directly (no launch velocity), so h is multiplied as is; the
+    -- airtime x sqrt(height mult) keeps the same gravity (x10 -> x3.16).
+    local hMult = math.max(0, MetaPoints.Mult(Me.Uuid(), "jump_height"))
+    local T = base * cfg("duration_mult") * math.sqrt(hMult)
     if T < D.min_air_s then T = D.min_air_s end
     if T > D.max_air_s then T = D.max_air_s end
-    local h, k = cfg("height_m"), cfg("apex_flatness")
+    local h, k = cfg("height_m") * hMult, cfg("apex_flatness")
 
     J.seq = J.seq + 1
     J.active = true
@@ -290,8 +295,10 @@ function M.OnSpace()
     end
 
     Log.Write(string.format(
-        "Jump: start seq=%d T=%.2fs h=%.2fm k=%.1f base=%.2fs(%s) mult=%.2f anim=%s phases=%d clips=%s data=%s speed=%.1fm/s moving=%s wasd=%s actions=%s",
-        J.seq, T, h, k, base, baseSrc, cfg("duration_mult"), animPath, #J.events, clipsWhy, JumpAnims.State(),
+        "Jump: start seq=%d T=%.2fs h=%.2fm k=%.1f base=%.2fs(%s) mult=%.2f%s anim=%s phases=%d clips=%s data=%s speed=%.1fm/s moving=%s wasd=%s actions=%s",
+        J.seq, T, h, k, base, baseSrc, cfg("duration_mult"),
+        math.abs(hMult - 1) > 1e-3 and string.format(" CON height x%.2f airtime x%.2f", hMult, math.sqrt(hMult)) or "",
+        animPath, #J.events, clipsWhy, JumpAnims.State(),
         speed.v, moving and "yes" or "no", moveKeysHeld() and "held" or "none", Actions.Describe()))
 end
 

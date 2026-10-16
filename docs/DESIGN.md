@@ -99,12 +99,14 @@ Each weapon family has its own chain of three swings, and the blade's path throu
 
 **Melee cooldown (decided 2026-10-13).** At most one swing per **1.5 s**, measured from swing start to swing start, so spamming left click can't out-swing a fight. A click in the last 0.3 s of the cooldown is kept and swings the moment it ends; earlier clicks do nothing. The chain still advances: its combo window opens when the cooldown ends. The server enforces the cooldown too: a swing that starts too soon lands nothing. Enemies already act on their own pace (4–10 s, `data/realtime.lua`), so today the cooldown only limits players. 1.5 s is a starting value (`data/combat.lua` `melee.cooldown_s`; live `!dag_melee_cooldown <s>`), and every weapon's data already carries a `cooldown_mult` (1.0 for now).
 
-Possible scaling for balancing and the RPG layer (not built; all multiply the base, clamped to about 0.4–3 s):
+**Built (2026-10-15):** Meta-Points DEX scales the cooldown down to ×0.10 (see Meta-Points); the clamp below doesn't apply to it. Below the swing's own length the swing plays faster.
+
+Possible scaling for balancing (not built; all multiply the base, clamped to about 0.4–3 s):
 
 - **Weapon family** (`cooldown_mult`): short blades and unarmed about ×0.65, finesse and staves ×0.8, longswords ×1.0, axes and light blunt ×1.1, great blades and polearms ×1.25, heavy blunt ×1.45.
 - **Chain step:** a per-swing multiplier, so a finisher (overhead, lunge) costs more than the openers.
 - **Weapon properties:** Light ×0.85, Heavy ×1.15; a versatile weapon held in two hands slower than in one.
-- **Ability score:** the attack ability (STR, or DEX for finesse) shortens it, for example −3 % per modifier point, capped at −15 %.
+- ~~**Ability score:** the attack ability (STR, or DEX for finesse) shortens it~~ superseded by Meta-Points DEX (2026-10-15).
 - **Level and class:** Extra Attack's "+20 % swing speed per tier" becomes ×0.83 per tier here; monks' Martial Arts gives unarmed and monk weapons its own lower base.
 - **Buffs and conditions:** Haste ×0.5, Action Surge ×0.67 for its 10 s, Slow ×2, Exhaustion ×1.1 per level, frightened ×1.2.
 - **Gear and feats:** heavy armour without proficiency ×1.2; Great Weapon Master trades a longer cooldown for its damage bonus; Dual Wielder and Polearm Master give the off-hand and butt strikes their own short cooldown.
@@ -153,7 +155,7 @@ Every spell is the unchanged BG3 spell, cast through script at the point or targ
 | Self | Shield of Faith, Mirror Image, Blur | Instant on key press |
 | Reaction | Shield, Counterspell, Hellish Rebuke | Used proactively (see below) |
 
-**Cast time (channelled).** Every spell has a cast time: 2.0 s base for now (`data/spells.lua`), later scaled by character traits. The prepare animation is stretched over it, then loops at READY. The server rejects a release before the cast time. While the cast time runs on the ground, movement is slowed to ×0.7; once READY, and in the air, it is full speed. Casting never roots the caster. **A hit while channelling does not interrupt the cast**: no cancel and no timer reset.
+**Cast time (channelled).** Every spell has a cast time: 2.0 s base (`data/spells.lua`), scaled by the caster's Meta-Points WIS (down to 0, floored at `min_action_interval`). The server computes its own. The prepare animation is stretched over it, then loops at READY. The server rejects a release before the cast time. While the cast time runs on the ground, movement is slowed to ×0.7; once READY, and in the air, it is full speed. Casting never roots the caster. **A hit while channelling does not interrupt the cast**: no cancel and no timer reset.
 
 **Range** (DECISIONS 2026-10-12). Two first-person ranges replace BG3's (mostly 18 m):
 - **70 m:** spells that fly at or hit one target (Fire Bolt, Ray of Frost, Guiding Bolt, Magic Missile, Sacred Flame, Hold Person, Healing Word) and arrows / bolts. A shot that hits nothing ends at 70 m.
@@ -205,6 +207,8 @@ Max mana         = 30 + 10 × CL + 5 × M
 Regen per second = 0.5 + 0.1 × CL + 0.1 × M
 ```
 
+Meta-Points INT multiplies max mana (×1–×5, 2026-10-15); current mana keeps its share of max when max changes.
+
 Max mana at level 12 (modifier +3 at level 1, +4 at 4, +5 at 8): full casters 175, half casters 115, third casters 95. Half and third casters start later and grow more slowly, so a level-12 Paladin has about two-thirds of a Wizard's pool.
 
 **Cost by spell level.** Cantrips are free and limited only by their cast time. Upcasting pays the cost of the level cast at.
@@ -246,6 +250,35 @@ Max mana at level 12 (modifier +3 at level 1, +4 at 4, +5 at 8): full casters 17
 | Enemy casters | Same rules, with CL taken from their level, so enemies cannot spam their best spells |
 
 **Tunables (MCM).** Every number in the formulas and the cost table, plus the Warlock multipliers and an out-of-combat regeneration multiplier (default 1.0, matching the steady-rate rule). Mana is owned by the server.
+
+## Meta-Points (progression, decided 2026-10-15)
+
+A point pool per party member, parallel to BG3's ability scores: it never reads or changes STR, DEX and the rest, and only feeds Dark and Gate's real-time combat knobs. Data: `data/metapoints.lua`; code: `Shared/MetaPoints.lua`, `Server/MetaPoints.lua`, `Client/MetaPoints.lua`, `Client/HUD/MetaMenu.lua`, `Server/Combat/MetaDamage.lua`.
+
+- **Points.** 8 per character level from level 1 (96 at level 12). Six stats with the D&D names: STR, DEX, INT, WIS, CON, CHA, 0–96 points each, no other cap. Unspent points carry over. An existing save gets 8 × the current level at once, because the total comes from the level. Points are saved per character (an SE user variable); a save without them loads with 0 spent. The server owns them: the client only asks.
+- **Menu (P, configurable).** The six stats with spent and pending points and − / + (and +5); every effect's value now → after the pending points; Confirm locks them, Reset drops the pending ones. **Reset all points** refunds everything, only in camp by default (`respec_mode`: camp | anywhere | off), on a second click. A notice on level-up when points are waiting.
+- **Effects.** Each is a piecewise-linear curve of (points, value) breakpoints, linear between them and flat after the last. All of them live in `data/metapoints.lua`, and `Script Extender\DarkAndGate\metapoints.json` overrides them without a repack (`!dag_meta_reload`; in co-op the host's file decides):
+
+| Effect | Stat | Applies to | Breakpoints (points → value) |
+| --- | --- | --- | --- |
+| Melee damage mult | STR | melee weapon damage | 0→1.0, 48→3.0, 96→4.0 |
+| Bow draw time mult | STR | bow draw time | 0→1.0, 67→0.10, 96→0.0 |
+| Ranged damage mult | DEX | ranged weapon damage | 0→1.0, 48→3.0, 96→4.0 |
+| Attack cooldown mult | DEX | melee cooldown | 0→1.0, 86→0.10, 96→0.10 |
+| Spell damage mult | INT | spell damage | 0→1.0, 48→3.0, 96→4.0 |
+| Mana mult | INT | max mana | 0→1.0, 96→5.0 |
+| Cast time mult | WIS | cast time (base 2.0 s) | 0→1.0, 58→0.075, 96→0.0 |
+| Block reduction | CON | shield block (absolute share) | 0→0.40, 96→0.85 |
+| Jump height mult | CON | jump apex height | 0→1.0, 96→10.0 |
+| Move speed mult | CHA | movement speed | 0→1.0, 96→4.0 |
+
+- **Stacking.** The multipliers apply on top of the game's base values and Dark and Gate's existing modifiers (zone, draw, casting slow…). Block replaces the fixed 40 % for party members, and only where a shield block already applies.
+- **Engine safety, not balance.** `min_action_interval` (0.05 s; 0 is allowed) floors the effective cast time, bow draw and melee cooldown, so a held button can't fire every frame. The jump sets its apex height directly (no launch velocity), so CON multiplies the height, and the airtime grows by √(height mult) to keep the same gravity (cap 4.1 s, enough for ×10). There is no fall damage for the party at all (see Real-time combat rules), so a ×10 jump never hurts. Move speed and jump height apply only while first person is live (no dialogue, cutscene or menu), so pathing, cutscenes and dialogue movement don't change.
+- **Melee speed.** Once the DEX cooldown is shorter than the swing itself, the swing (its windows and its clip) plays that much faster, up to ×4 (`data/combat.lua` `melee.max_swing_rate`). The server's swing-to-swing check uses the same cooldown, with its slack capped at half of it.
+- **Who uses what.** A character a player controls uses every effect. A companion on AI uses damage, block, bow draw and cast time; cooldown, move speed and jump work only while a player controls it (marked * in the menu).
+- **Spell damage** is BG3's own. It is scaled in the Script Extender's server damage event before it lands, so resistances apply once. The mod checks that on the first hits; if BG3 ignores it, the difference is dealt right after the hit instead.
+- **Enemies.** Meta-Points are the party's only. `enemy_hp_mult` and `enemy_damage_mult` (both 1.0) are there to compensate later.
+- **Later.** WIS will also cover parry and sneak: each is a new entry in `data/metapoints.lua` plus the code that reads it.
 
 ## Hotbar and the Prepare Hotbar tab
 
@@ -324,7 +357,8 @@ Full rules: [design/combat-rules.md](design/combat-rules.md) and [design/interac
 - **Fights are real time on Brawl's loop.** No turns; vanilla combat groups join together. Rules stay BG3's at **1 turn = 6 s**. All reactions and Sneak Attack are off for now, each with a rework note ([rework-list.md](rework-list.md)). `!dag_rt off` is for debugging only.
 - **Enemy AI uses our rules.** Pathfinding and choices are Brawl's / BG3's. Melee goes through our swing (same weapon data, committed direction, arc, wall stop, shield). Archers and casters go through our projectiles, with human-like aim: reaction delay, error cone, misjudged lead (`data/ai.lua`). Other spells take our cast time; area spells commit their point when the cast starts.
 - **Getting hit.** The player has no hit reaction; enemies keep BG3's and die at 0 HP. A hit doesn't interrupt a cast.
-- **Shields are passive.** About 40 % comes off any hit that lands on the shield disc.
+- **No fall damage** for party members (decided 2026-10-15): they carry BG3's own `IgnoreFallDamage()` boost (Feather Fall's) on a hidden status. Enemies keep BG3's fall damage. `data/combat.lua` `fall_damage = true` brings it back.
+- **Shields are passive.** About 40 % comes off any hit that lands on the shield disc (a party member's Meta-Points CON curve: 40–85 %).
 - **Downed.** At 0 HP the camera orbits the body (spectate with Space) for a **3 min bleed-out**, paused while someone revives. Revive = **hold F 3 s within 1.5 m**: up at 1 HP; only letting go of F or another action cancels it. Companions revive first (except in camp). Death is undone only the vanilla ways. Nobody attacks a downed character (hits can't kill one), you stay in control of your own body (BG3 would hand control to a companion, who would then stop fighting), and BG3's game over waits until the last downed party member has bled out instead of coming the moment everyone is down. When nobody in the party is left standing, the downed screen offers **Give up** (a button, or G; twice to confirm): BG3's game-over screen comes up at once, and with other players once every player has given up (DECISIONS 2026-10-13).
 - **C = crouch = BG3's sneak.** Crouched speed is 60 %, and the vision cones are hidden in first person. Standing in an enemy's cone = detected. Crouched in a cone = d20 + Stealth vs passive Perception once per enemy per 6 s; failing pulls its group into the fight.
 - **F interacts** with what the crosshair is on (talk, loot, doors, levers, pick up, climb), exactly like a click; only interactive things are highlighted. A downed ally in range wins: hold F to revive. BG3's panels (dialogue, loot, trade, inventory, map) free the mouse and pause our input.

@@ -33,6 +33,7 @@ local Party          = Ext.Require("Server/Party.lua")
 local Projectiles    = Ext.Require("Server/Combat/Projectiles.lua")
 local SpellCast      = Ext.Require("Server/Combat/SpellCast.lua")
 local cfg            = Ext.Require("data/bows.lua")
+local MetaPoints     = Ext.Require("Shared/MetaPoints.lua")
 
 local M = {}
 
@@ -94,8 +95,11 @@ function M.Family(uuid)
     return info
 end
 
--- The draw time (the hook for the stat that will scale it; not yet).
+-- The draw time: a party member's STR curve on top (Meta-Points bow_draw),
+-- floored at min_action_interval; everyone else the data value.
 function M.DrawTime(uuid)
+    local u = Party.Norm(uuid)
+    if u and Party.IsMember(u) then return MetaPoints.Floor(cfg.draw_s * MetaPoints.Mult(u, "bow_draw")) end
     return cfg.draw_s
 end
 
@@ -216,7 +220,7 @@ local function release(peer, p)
             return
         end
         local drawS = M.DrawTime(u)
-        local fServer = math.min(1, ((t - d.at) / 1000 + (cfg.release_tolerance_s or 0)) / drawS)
+        local fServer = drawS > 1e-3 and math.min(1, ((t - d.at) / 1000 + (cfg.release_tolerance_s or 0)) / drawS) or 1
         draw = math.min(tonumber(p.draw) or fServer, fServer)
         if draw < (cfg.min_draw or 0) then
             Log.Write(string.format("Bows: %s let go at %.0f %% (< %.0f %%): no shot", name(u), draw * 100, (cfg.min_draw or 0) * 100))

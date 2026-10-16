@@ -21,6 +21,17 @@ return {
     origin = "eye",
     origin_fwd_m  = 0.6,
     origin_down_m = 0.25,
+    -- World line checks, the crosshair and our flight (Shared/WorldRay.lua;
+    -- playtest 2026-10-15: under a roof the camera sat inside an invisible
+    -- shape and every shot hit it at once).
+    --   ignore_groups  physics groups left out (CanShootThrough: what BG3's
+    --                  own projectiles fly through)
+    --   min_hit_m      hits closer than this to a line's start are a shape the
+    --                  line starts inside: skipped
+    world_ray = {
+        ignore_groups = { "CanShootThrough" },
+        min_hit_m     = 0.02,
+    },
     -- The visual clone is cast at a point visual_overshoot_m past the aim
     -- point, at most visual_far_m along the aim line (2026-10-12: was a fixed
     -- 150 m, often under the ground; in a fight BG3's spell camera went to

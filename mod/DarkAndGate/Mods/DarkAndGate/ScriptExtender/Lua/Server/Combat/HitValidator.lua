@@ -24,6 +24,7 @@ local MPFeatures = Ext.Require("Shared/MPFeatures.lua")
 local PosHistory = Ext.Require("Server/PosHistory.lua")
 local mpData = Ext.Require("data/mp.lua")
 local longsword = Ext.Require("data/weapons/longsword.lua")
+local MetaDamage = Ext.Require("Server/Combat/MetaDamage.lua")
 
 -- The host's own weapon data decides damage and reach (multiplayer MP-2:
 -- the client's numbers were trusted). Single player: the client sends the
@@ -126,7 +127,11 @@ function M.Register()
             local nonce = claim.swingNonce or 0
             local last = lastSwing[attacker]
             if not last or last.nonce ~= nonce then
-                local minGap = (MeleeCooldown.Seconds(claim.weapon) - MeleeCooldown.ServerSlack()) * 1000
+                -- The attacker's own cooldown (Meta-Points DEX); the swing
+                -- plays faster below its own length (MeleeCooldown.SwingRate),
+                -- so swing start to swing start is still the cooldown.
+                local cd = MeleeCooldown.Seconds(claim.weapon, attacker)
+                local minGap = (cd - MeleeCooldown.ServerSlack(cd)) * 1000
                 if last and recvAt - last.at < minGap then
                     Log.Write(string.format("HitValidator: REJECT melee cooldown: %d ms after the last swing's hit (min %d) target=%s",
                         math.floor(recvAt - last.at), math.floor(minGap), target))
@@ -146,12 +151,16 @@ function M.Register()
             if zone ~= "head" and zone ~= "torso" and zone ~= "limbs" then zone = "torso" end
             local zoneMult = Hitbox.ZoneMult(zone)
             local dmg = math.max(1, math.floor((def.damage or 1) * zoneMult))
+            -- Meta-Points STR (melee damage).
+            local metaNote = ""
+            local scaled, mult = MetaDamage.Scale(dmg, attacker, "melee")
+            if mult ~= 1.0 then metaNote = string.format(" STR x%.2f (%d -> %d)", mult, dmg, scaled); dmg = scaled end
             -- Passive shield (DECISIONS 2026-10-12): the swing's line from the
             -- eye to the hit point crosses the target's shield disc first.
             local shieldNote = ""
             local hp = vec(claim.hitPoint)
             if hp and Shields.Has(target) and Shields.Blocks(target, eye, hp, 0.05) then
-                local kept, r = Shields.Reduce(dmg)
+                local kept, r = Shields.Reduce(dmg, target)
                 shieldNote = string.format(" SHIELD -%.0f%% (%d -> %d)", r * 100, dmg, kept)
                 dmg = math.max(0, kept)
             end
@@ -167,7 +176,7 @@ function M.Register()
             if not okD then
                 Log.Write("HitValidator: ApplyDamage err: " .. tostring(err))
             end
-            Log.Write(string.format("HitValidator: HIT %s zone=%s dmg=%d dist=%.2f lift=%.2f%s", target, zone, dmg, d, cyl.lift, shieldNote))
+            Log.Write(string.format("HitValidator: HIT %s zone=%s dmg=%d dist=%.2f lift=%.2f%s%s", target, zone, dmg, d, cyl.lift, metaNote, shieldNote))
 
             Ext.Net.PostMessageToUser(userId, Net.Channels.HitResult, Ext.Json.Stringify({
                 target = target, zone = zone, damage = dmg, swingNonce = claim.swingNonce,

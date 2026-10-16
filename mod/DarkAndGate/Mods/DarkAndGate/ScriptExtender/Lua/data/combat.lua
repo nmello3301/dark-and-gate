@@ -12,7 +12,13 @@ return {
         cooldown_s     = 1.5,
         buffer_s       = 0.3,   -- a click this close to the end of the cooldown waits and swings on time; earlier clicks are ignored
         server_slack_s = 0.4,   -- server: a new swing's first hit may arrive this much sooner than the cooldown (swings hit at different points of their windup / active window; lag)
+        server_slack_frac = 0.5, -- ...but at most this share of the cooldown (fast high-DEX swings, Meta-Points)
+        max_swing_rate = 4.0,   -- a cooldown shorter than the swing plays the swing (and its clip) faster, at most this much (Meta-Points DEX, 2026-10-15)
     },
+    -- No fall damage (developer 2026-10-15): party members carry BG3's
+    -- IgnoreFallDamage() boost (Server/Combat/NoFallDamage.lua). true = BG3's
+    -- fall damage back.
+    fall_damage = false,
     -- Passive shields: an equipped shield takes this share of the damage of any
     -- melee hit, arrow or projectile spell that lands on it.
     shield = {

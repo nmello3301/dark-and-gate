@@ -150,7 +150,7 @@ return {
         clip_air_s    = 0.80,
         duration_mult = 1.60,
         min_air_s     = 0.30,
-        max_air_s     = 3.00,
+        max_air_s     = 4.10,     -- 2026-10-15: fits a x10 Meta-Points jump (1.28 s x sqrt(10) = 4.05 s; was 3.0)
         apex_flatness = 3.0,
         cooldown_s    = 0.0,      -- 2026-10-13: no recover after landing (was 0.15; bunny hops caught on it)
         buffer_s      = 0.25,     -- bunny-hop grace before landing (2026-10-13)
@@ -183,7 +183,7 @@ return {
         run_speed     = 1.0,
         speed_mult    = 1.0,
         min_mult      = 0.2,
-        max_mult      = 3.0,
+        max_mult      = 5.0,      -- 2026-10-15: room for Meta-Points CHA x4 (was 3.0)
         loco_sync     = true,
         loco_deadband = 0.03,
         idle_speed    = 0.3,

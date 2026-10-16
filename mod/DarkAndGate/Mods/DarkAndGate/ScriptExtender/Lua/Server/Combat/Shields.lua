@@ -11,7 +11,11 @@
 --   Shields.Disc(uuid)                        -> disc or nil (no shield / no transform)
 --   Shields.Blocks(uuid, from, to, pad)       -> distance along from->to if the
 --                                                disc is hit first, else nil
---   Shields.Reduce(amount)                    -> reduced amount, share taken
+--   Shields.Reduce(amount, defender)          -> reduced amount, share taken
+--   Shields.ReductionFor(defender)            -> the share a shield takes: a party
+--                                                member's CON curve (Meta-Points
+--                                                "block", replaces the fixed 40 %),
+--                                                the data value for everyone else
 --   !dag_shield_pct <0-1>   !dag_shield_debug   (also from the client console)
 
 local Log    = Ext.Require("Shared/Log.lua")
@@ -19,6 +23,7 @@ local Shield = Ext.Require("Shared/Shield.lua")
 local Hitbox = Ext.Require("Shared/Hitbox.lua")
 local Party  = Ext.Require("Server/Party.lua")
 local ConsoleForward = Ext.Require("Shared/ConsoleForward.lua")
+local MetaPoints = Ext.Require("Shared/MetaPoints.lua")
 
 local M = {}
 
@@ -82,8 +87,17 @@ function M.Blocks(uuid, from, to, pad)
     return Shield.RayHit(disc, from, { d[1] / L, d[2] / L, d[3] / L }, L, pad)
 end
 
-function M.Reduce(amount)
-    local r = Shield.Reduction()
+function M.ReductionFor(defender)
+    local u = defender and Party.Norm(defender)
+    if u and Party.IsMember(u) then
+        local v = MetaPoints.Value(u, "block")
+        if v then return math.max(0, math.min(1, v)) end
+    end
+    return Shield.Reduction()
+end
+
+function M.Reduce(amount, defender)
+    local r = M.ReductionFor(defender)
     local kept = math.floor((tonumber(amount) or 0) * (1 - r) + 0.5)
     return kept, r
 end
@@ -93,7 +107,7 @@ function M.Register()
     Ext.Osiris.RegisterListener("Unequipped", 2, "after", function(_, char) cache[Party.Norm(char) or ""] = nil end)
     ConsoleForward.Server("dag_shield_pct", function(_, v)
         if v then Shield.SetReduction(v) end
-        Log.Write(string.format("Shields: a hit on a shield loses %.0f %% of its damage (data/combat.lua shield.reduction)", Shield.Reduction() * 100))
+        Log.Write(string.format("Shields: a hit on a shield loses %.0f %% of its damage (data/combat.lua shield.reduction; party members: their CON block curve)", Shield.Reduction() * 100))
     end)
     ConsoleForward.Server("dag_shield_debug", function()
         local n = 0

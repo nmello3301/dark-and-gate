@@ -77,6 +77,16 @@ local hitboxData  = Ext.Require("data/hitbox.lua")
 local cfg         = Ext.Require("data/ai.lua")
 local rtCfg       = Ext.Require("data/realtime.lua")
 local WEAPONS     = { longsword = Ext.Require("data/weapons/longsword.lua") }
+local MetaPoints  = Ext.Require("Shared/MetaPoints.lua")
+local MetaDamage  = Ext.Require("Server/Combat/MetaDamage.lua")
+
+-- AI cast time: a party member's own WIS curve on top (Meta-Points; the AI
+-- uses cast time, bow draw, damage and block, not cooldown / move / jump).
+local function castTimeOf(attacker)
+    local base = cfg.cast_time_s or 0
+    if attacker and Party.IsMember(attacker) then return MetaPoints.Floor(base * MetaPoints.Mult(attacker, "cast_time")) end
+    return base
+end
 
 local M = {}
 
@@ -429,11 +439,13 @@ local function meleeActive(a, t)
                 a.hits[cand] = true
                 local dmg, w = weaponDamage(a.attacker, false)
                 local shield = Shields.Has(cand) and Shields.Blocks(cand, a.eye, hp, 0.05)
+                -- Meta-Points STR for a companion, enemy_damage_mult for an enemy.
+                dmg = MetaDamage.Scale(dmg, a.attacker, "melee")
                 local base = dmg
-                if shield then dmg = Shields.Reduce(dmg) end
+                if shield then dmg = Shields.Reduce(dmg, cand) end
                 local dealt = Damage.Apply(cand, dmg, w.type, a.attacker, "AI swing")
                 a.results[cand] = string.format("HIT for %d %s (%s %s%+d = %d%s) at %.2f m", dealt, w.type, w.name, w.dice, w.mod, base,
-                    shield and string.format(", SHIELD -%.0f %% -> %d", Shield.Reduction() * 100, dmg) or "", dist or 0)
+                    shield and string.format(", SHIELD -%.0f %% -> %d", Shields.ReductionFor(cand) * 100, dmg) or "", dist or 0)
             end
         end
     end
@@ -498,12 +510,12 @@ local function ranged(attacker, target, spell, kind, onSubmitted, onCompleted, o
         if fam and fam.kind == "bow" then a.bow = fam end
     end
     -- A projectile spell is channelled first (our cast time), then aimed.
-    a.aimAt = t + (kind == "projectile" and (cfg.cast_time_s or 0) * 1000 or 0)
+    a.aimAt = t + (kind == "projectile" and castTimeOf(attacker) * 1000 or 0)
     busy[attacker] = a.aimAt + 3000
     pcall(onSubmitted, { RequestGuid = "dag-shot" })
     actions[#actions + 1] = a
     if kind == "projectile" then
-        log(string.format("AI: %s starts casting %s at %s (cast time %.1f s, then aims)", name(attacker), spell, name(target), cfg.cast_time_s or 0))
+        log(string.format("AI: %s starts casting %s at %s (cast time %.2f s, then aims)", name(attacker), spell, name(target), castTimeOf(attacker)))
     end
 end
 
@@ -518,7 +530,7 @@ local function area(attacker, target, spell, onSubmitted, onCompleted, onFailed)
     local r = math.sqrt(math.random()) * dist * math.tan(math.rad(cfg.ranged.aim_error_deg or 0))
     local th = 2 * math.pi * math.random()
     local point = { tf[1] + r * math.cos(th), tf[2], tf[3] + r * math.sin(th) }
-    local ct = (cfg.cast_time_s or 0) * 1000
+    local ct = castTimeOf(attacker) * 1000
     busy[attacker] = t + ct + 1500 + (cfg.busy_pad_ms or 300)
     pcall(onSubmitted, { RequestGuid = "dag-area" })
     actions[#actions + 1] = { kind = "area", attacker = attacker, target = target, spell = spell, point = point, castAt = t + ct,
@@ -531,7 +543,7 @@ end
 local origUse = nil
 local function castLater(attacker, target, spell, isFriendly, onSubmitted, onCompleted, onFailed)
     local t = now()
-    local ct = (cfg.cast_time_s or 0) * 1000
+    local ct = castTimeOf(attacker) * 1000
     busy[attacker] = t + ct + 8000
     actions[#actions + 1] = { kind = "cast", attacker = attacker, target = target, spell = spell, isFriendly = isFriendly, castAt = t + ct,
         state = "wait", onSubmitted = onSubmitted, onCompleted = onCompleted, onFailed = onFailed }
@@ -992,14 +1004,18 @@ local function arrowHit(p, target, pos, zone, shielded)
     local dmg, w = weaponDamage(p.caster, true)
     -- The draw (Server/Combat/Bows.lua Shot): x1 at full draw.
     if p.dmgMult and p.dmgMult ~= 1 then dmg = math.max(1, math.floor(dmg * p.dmgMult + 0.5)) end
+    -- Meta-Points DEX (ranged damage) for a party member, enemy_damage_mult for an enemy.
+    local metaMult
+    dmg, metaMult = MetaDamage.Scale(dmg, p.caster, "ranged")
     local base = dmg
     local mult = Hitbox.ZoneMult(zone or "torso")
     dmg = math.max(1, math.floor(dmg * mult + 0.5))
     local zoned = dmg
-    if shielded then dmg = Shields.Reduce(dmg) end
+    if shielded then dmg = Shields.Reduce(dmg, target) end
     local dealt = Damage.Apply(target, dmg, w.type, p.caster, "arrow")
-    return string.format("%d %s to %s (%s %s%+d = %d%s, %s x%.1f%s)", dealt, w.type, name(target), w.name, w.dice, w.mod, base,
-        (p.dmgMult and p.dmgMult ~= 1) and string.format(" after the draw's x%.2f", p.dmgMult) or "", zone or "torso",
+    return string.format("%d %s to %s (%s %s%+d = %d%s%s, %s x%.1f%s)", dealt, w.type, name(target), w.name, w.dice, w.mod, base,
+        (p.dmgMult and p.dmgMult ~= 1) and string.format(" after the draw's x%.2f", p.dmgMult) or "",
+        (metaMult and metaMult ~= 1) and string.format(" and x%.2f (Meta-Points / enemy damage)", metaMult) or "", zone or "torso",
         mult, shielded and string.format(", SHIELD %d -> %d", zoned, dmg) or "")
 end
 

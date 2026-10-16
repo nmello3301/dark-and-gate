@@ -5,6 +5,13 @@ Versions follow `meta.lsx` (`major.minor.revision`). Every release names the gam
 ## Unreleased
 
 - Jumping up a slope keeps the jump's full height over the slope instead of ending in a short hop (`data/movement.lua` `jump.slope_max_deg`, `!dag_jump_slope`).
+- **Meta-Points:** 8 points per level for every party member to put into STR, DEX, INT, WIS, CON and CHA, which scale melee / ranged / spell damage, bow draw, attack cooldown, cast time, max mana, shield block, jump height and move speed. Menu on **P**; Reset all points in camp; numbers in `Script Extender\DarkAndGate\metapoints.json` (`!dag_meta_reload`). Debug: `!dag_meta_grant`, `!dag_meta_set`, `!dag_meta_reset`, `!dag_meta_print`, `!dag_meta_selftest`, `!dag_meta_xp`.
+- Below the swing's own length, a shorter melee cooldown plays the swing faster.
+- The server computes cast times itself; `!dag_cast_time` sets both sides.
+- No fall damage for the party (BG3's own Feather Fall boost on a hidden status).
+- Spells cast under a roof no longer hit invisible shapes right in front of you.
+- BG3's "Your turn" and other turn notices are hidden in real-time fights.
+- Offline checks: `scripts\test-lua.ps1` (every Lua file compiles; Meta-Points self-test).
 
 ## 0.1.0 (alpha), 2026-10-15
 

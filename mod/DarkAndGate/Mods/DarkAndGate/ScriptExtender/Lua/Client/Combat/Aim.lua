@@ -20,6 +20,7 @@
 local Log = Ext.Require("Shared/Log.lua")
 local Hitbox = Ext.Require("Shared/Hitbox.lua")
 local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
+local WorldRayLib = Ext.Require("Shared/WorldRay.lua")
 
 local M = {}
 
@@ -27,9 +28,8 @@ local M = {}
 -- "not a valid 'PhysicsGroupFlags' bitfield value: Door" inside WorldRay's
 -- pcall, so every world ray returned nil since fix3: client.log never shows
 -- "via ray", only plane / ahead / far, and LineOfSight always said yes.
--- Same groups as the server's ray (Server/Combat/Projectiles.lua).
-local WORLD = { "Terrain", "Scenery", "Item" }
-local IGNORED = {}
+-- 2026-10-15: the groups, ignored groups and the skip of a shape the ray
+-- starts inside live in Shared/WorldRay.lua (the server's flight uses it too).
 
 local function now() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
 
@@ -187,27 +187,18 @@ M.ReadInvView = readInvView
 -- ---------------------------------------------------------------------
 -- World ray
 -- ---------------------------------------------------------------------
-local lastRawDistance = nil
 -- Distance in metres from `from` along unit `dir` to the first world hit
--- within `len`, or nil. hit.Distance is a 0..1 fraction (spike 2); a value
--- above 1 is taken as metres in case a future SE build changes it.
-local rayErrLogged = false
+-- within `len`, or nil (Shared/WorldRay.lua).
 function M.WorldRay(from, dir, len)
     local to = { from[1] + dir[1] * len, from[2] + dir[2] * len, from[3] + dir[3] * len }
-    local okR, hit = pcall(Ext.Level.RaycastClosest, from, to, "Static", WORLD, IGNORED, 1)
-    if not okR and not rayErrLogged then
-        rayErrLogged = true
-        Log.Write("Aim: world ray error: " .. tostring(hit))
-    end
-    if not okR or not hit then return nil end
-    local okD, raw = pcall(function() return hit.Distance end)
-    raw = okD and tonumber(raw) or nil
-    if not raw then return nil end
-    lastRawDistance = raw
-    if raw <= 1.0001 then return raw * len end
-    return raw
+    local ok, d = pcall(WorldRayLib.Cast, from, to)
+    return ok and d or nil
 end
-function M.LastRawDistance() return lastRawDistance end
+-- The physics groups of the last world hit (for the aim logs).
+function M.LastWorldGroups()
+    local w = WorldRayLib.Last()
+    return w and w.groups or "?"
+end
 
 -- Ground point under the crosshair: world ray first, then the plane at
 -- the player's feet, then a point straight ahead at `maxDist`.

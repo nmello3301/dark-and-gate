@@ -82,6 +82,26 @@ Alt+Tab switches between the game and the console.
 | M | BG3's map (fast travel works) |
 | Middle mouse | Free the cursor / back to mouse-look |
 | I or Tab | BG3's panels, with the **Prepare Hotbar** menu beside them (H pins it) |
+| P | Meta-Points menu |
+
+## Meta-Points
+
+Every party member gets **8 Meta-Points per level** (96 at level 12), also on an existing save. They're separate from BG3's ability scores, which they never change, and only scale this mod's combat:
+
+| Stat | What it improves |
+| --- | --- |
+| STR | Melee damage (up to ×4), bow draw time (down to instant) |
+| DEX | Ranged damage (up to ×4), attack cooldown (down to ×0.1; swings get faster) |
+| INT | Spell damage (up to ×4), max mana (up to ×5) |
+| WIS | Cast time (2 s down to instant) |
+| CON | Shield block (40 % up to 85 %), jump height (up to ×10) |
+| CHA | Move speed (up to ×4) |
+
+- **P** opens the menu (first or third person): − / + per stat, the value of every effect now and after, **Confirm** to lock the points, **Reset** to drop the pending ones. You get a notice when a level-up brings points.
+- **Reset all points** refunds everything, **in camp only**.
+- Companions get their own points. While they're on AI, damage, block, bow draw and cast time count; attack cooldown, jump and move speed only work while you control them (marked * in the menu).
+- Jump height and move speed apply only in first person. There is no fall damage for your party in this mod, so high jumps never hurt.
+- The numbers are in `%LOCALAPPDATA%\Larian Studios\Baldur's Gate 3\Script Extender\DarkAndGate\metapoints.json` (made on first launch). Edit it, then type `!dag_meta_reload` in the console (`C >>`); delete it to get the defaults back. Settings: `respec_mode` (`camp`, `anywhere`, `off`), `hotkey`, `min_action_interval` (the shortest cast / draw / cooldown, 0.05 s), `enemy_hp_mult` and `enemy_damage_mult` (1.0).
 
 ## Multiplayer
 

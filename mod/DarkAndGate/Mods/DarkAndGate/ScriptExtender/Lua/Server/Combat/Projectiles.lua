@@ -47,6 +47,7 @@ local Shields   = Ext.Require("Server/Combat/Shields.lua")
 local Party     = Ext.Require("Server/Party.lua")
 local Damage    = Ext.Require("Server/Combat/Damage.lua")
 local SpellRange = Ext.Require("Shared/SpellRange.lua")
+local WorldRay  = Ext.Require("Shared/WorldRay.lua")
 
 local M = {}
 
@@ -54,11 +55,6 @@ local nextId = 1
 local pending = {}    -- casterUuid -> launch waiting for BG3's projectile
 local active = {}     -- id -> projectile
 local debugSteps = false
--- Physics groups for the world ray. The server rejected "Door" (playtest
--- 2026-10-12: "not a valid 'PhysicsGroupFlags' bitfield value: Door"), so
--- the sets are tried in order and the first one the server accepts is kept.
-local WORLD_SETS = { { "Terrain", "Scenery", "Item" }, { "Terrain", "Scenery" }, { "Terrain" } }
-local worldSet = 1
 
 local function now() return tonumber(Ext.Timer.MonotonicTime()) or 0 end
 local function v3(p) return { tonumber(p.x or p[1]) or 0, tonumber(p.y or p[2]) or 0, tonumber(p.z or p[3]) or 0 } end
@@ -224,8 +220,20 @@ function M.Launch(caster, spell, claim, castAt)
     end
     local origin = add(add(eye, dir, data.origin_fwd_m or 0.6), { 0, -1, 0 }, data.origin_down_m or 0.25)
     -- Aim the flight at the crosshair point, so the slight origin offset
-    -- still converges on what the player aimed at.
-    if claim.hitPoint then dir = norm(sub(v3(claim.hitPoint), origin)) end
+    -- still converges on what the player aimed at. Not at a point that is
+    -- no farther than the origin itself: the direction from the origin would
+    -- turn back toward the camera (playtest 2026-10-15, under a roof: the
+    -- crosshair point 0.4 m from the eye sent Fire Bolts up and backwards).
+    local nearAim = nil
+    if claim.hitPoint then
+        local hp = v3(claim.hitPoint)
+        if len(sub(hp, eye)) > (data.origin_fwd_m or 0.6) + 0.3 then
+            dir = norm(sub(hp, origin))
+        else
+            nearAim = len(sub(hp, eye))
+            claim.hitPoint = nil
+        end
+    end
     local tsp = templateSpeed(spell)
     local speed = tonumber(claim.speed) or (def.speed_mps == "template" and tsp.speed) or tonumber(def.speed_mps) or def.fallback_speed_mps or 25
     if speed <= 0 then speed = def.fallback_speed_mps or 25 end
@@ -258,10 +266,11 @@ function M.Launch(caster, spell, claim, castAt)
         dmgMult = tonumber(claim.dmgMult), draw = tonumber(claim.draw), launchWait = tonumber(claim.launch_wait_s),
         maxRange = maxRange,
     }
-    Log.Write(string.format("PROJ #%d launch %s: origin %s dir (%.3f,%.3f,%.3f) speed %.1f m/s accel %.1f gravity %.2f r %.2f m, range %.0f m%s, visual clone %s %s",
+    Log.Write(string.format("PROJ #%d launch %s: origin %s dir (%.3f,%.3f,%.3f) speed %.1f m/s accel %.1f gravity %.2f r %.2f m, range %.0f m%s, visual clone %s %s%s",
         id, spell, fmt(origin), dir[1], dir[2], dir[3], speed, tsp.accel or 0, gravity, def.radius_m or 0.15, maxRange,
         claim.draw and string.format(", draw %.0f %% (damage x%.2f)", claim.draw * 100, tonumber(claim.dmgMult) or 1) or "",
-        PSpells.VisualId(spell), okV and ("cast at " .. fmt(far)) or "FAILED to cast"))
+        PSpells.VisualId(spell), okV and ("cast at " .. fmt(far)) or "FAILED to cast",
+        nearAim and string.format(" (the crosshair point was %.1f m from the eye: flies along the camera instead)", nearAim) or ""))
     return true
 end
 
@@ -358,28 +367,15 @@ end
 -- ---------------------------------------------------------------------
 -- Flight + hits
 -- ---------------------------------------------------------------------
+-- Shared/WorldRay.lua: every hit along the line, a shape the line starts
+-- inside skipped, BG3's pass-through groups left out (2026-10-15).
 local function worldHit(a, b)
-    local seg = sub(b, a)
-    local L = len(seg)
-    if L < 1e-4 then return nil end
-    while worldSet <= #WORLD_SETS do
-        local okR, hit = pcall(Ext.Level.RaycastClosest, a, b, "Static", WORLD_SETS[worldSet], {}, 1)
-        if okR then
-            if not M.raySetLogged then
-                M.raySetLogged = true
-                Log.Write("Projectiles: server world ray uses groups " .. table.concat(WORLD_SETS[worldSet], ","))
-            end
-            if not hit then return nil end
-            local okD, raw = pcall(function() return hit.Distance end)
-            raw = okD and tonumber(raw) or nil
-            if not raw then return nil end
-            return raw <= 1.0001 and raw * L or raw   -- Distance is a 0..1 fraction (spike 2)
-        end
-        Log.Write(string.format("Projectiles: server RaycastClosest groups %s rejected (%s)",
-            table.concat(WORLD_SETS[worldSet], ","), tostring(hit)))
-        worldSet = worldSet + 1
+    if not M.raySetLogged then
+        M.raySetLogged = true
+        local inc, exc = WorldRay.Groups()
+        Log.Write("Projectiles: server world ray uses groups " .. inc .. (exc ~= "" and (", ignores " .. exc) or ""))
     end
-    return nil
+    return WorldRay.Cast(a, b)
 end
 
 -- For other server systems (NpcCombat's swing line of sight / wall stop).
@@ -469,8 +465,8 @@ local function impact(p, pos, targetUuid, what, cyl, shielded)
     broadcast(Net.Channels.ProjectileHit, { id = p.id, pos = pos, target = targetUuid, what = what })
     if what == "expired" or what == "world" or what == "range" then
         local c = p.closest
-        p.missNote = c and string.format(" (closest character %s passed %.2f m from its cylinder)", c.uuid, math.max(0, c.gap)) or
-            " (no character near the path)"
+        p.missNote = (c and string.format(" (closest character %s passed %.2f m from its cylinder)", c.uuid, math.max(0, c.gap)) or
+            " (no character near the path)") .. (p.worldNote or "")
     end
     if what == "expired" then
         Log.Write(string.format("PROJ #%d expired after %.1f m (no hit)%s; BG3 projectile: %s", p.id, p.traveled, p.missNote, removed))
@@ -524,7 +520,7 @@ local function impact(p, pos, targetUuid, what, cyl, shielded)
             -- The shield's share of a spell impact: the clone can't be scaled
             -- before it lands, so that share is healed back (never revives).
             if shielded and hp1 and hp1 < hp0 and hp1 > 0 then
-                local _, r = Shields.Reduce(hp0 - hp1)
+                local _, r = Shields.Reduce(hp0 - hp1, targetUuid)
                 Damage.HealBack(targetUuid, (hp0 - hp1) * r, string.format("PROJ #%d hit the shield, %.0f %% of %d", p.id, r * 100, hp0 - hp1))
             end
         end
@@ -551,6 +547,9 @@ local function stepOne(p, dt)
         impact(p, add(a, dirN, dc), u, "character", cyl, shielded)
         return true
     elseif dw then
+        local w = WorldRay.Last()
+        p.worldNote = string.format(" [world hit: groups %s via %s%s]", w and w.groups or "?", w and w.via or "?",
+            (w and w.skipped > 0) and string.format(", %d start-inside hit(s) skipped", w.skipped) or "")
         impact(p, add(a, dirN, math.max(0, dw - (p.def.radius_m or 0.15))), nil, "world")
         return true
     end

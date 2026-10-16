@@ -8,12 +8,19 @@
 --
 -- Spell slots are unused (spike 5: Osi.UseSpell ignores them). Costs come
 -- from data/spells.lua. Cast fails if current < cost.
+--
+-- Meta-Points (2026-10-15): max x the controlled character's INT curve
+-- (max_mana); whenever max changes, current keeps its share of max.
+-- Recomputed on every cast, when that character's points or level change
+-- (OnCharacterChanged) and when the player takes another character.
 
 local Log = Ext.Require("Shared/Log.lua")
 local Net = Ext.Require("Shared/Net.lua")
 
 local MPState = Ext.Require("Shared/MPState.lua")
 local ServerNetMod = Ext.Require("Server/Net.lua")
+local MetaPoints = Ext.Require("Shared/MetaPoints.lua")
+local Party = Ext.Require("Server/Party.lua")
 
 local M = {}
 
@@ -40,9 +47,17 @@ end
 
 local function recompute(user, uuid)
     local cl, m = statsForCaster(uuid)
-    user.max   = 30 + 10 * cl + 5 * m
+    local mult = MetaPoints.Mult(uuid, "max_mana")
+    local max = (30 + 10 * cl + 5 * m) * mult
+    if user.current == nil then
+        user.current = max
+    elseif user.max and user.max > 0 and math.abs(max - user.max) > 1e-6 then
+        user.current = user.current / user.max * max   -- the same share of the new max
+    end
+    user.max   = max
     user.regen = 0.5 + 0.1 * cl + 0.1 * m
-    if user.current == nil then user.current = user.max end
+    user.uuid  = uuid
+    user.mult  = mult
     if user.current > user.max then user.current = user.max end
 end
 
@@ -84,6 +99,31 @@ function M.Refill(userId, uuid)
     broadcast(userId, u)
 end
 
+-- A character's Meta-Points or level changed: every player on it now gets
+-- the new max (same share of it) at once.
+function M.OnCharacterChanged(uuid)
+    for uid, u in pairs(users) do
+        if u.uuid == uuid then
+            local before = u.max
+            recompute(u, uuid)
+            broadcast(uid, u)
+            if math.abs((before or 0) - u.max) > 1e-6 then
+                Log.Write(string.format("Mana: user %s max %.0f -> %.0f (INT x%.2f), current %.0f", tostring(uid), before or 0, u.max, u.mult or 1, u.current))
+            end
+        end
+    end
+end
+
+-- For !dag_meta_print.
+function M.Describe(uuid)
+    for uid, u in pairs(users) do
+        if u.uuid == uuid then
+            return string.format("mana %.0f / %.0f (INT x%.2f), regen %.2f/s (user %s)", u.current, u.max, u.mult or 1, u.regen, tostring(uid))
+        end
+    end
+    return "mana: no player has cast with this character yet"
+end
+
 function M.Tick(now, osiFns)
     for uid, u in pairs(users) do
         if u.lastTickMs == 0 then u.lastTickMs = now end
@@ -113,6 +153,16 @@ function M.Register()
         local uuid = ServerNetMod.UserToCharacter(userId)
         M.Refill(userId, uuid)
         Log.Write("Mana: refill user=" .. tostring(userId))
+    end)
+    -- Another character: that one's max (same share), at once.
+    Party.OnControl(function(user, uuid)
+        for uid, u in pairs(users) do
+            if Party.UserFromPeer(uid) == user and uuid then
+                Ext.OnNextTick(function()
+                    pcall(function() recompute(u, uuid); broadcast(uid, u) end)
+                end)
+            end
+        end
     end)
     Log.Write("Mana: registered")
 end

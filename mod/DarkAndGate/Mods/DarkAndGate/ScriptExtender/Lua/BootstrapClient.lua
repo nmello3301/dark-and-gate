@@ -32,6 +32,9 @@ Spike3.Register()
 local Spike2 = Ext.Require("Spikes/Spike2_AimRay.lua")
 Spike2.Register()
 
+-- Meta-Points: the user variable is registered when this loads (both sides).
+Ext.Require("Shared/MetaPoints.lua")
+
 local ClientNet = Ext.Require("Client/Net.lua")
 ClientNet.Register()
 
@@ -101,6 +104,8 @@ Ext.Require("Client/CamGuard.lua").Register()
 Ext.Require("Shared/TickBudget.lua").Register()
 Ext.Require("Client/LookAt.lua").Register()
 Ext.Require("Client/HUD/Overlay.lua").Register()
+-- BG3's turn notices ("Your turn") skipped in real-time fights.
+Ext.Require("Client/HUD/TurnNotices.lua").Register()
 -- F: tap = interact with what the crosshair is on, hold = revive.
 Ext.Require("Client/Interact.lua").Register()
 -- Downed: orbit camera, spectate, banner, revive bar.
@@ -134,6 +139,10 @@ ConsoleForward.Forward({
     "dag_mp_feature", "dag_mp_rewind",
     -- Reaction / interrupt switches per character (Server/Combat/NoReactions.lua).
     "dag_reactions",
+    -- The cast time base: the client sets its own too (Client/Combat/Spells.lua).
+    "dag_cast_time",
+    -- Meta-Points (Server/MetaPoints.lua; print / self-test / reload also run here).
+    "dag_meta_grant", "dag_meta_set", "dag_meta_reset", "dag_meta_print", "dag_meta_selftest", "dag_meta_reload", "dag_meta_xp",
 })
 -- Forwarded commands carry the camera's forward ("ahead of you" spawns).
 local AimForCtx = Ext.Require("Client/Combat/Aim.lua")
@@ -162,6 +171,8 @@ Ext.Require("Client/Movement/MoveMetrics.lua").Register()
 Ext.Require("Client/Movement/CombatMove.lua").Register()
 -- The real jump's height, reported to the server (hitbox + projectile hits).
 Ext.Require("Client/Movement/JumpReport.lua").Register()
+-- Meta-Points: menu (P), level-up notices, CHA move speed (Client/MetaPoints.lua).
+Ext.Require("Client/MetaPoints.lua").Register()
 
 -- Animation browser + gallery (!dag_animlib). Tags picked there feed
 -- Swing.lua and the jump (Client/AnimLib/Tags.lua).

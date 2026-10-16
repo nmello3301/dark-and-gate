@@ -56,6 +56,11 @@ return {
     hide_vanilla = { "HotBar", "PlayerPortraits", "CombatLog", "Minimap", "TargetInfo",
                      "TurnModeInfo", "CombatantsOverlay", "HudIndicator" },
     reapply_s    = 1.0,
+    -- BG3 notifications skipped while real-time fights are on (Client/HUD/
+    -- TurnNotices.lua; developer 2026-10-15: "Your turn" means nothing in
+    -- real time). Types from BG3's Notification.TemplateSwitcher; others:
+    -- CombatStarted, CombatJoined, Warning, JournalUpdate, NewItem...
+    hide_notification_types = { "CombatTurn", "CombatInitiatives", "StartTurnFTB", "FTBModeStarted" },
     -- Widgets that mean "a menu is open" when visible: our HUD hides, BG3's
     -- comes back and mouse-look lets go of the cursor (FullPov.SetMenuOpen)
     -- until it closes. Names = the widgets BG3's keyboard UI state machine

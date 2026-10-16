@@ -215,6 +215,18 @@ Net.Channels = {
     -- own position of the client's character), to measure client/server drift.
     MoveProbeReq      = "DAG_MoveProbeReq",
     MoveProbe         = "DAG_MoveProbe",
+    -- Meta-Points (Server/MetaPoints.lua, Client/MetaPoints.lua). Client ->
+    -- server: MetaQuery { uuid? } (no uuid = config + the whole party),
+    -- MetaConfirm { uuid, spent }, MetaRespec { uuid }. Server -> clients:
+    -- MetaConfig { config }, MetaState { uuid, name, level, spent, bonus,
+    -- total, unspent, inCamp, respec, respecWhy, owner }, MetaNotify { uuid,
+    -- name, unspent, level } (a level-up brought points to spend).
+    MetaQuery         = "DAG_MetaQuery",
+    MetaConfirm       = "DAG_MetaConfirm",
+    MetaRespec        = "DAG_MetaRespec",
+    MetaConfig        = "DAG_MetaConfig",
+    MetaState         = "DAG_MetaState",
+    MetaNotify        = "DAG_MetaNotify",
 }
 
 -- Every channel both sides care about. Both server and client must register
@@ -288,6 +300,12 @@ Net.AllChannels = {
     Net.Channels.MpSettings,
     Net.Channels.MpNote,
     Net.Channels.MpNoteMark,
+    Net.Channels.MetaQuery,
+    Net.Channels.MetaConfirm,
+    Net.Channels.MetaRespec,
+    Net.Channels.MetaConfig,
+    Net.Channels.MetaState,
+    Net.Channels.MetaNotify,
 }
 
 return Net
