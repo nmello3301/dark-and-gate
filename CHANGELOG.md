@@ -2,6 +2,12 @@
 
 Versions follow `meta.lsx` (`major.minor.revision`). Every release names the game version it was tested on.
 
+## 0.4.1 (alpha), 2026-10-16
+
+Built for BG3 4.1.1.7631656 (Steam, DirectX 11) with Script Extender v33. Local build for friends; not on GitHub or Nexus.
+
+- Fixed: loading a save replaced your hotbar with the character's default spell list a couple of seconds later in play mode. The saved layout (per character, in `Script Extender\DarkAndGate\hotbar-<uuid>.json`) now stays.
+
 ## 0.4.0 (alpha), 2026-10-16
 
 Built for BG3 4.1.1.7631656 (Steam, DirectX 11) with Script Extender v33. Still an alpha: play on a new save or a copy.
