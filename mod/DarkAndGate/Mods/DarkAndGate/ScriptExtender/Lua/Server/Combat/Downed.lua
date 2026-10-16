@@ -30,6 +30,12 @@
 --     don't carry it. A downed character who dies was already "defeated", so
 --     the story doesn't check again: its check (PROC_GameOver_CheckGameOver)
 --     runs after such a death unless the story ran it itself.
+--   * 0 HP always means downed (playtest 2026-10-15: BG3 said "no longer
+--     downed" 60 ms after Gale and Shadowheart went down, they stayed at
+--     0 HP, hits on them were ignored as "downed" and no bleed-out started:
+--     unkillable). A "no longer downed" at 0 HP is not an up (checked again
+--     after 500 ms), and a party member alive at 0 HP for zero_hp_s that we
+--     don't count as downed gets our downed status again and bleeds out.
 -- Every state change is logged and broadcast (DownedState) for the client
 -- (Client/Downed.lua: orbit camera, banner, revive bar).
 --   !dag_bleedout <s>   !dag_revive_time <s>   !dag_downme   (server or client console)
@@ -50,11 +56,15 @@ local MPFeatures = Ext.Require("Shared/MPFeatures.lua")   -- multiplayer kill sw
 local M = {}
 
 local PASSIVE = "DAG_BleedOut"
+local DOWNED_STATUS = "DAG_BLEEDOUT_DOWNED"   -- what the passive makes BG3 apply at 0 HP
 local NULL = "NULL_00000000-0000-0000-0000-000000000000"
 local D = cfg.downed
 
 local downed = {}      -- uuid -> { since, left, total, reviver, kind = "player"|"companion", progress, paused, outOfRange }
 local pendingDown = {} -- uuid -> ms to confirm at
+local upCheck = {}     -- downed uuid -> ms: BG3 said "up" at 0 HP, look at the HP again then
+local zeroSince = {}   -- uuid -> ms it was first seen alive at 0 HP without being downed
+local graceUntil = {}  -- uuid -> ms: just revived, the 0-HP check waits
 local companionGoing = {} -- companion uuid -> downed uuid
 local modeSource = nil -- fn(companionUuid) -> "follow"|"wait"|"camp"
 local lastBroadcast = -1e9
@@ -92,10 +102,25 @@ function M.SetModeSource(fn) modeSource = fn end
 function M.IsDowned(uuid) return downed[Party.Norm(uuid)] ~= nil end
 function M.Downed() return downed end
 
-local function downedNow(u)
-    if downed[u] or pendingDown[u] then return true end
+local function hasDownedStatus(u)
     local ok, v = pcall(function() return Osi.HasAppliedStatusOfType(u, "DOWNED") end)
     return ok and tonumber(v) == 1
+end
+
+local function downedNow(u)
+    if downed[u] or pendingDown[u] then return true end
+    return hasDownedStatus(u)
+end
+
+local function downedStatusName(u)
+    local s = nil
+    pcall(function() s = tostring(Ext.Entity.Get(u).Downed.DownedStatus) end)
+    return (s and s ~= "" and s ~= "nil") and s or nil
+end
+
+local function zeroHp(u)
+    local hp = Damage.Hp(u)
+    return hp ~= nil and hp <= 0, hp
 end
 
 -- ---------------------------------------------------------------------
@@ -187,9 +212,25 @@ local function startDown(uuid, why)
     send(uuid, downed[uuid], "downed")
 end
 
+-- 0 HP but not downed in BG3's eyes: our downed status again (if it takes),
+-- and the bleed-out starts either way, so the character can die.
+local function forceDown(uuid, why)
+    local had = hasDownedStatus(uuid)
+    local res = "had one"
+    if not had then
+        local ok, err = pcall(function() Osi.ApplyStatus(uuid, DOWNED_STATUS, -1, 1, uuid) end)
+        res = ok and ("applied " .. DOWNED_STATUS) or ("ApplyStatus ERROR " .. tostring(err))
+    end
+    Log.Write(string.format("Downed: %s is alive at 0 HP but BG3 doesn't count it as downed (%s) -> downed by us (downed status: %s)",
+        name(uuid), why, res))
+    pendingDown[uuid], zeroSince[uuid], graceUntil[uuid] = nil, nil, nil
+    startDown(uuid, "0 HP, " .. why)
+end
+
 local function upAgain(uuid, why)
     local st = downed[uuid]
     downed[uuid] = nil
+    upCheck[uuid] = nil
     holdTries[uuid], holdCheck[uuid] = nil, nil
     gaveUp = {}   -- someone stands again: a give up starts over
     for c, t in pairs(companionGoing) do if t == uuid then companionGoing[c] = nil end end
@@ -206,6 +247,7 @@ local function revive(uuid, reviver)
     pcall(function() Osi.RemoveStatusesWithType(uuid, "DOWNED", reviver) end)
     pcall(function() Osi.SetHitpoints(uuid, D.revive_hp, "Guaranteed") end)
     if st then st.reviver = nil end
+    graceUntil[uuid] = now() + (D.up_grace_s or 2) * 1000
     upAgain(uuid, "revived by " .. name(reviver))
 end
 
@@ -214,6 +256,7 @@ local function bleedOut(uuid)
         Log.Write(string.format("Downed: %s would bleed out now, but is in god mode (!dag_god) -> stood up at %d HP", name(uuid), D.revive_hp))
         pcall(function() Osi.RemoveStatusesWithType(uuid, "DOWNED", uuid) end)
         pcall(function() Osi.SetHitpoints(uuid, D.revive_hp, "Guaranteed") end)
+        graceUntil[uuid] = now() + (D.up_grace_s or 2) * 1000
         upAgain(uuid, "god mode: no bleed-out")
         return
     end
@@ -425,15 +468,68 @@ end
 -- ---------------------------------------------------------------------
 local lastT = nil
 local dispatchAt = -1e9
+local zeroCheckAt = -1e9
+local ZERO_CHECK_MS = 250   -- how often party HP is looked at for the 0-HP rule
 local function tick()
     if ended then return end
     local t = now()
     for u, at in pairs(pendingDown) do
         if t >= at then
             pendingDown[u] = nil
-            local ok, v = pcall(function() return Osi.HasAppliedStatusOfType(u, "DOWNED") end)
-            if ok and tonumber(v) == 1 and not isDead(u) then startDown(u, "0 HP") else
-                Log.Write(string.format("Downed: %s went down but is up again within 500 ms (Relentless Endurance / Death Ward?)", name(u)))
+            if not isDead(u) then
+                local zero, hp = zeroHp(u)
+                if hasDownedStatus(u) then startDown(u, "0 HP")
+                elseif zero then forceDown(u, "BG3 dropped its downed state within 500 ms")
+                else
+                    Log.Write(string.format("Downed: %s went down but is up again within 500 ms at %s HP (Relentless Endurance / Death Ward / healed?)",
+                        name(u), tostring(hp)))
+                end
+            end
+        end
+    end
+    -- BG3 said "up" while the HP was 0: up only if the HP came back meanwhile.
+    for u, at in pairs(upCheck) do
+        if t >= at then
+            upCheck[u] = nil
+            local zero, hp = zeroHp(u)
+            if downed[u] and not isDead(u) then
+                if not zero then upAgain(u, "BG3: no longer downed, HP " .. tostring(hp))
+                else
+                    -- The status once more at most (BG3 may drop it again: no
+                    -- re-apply loop); the bleed-out runs on our timer anyway.
+                    local st = downed[u]
+                    st.flips = (st.flips or 0) + 1
+                    local res = "kept"
+                    if not hasDownedStatus(u) then
+                        if st.flips <= 1 then
+                            local ok = pcall(function() Osi.ApplyStatus(u, DOWNED_STATUS, -1, 1, u) end)
+                            res = ok and ("re-applied " .. DOWNED_STATUS) or "re-apply FAILED"
+                        else
+                            res = "gone, not re-applied again"
+                        end
+                    end
+                    if st.flips <= 3 then
+                        Log.Write(string.format("Downed: %s still at 0 HP 500 ms after BG3's \"no longer downed\" -> stays downed, bleed-out goes on (downed status %s)",
+                            name(u), res))
+                    end
+                end
+            end
+        end
+    end
+    -- Alive at 0 HP and not downed: downed by us (header).
+    if t >= zeroCheckAt then
+        zeroCheckAt = t + ZERO_CHECK_MS
+        if not Party.InCharacterCreation() then
+            for _, u in ipairs(Party.Members()) do
+                if downed[u] or pendingDown[u] or (graceUntil[u] or 0) > t or isDead(u) or not zeroHp(u) then
+                    zeroSince[u] = nil
+                else
+                    zeroSince[u] = zeroSince[u] or t
+                    local held = (t - zeroSince[u]) / 1000
+                    if held >= (D.zero_hp_s or 0.5) then
+                        forceDown(u, string.format("0 HP for %.1f s, BG3's downed status %s", held, downedStatusName(u) or "none"))
+                    end
+                end
             end
         end
     end
@@ -490,11 +586,21 @@ end
 function M.Register()
     Ext.Osiris.RegisterListener("DownedChanged", 2, "after", function(char, isDowned)
         local u = Party.Norm(char)
+        local zero, hp = zeroHp(u)
         if tonumber(isDowned) == 1 then
+            Log.Write(string.format("Downed: BG3 says %s is downed (HP %s, downed status %s)", name(u), tostring(hp), downedStatusName(u) or "none"))
             pendingDown[u] = now() + 500
             -- Now, before the story's own 500 ms check marks them defeated.
             syncGameOver(name(u) .. " went down")
         else
+            Log.Write(string.format("Downed: BG3 says %s is no longer downed (HP %s, downed status %s, %s)", name(u), tostring(hp),
+                downedStatusName(u) or "none", downed[u] and "downed for us" or pendingDown[u] and "down not confirmed yet" or "not downed for us"))
+            -- At 0 HP that's no up (header): a pending down is confirmed by the
+            -- HP in its 500 ms check, a running one looks again in 500 ms.
+            if zero and not isDead(u) and (downed[u] or pendingDown[u]) then
+                if downed[u] then upCheck[u] = now() + 500 end
+                return
+            end
             pendingDown[u] = nil
             if downed[u] then upAgain(u, "BG3: no longer downed (healed?)") end
         end
@@ -504,6 +610,7 @@ function M.Register()
         local wasDown = downed[u] ~= nil or pendingDown[u] ~= nil
         if downed[u] then downed[u] = nil; send(u, nil, "dead") end
         pendingDown[u], holdTries[u], holdCheck[u] = nil, nil, nil
+        upCheck[u], zeroSince[u], graceUntil[u] = nil, nil, nil
         cancelBy(u, "died")
         if wasDown and Party.IsMember(u) then checkAfterDeath() end
     end)

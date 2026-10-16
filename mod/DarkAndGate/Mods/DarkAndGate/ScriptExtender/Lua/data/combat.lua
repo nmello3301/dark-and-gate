@@ -46,6 +46,9 @@ return {
         revive_s         = 3.0,   -- hold F this long
         revive_range_m   = 1.5,   -- reviver within this distance of the body
         revive_hp        = 1,     -- HP after a revive
+        zero_hp_s        = 0.5,   -- a party member alive at 0 HP this long without being downed is downed by us
+                                  -- (BG3 dropped its downed state 60 ms after a down, playtest 2026-10-15)
+        up_grace_s       = 2.0,   -- after a revive the 0-HP check waits this long (the new HP lands a tick later)
         companion_range_m = 25,   -- companions come to revive from this far
         control_back_tries = 3,   -- BG3 moves your control off your downed body: handed back this many times per down
         give_up_confirm_s = 5,    -- nobody standing: Give up (button / G) a second time within this ends the game

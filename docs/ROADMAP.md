@@ -512,6 +512,10 @@ Built 2026-10-15 (DECISIONS); tick after it is seen in-game.
 - [ ] Several flags in one area.
 - [ ] Pick and pin the flag banner (`!dag_rpg_flag_templates`, `flag_template`).
 
+## Bug fixes, 2026-10-15 (late)
+
+- [ ] **Unkillable at 0 HP** (nautiloid playtest: Gale and Shadowheart). BG3 said "no longer downed" 60 ms after each down, so our bleed-out never started; HP stayed 0, hits were ignored as "on a downed player", the AI stopped targeting them. Now a "no longer downed" at 0 HP isn't an up, and anyone alive at 0 HP for 0.5 s gets our downed status and bleeds out (`Server/Combat/Downed.lua`, `data/combat.lua` `downed.zero_hp_s`). Every BG3 down / up is logged with HP and status to find BG3's trigger. Offline replay passes.
+
 ## M2 — Combat breadth
 
 - [ ] All 10 weapon families with their chains
