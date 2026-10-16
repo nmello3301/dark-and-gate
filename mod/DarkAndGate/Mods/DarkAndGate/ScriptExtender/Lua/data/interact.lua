@@ -35,6 +35,7 @@ return {
         use    = "Use",
         climb  = "Climb",
         locked = "Open (locked)",
+        rpgflag = "Toggle",   -- an RPG Mode flag (Server/Combat/RpgMode.lua)
     },
     -- BG3 use actions (ActionDataType) that make an item "[F] Use": what a
     -- click does with it in the world. Inventory-only ones (Equip, Consume,

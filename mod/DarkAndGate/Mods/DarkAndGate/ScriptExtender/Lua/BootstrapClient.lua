@@ -143,6 +143,8 @@ ConsoleForward.Forward({
     "dag_cast_time",
     -- Meta-Points (Server/MetaPoints.lua; print / self-test / reload also run here).
     "dag_meta_grant", "dag_meta_set", "dag_meta_reset", "dag_meta_print", "dag_meta_selftest", "dag_meta_reload", "dag_meta_xp",
+    -- RPG Mode (Server/Combat/RpgMode.lua).
+    "dag_rpg_list", "dag_rpg_respawn", "dag_rpg_delete", "dag_rpg_flag_templates", "dag_rpg_reload",
 })
 -- Forwarded commands carry the camera's forward ("ahead of you" spawns).
 local AimForCtx = Ext.Require("Client/Combat/Aim.lua")

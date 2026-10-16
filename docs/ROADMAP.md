@@ -500,6 +500,18 @@ Same round:
 - [ ] **Skillshots under a roof** no longer hit invisible shapes (`Shared/WorldRay.lua`; the log names the groups of every world hit).
 - [ ] **"Your turn"** and BG3's other turn notices don't show in real-time fights.
 
+## RPG Mode, started 2026-10-15
+
+Built 2026-10-15 (DECISIONS); tick after it is seen in-game.
+
+- [ ] Emerald Grove gate fight: only the goblins come back (no tieflings / druids); quests unaffected.
+- [ ] A fight that ends in dialogue: no flag.
+- [ ] Flag OFF + leave and return: no respawn. Flag ON + past 100 m: respawn; back before 60 s: not yet.
+- [ ] Copies: XP and their copied loot drop; idle until they see you; level / rotation / group logged as kept.
+- [ ] Save / load with a flag ON and with copies alive.
+- [ ] Several flags in one area.
+- [ ] Pick and pin the flag banner (`!dag_rpg_flag_templates`, `flag_template`).
+
 ## M2 — Combat breadth
 
 - [ ] All 10 weapon families with their chains

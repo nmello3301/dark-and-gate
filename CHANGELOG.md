@@ -11,6 +11,7 @@ Versions follow `meta.lsx` (`major.minor.revision`). Every release names the gam
 - No fall damage for the party (BG3's own Feather Fall boost on a hidden status).
 - Spells cast under a roof no longer hit invisible shapes right in front of you.
 - BG3's "Your turn" and other turn notices are hidden in real-time fights.
+- **RPG Mode:** a fully cleared fight leaves a flag; switched ON with F, the fight's enemies come back (fresh copies with copies of their items) once you're 100 m away for 60 s. `data/rpgmode.lua` / `rpgmode.json`; `!dag_rpg_list`, `!dag_rpg_respawn`, `!dag_rpg_delete`.
 - Offline checks: `scripts\test-lua.ps1` (every Lua file compiles; Meta-Points self-test).
 
 ## 0.1.0 (alpha), 2026-10-15

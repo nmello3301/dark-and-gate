@@ -280,6 +280,10 @@ A point pool per party member, parallel to BG3's ability scores: it never reads 
 - **Enemies.** Meta-Points are the party's only. `enemy_hp_mult` and `enemy_damage_mult` (both 1.0) are there to compensate later.
 - **Later.** WIS will also cover parry and sneak: each is a new entry in `data/metapoints.lua` plus the code that reads it.
 
+## RPG Mode (optional respawns, decided 2026-10-15)
+
+Player-controlled respawning of cleared fights (`Server/Combat/RpgMode.lua`, `data/rpgmode.lua`). One whole fight is one encounter. Every hostile character that enters it is recorded as it enters (template, level, faction, combat group, position, rotation, items; items read again right after its death). Allies, neutrals, party members, summons and props are never recorded. A fight that ends with every recorded hostile dead leaves an RPG Mode flag (a BG3 banner) where the last one died, OFF; ended any other way, nothing. Story / global / unique characters stay out unless `respawn_unique_enemies`. F toggles the flag. ON + every party member over `respawn_radius` (100 m) from the centre of the start positions + `respawn_min_delay` (60 s of play) since ON: fresh copies at the start positions and rotations, same faction and group, dialogue off, carrying new copies of the originals' items (no new loot roll); the flag goes; BG3's normal per-enemy XP. Clearing the copies leaves a new flag, OFF. Originals are never revived, and the copies' new ids keep them out of quest scripts. Saved per save (mod variable `RpgEncounters`); only the host's current region is checked.
+
 ## Hotbar and the Prepare Hotbar tab
 
 Each character has a 10-slot hotbar on keys 1 to 0, arranged in a new **Hotbar** tab inside BG3's own character menu. Hotbars are saved per character in the save file and synced to all players in multiplayer.

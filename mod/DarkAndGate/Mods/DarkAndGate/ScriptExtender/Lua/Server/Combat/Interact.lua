@@ -87,10 +87,15 @@ local function actionList(acts)
     return #t > 0 and table.concat(t, ",") or "none"
 end
 
+-- RPG Mode flags (Server/Combat/RpgMode.lua): F toggles them.
+local flagHandler = nil
+function M.SetFlagHandler(h) flagHandler = h end
+
 -- -> kind, name, use action (kind "use"), why (for the log)
 function M.Classify(player, target)
     target = Party.Norm(target)
     if not target or target == Party.Norm(player) then return "none" end
+    if flagHandler and flagHandler.IsFlag(target) then return "rpgflag", flagHandler.FlagName(target) end
     local name = displayName(target)
     if q("IsCharacter", target) == 1 then
         if q("IsDead", target) == 1 then
@@ -186,7 +191,9 @@ end
 
 local function start(player, target, kind)
     local name = displayName(target)
-    if kind == "talk" then
+    if kind == "rpgflag" and flagHandler then
+        return flagHandler.Toggle(target, player)
+    elseif kind == "talk" then
         local ok, err = pcall(function() Osi.DialogStartRequested(target, player) end)
         return ok, ok and "DialogStartRequested (the engine's click-to-talk event)" or ("DialogStartRequested ERROR " .. tostring(err))
     elseif kind == "loot" then

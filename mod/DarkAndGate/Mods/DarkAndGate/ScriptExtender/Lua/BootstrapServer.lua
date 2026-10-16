@@ -126,6 +126,11 @@ MetaPointsServer.AddDescriber(function(uuid)
     }
 end)
 
+-- RPG Mode: cleared fights leave a flag; ON + away = the camp comes back.
+local RpgMode = Ext.Require("Server/Combat/RpgMode.lua")
+RpgMode.Register()
+Ext.Require("Server/Combat/Interact.lua").SetFlagHandler(RpgMode)
+
 -- Animation browser + gallery (server side: preview copies).
 local AnimLib = Ext.Require("Server/AnimLib.lua")
 AnimLib.Register()

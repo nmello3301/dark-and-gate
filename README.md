@@ -40,6 +40,28 @@ mana, shield block, jump height and move speed.
 
 Full rules: [`docs/DESIGN.md`](docs/DESIGN.md) "Meta-Points".
 
+## RPG Mode
+
+Optional respawning of cleared fights, controlled by the player.
+
+- When a fight ends with **every** enemy dead, a banner (the RPG Mode flag)
+  appears where the last one fell, **OFF**. A fight that ends any other
+  way (dialogue, fleeing, enemies escaping) leaves no flag.
+- **F** on the flag toggles it. While it is **ON**, once no party member
+  is within 100 m of the fight and 60 s of play have passed, the enemies
+  come back: fresh copies at their starting spots, carrying copies of the
+  originals' items, giving BG3's normal XP. Story and unique characters
+  stay dead by default. The flag disappears; clearing the copies leaves a
+  new flag, OFF.
+- Copies have no dialogue and never touch quests; the originals are never
+  revived. Everything is saved per save.
+- Settings: `data/rpgmode.lua`, overridden by
+  `%LOCALAPPDATA%\Larian Studios\Baldur's Gate 3\Script Extender\DarkAndGate\rpgmode.json`
+  (`rpg_mode_enabled`, `respawn_radius`, `respawn_min_delay`,
+  `respawn_unique_enemies`, `flag_template`); `!dag_rpg_reload`.
+- Debug: `!dag_rpg_list`, `!dag_rpg_respawn <id>`, `!dag_rpg_delete <id>`,
+  `!dag_rpg_flag_templates`.
+
 ## Documents
 
 - [`docs/DESIGN.md`](docs/DESIGN.md): design document, the source of truth.
