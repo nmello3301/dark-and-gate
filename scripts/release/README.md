@@ -61,7 +61,7 @@ Dark and Gate comes as two downloads, plus optional settings. Always use the sam
 
 Alt+Tab switches between the game and the console.
 
-**To turn it off:** in the console (`C >>`), `!dag_play off` leaves first person, and `!dag_rt off` brings turn-based fights back.
+**To turn it off:** press **Ctrl+F10**. You get vanilla BG3 back (the normal camera, cursor, HUD and click-to-move, and turn-based fights), for any spot the mod can't handle. Press it again to turn the mod back on. Your PC remembers which you chose. To change the key, go to Mod Configuration Menu > Dark and Gate > General. In the console (`C >>`), `!dag_play off` and `!dag_play` do the same.
 
 ## Controls
 
@@ -84,6 +84,7 @@ Alt+Tab switches between the game and the console.
 | Middle mouse | Free the cursor / back to mouse-look |
 | I or Tab | BG3's panels, with the **Prepare Hotbar** menu beside them (H pins it) |
 | P | Meta-Points menu |
+| Ctrl+F10 | Turn the mod off / back on (change the key in Mod Configuration Menu) |
 
 ## Meta-Points
 

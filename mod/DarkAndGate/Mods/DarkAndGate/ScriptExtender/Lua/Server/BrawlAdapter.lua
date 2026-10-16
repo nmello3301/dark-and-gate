@@ -207,8 +207,9 @@ local function disable(why)
     Log.Write("RT: real-time fights OFF -> the next fight is BG3's vanilla turn-based (" .. tostring(why) .. ")")
 end
 
--- Real time on (!dag_play, Server/PlayMode.lua).
+-- Real time on / off (!dag_play and the on / off key, Server/PlayMode.lua).
 function Adapter.Enable(why) enable(why) end
+function Adapter.Disable(why) disable(why) end
 
 -- True when this character's fight is really turn-based right now: in combat
 -- with real time off, or the party paused into force-turn-based. Scripted

@@ -9,6 +9,7 @@ local M = {}
 
 local FILE = "DarkAndGate/play-mode.json"
 local on = false
+local chosen = false   -- the file says on or off (false: never set on this PC)
 local listeners = {}
 
 function M.Load()
@@ -16,16 +17,19 @@ function M.Load()
     if ok and txt and txt ~= "" then
         local okJ, t = pcall(Ext.Json.Parse, txt)
         on = okJ and type(t) == "table" and t.on == true or false
+        chosen = okJ and type(t) == "table" and t.on ~= nil
     end
     return on
 end
 
 function M.On() return on end
+-- Turned on or off on this PC at some point (!dag_play, the on / off key).
+function M.Chosen() return chosen end
 
 function M.Set(v)
     v = v and true or false
     local changed = v ~= on
-    on = v
+    on, chosen = v, true
     pcall(Ext.IO.SaveFile, FILE, Ext.Json.Stringify({ on = on }))
     if changed then
         for _, fn in ipairs(listeners) do

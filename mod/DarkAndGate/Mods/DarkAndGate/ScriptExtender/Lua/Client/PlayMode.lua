@@ -16,8 +16,10 @@
 -- when the level isn't character creation (PlayReady). !dag_full_pov off
 -- still turns first person off until the next level.
 -- The max HP bonus is its own command (Server/Combat/HpBonus.lua, !dag_hp 50).
+-- Off: M.Set(false) below; the on / off key (Ctrl+F10 by default, set in
+-- Mod Configuration Menu) toggles it (Client/ToggleKey.lua).
 --
---   !dag_play [on|off|status]      (no argument = on)
+--   !dag_play [on|off|toggle|status]      (no argument = on)
 
 local Log       = Ext.Require("Shared/Log.lua")
 local Net       = Ext.Require("Shared/Net.lua")
@@ -29,6 +31,7 @@ local Hud       = Ext.Require("Client/HUD/Hud.lua")
 local CombatHUD = Ext.Require("Client/Combat/HUD.lua")
 local Overlay   = Ext.Require("Client/HUD/Overlay.lua")
 local State     = Ext.Require("Client/Combat/State.lua")
+local Prepare   = Ext.Require("Client/Combat/Prepare.lua")
 local Me = Ext.Require("Client/Me.lua")   -- the local player's character (multiplayer)
 
 local M = {}
@@ -98,13 +101,52 @@ local function tick()
     end
 end
 
+-- The on / off key's name for the toasts, "[LCtrl] + [F10]" (Client/ToggleKey.lua).
+local keyLabel = nil
+function M.SetKeyLabel(fn) keyLabel = fn end
+local function keyText()
+    local ok, s = pcall(function() return keyLabel and keyLabel() end)
+    return (ok and type(s) == "string" and s ~= "") and s or nil
+end
+
 local function status(toast)
-    local text = PlayFlag.On() and "Dark and Gate: play mode ON (first person, real-time fights, your spells on 1-0)"
-        or "Dark and Gate: play mode OFF (!dag_play turns everything on)"
+    local key = keyText()
+    local text = PlayFlag.On()
+        and ("Dark and Gate: ON (first person, real-time fights, your spells on 1-0)" .. (key and ("; " .. key .. " turns it off") or ""))
+        or ("Dark and Gate: OFF (vanilla BG3); " .. (key and (key .. " or ") or "") .. "!dag_play turns it back on")
     Log.Write(string.format("PlayMode: %s; first person %s; level %s%s", PlayFlag.On() and "ON" or "OFF",
         FullPov.IsOn() and "on" or "off", tostring(level.name), level.cc and " (character creation)" or ""))
-    if toast then pcall(Overlay.Toast, text, 3) end
+    -- Shown with first person off too: it is the only sign the mod went off.
+    if toast then pcall(Overlay.Toast, text, 4, true) end
 end
+
+-- Play mode on / off: !dag_play and the on / off key (developer 2026-10-16:
+-- "a hotkey to enable/disable the mod ... so someone can progress in some
+-- spots we might have not foreseen"). Off = first person off (BG3's camera,
+-- cursor, HUD and click-to-move back), a spell being channelled let go, and
+-- the server turns real-time fights off once no player is in play mode
+-- (Server/PlayMode.lua). On = everything back, as !dag_play always did.
+function M.Set(on, why)
+    if on then
+        PlayFlag.Set(true)
+        clientOn()
+        want = true
+    else
+        PlayFlag.Set(false)
+        want = false
+        if State.armedSpell then
+            State.armedSpell, State.armedAt = nil, nil
+            pcall(ClientNet.Send, Net.Channels.SpellArm, { spell = nil })
+            pcall(Prepare.Stop, "play mode off")
+        end
+        State.blocking = false
+        FullPov.SetOn(false)
+    end
+    ask()
+    status(true)
+    Log.Write(string.format("PlayMode: turned %s (%s)", on and "ON" or "OFF", tostring(why)))
+end
+function M.Toggle(why) M.Set(not PlayFlag.On(), why) end
 
 function M.Register()
     Ext.RegisterNetListener(Net.Channels.PlayReady, function(_, payload)
@@ -139,6 +181,11 @@ function M.Register()
             want = true
             ask()
             Log.Write("PlayMode: play mode is ON (remembered): asking the server for the level")
+        elseif PlayFlag.Chosen() then
+            -- Turned off on this PC: the server's real-time fights (on by
+            -- data/realtime.lua at every session start) go off too.
+            ask()
+            Log.Write("PlayMode: play mode is OFF (remembered): the server is told")
         end
     end)
     Ext.Events.Tick:Subscribe(function() pcall(tick) end)
@@ -146,22 +193,12 @@ function M.Register()
     Ext.RegisterConsoleCommand("dag_play", function(_, a)
         a = a and tostring(a):lower() or ""
         if a == "status" then status(true); return end
-        if a == "off" or a == "0" then
-            PlayFlag.Set(false)
-            want = false
-            FullPov.SetOn(false)
-            ask()
-            status(true)
-            return
-        end
-        PlayFlag.Set(true)
-        clientOn()
-        want = true
-        ask()
-        status(true)
+        if a == "toggle" then M.Toggle("!dag_play toggle"); return end
+        if a == "off" or a == "0" then M.Set(false, "!dag_play off"); return end
+        M.Set(true, "!dag_play")
         Log.Write("PlayMode: max HP bonus: !dag_hp 50 (your character) or !dag_hp 50 party")
     end)
-    Log.Write("PlayMode: registered (!dag_play [on|off|status]; play mode " .. (PlayFlag.On() and "ON" or "off") .. ")")
+    Log.Write("PlayMode: registered (!dag_play [on|off|toggle|status]; play mode " .. (PlayFlag.On() and "ON" or "off") .. ")")
 end
 
 return M

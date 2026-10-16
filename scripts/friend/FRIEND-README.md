@@ -96,6 +96,8 @@ Run INSTALL.bat again afterwards: its "Load order" list should be all green and 
 
 The host usually turns it on for everyone. If your view isn't first-person, type `client`, then `!dag_play` in the console.
 
+Stuck somewhere the mod can't handle? **Ctrl+F10** turns the mod off (vanilla camera, cursor and HUD), and Ctrl+F10 again turns it back on. To change the key, go to Mod Configuration Menu > Dark and Gate > General. Fights go back to turn-based only once every player has turned the mod off.
+
 ## 7. When something goes wrong while playing
 
 - Press **INSERT** the moment it happens. That marks the time in the log, so we can find it later.

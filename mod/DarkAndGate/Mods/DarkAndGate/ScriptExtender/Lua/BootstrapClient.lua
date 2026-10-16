@@ -118,6 +118,8 @@ Ext.Require("Client/Travel.lua").Register()
 -- !dag_play: the whole mod on, remembered; first person by itself after
 -- loads and character creation (Client/PlayMode.lua, Server/PlayMode.lua).
 Ext.Require("Client/PlayMode.lua").Register()
+-- The on / off key for the whole mod (Ctrl+F10; rebind in MCM > Dark and Gate > General).
+Ext.Require("Client/ToggleKey.lua").Register()
 -- Multiplayer MP-0: version handshake, log tags, !dag_mp_status (Client/MP.lua).
 Ext.Require("Client/MP.lua").Register()
 -- Other players' jump arcs on this screen (Client/RemoteJump.lua; switch jump_sync).

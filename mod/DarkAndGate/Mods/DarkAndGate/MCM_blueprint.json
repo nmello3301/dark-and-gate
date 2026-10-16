@@ -3,6 +3,33 @@
     "ModName": "Dark and Gate",
     "Tabs": [
         {
+            "TabId": "general",
+            "TabName": "General",
+            "Settings": [
+                {
+                    "Id": "toggle_mod",
+                    "Name": "Turn Dark and Gate on / off",
+                    "Type": "keybinding_v2",
+                    "Default": {
+                        "Keyboard": {
+                            "Key": "F10",
+                            "ModifierKeys": ["LCtrl"]
+                        },
+                        "Enabled": true
+                    },
+                    "Description": "Switches the whole mod off and back on. Off gives you vanilla BG3: the normal camera, cursor, HUD and click-to-move, and turn-based fights. Use it if a spot can't be done in first person or in real time. Your PC remembers the choice.",
+                    "Tooltip": "The same as typing !dag_play off / !dag_play in the Script Extender console. In co-op, fights stay real time while any player still has the mod on.",
+                    "Options": {
+                        "ShouldTriggerOnKeyDown": true,
+                        "ShouldTriggerOnKeyUp": false,
+                        "ShouldTriggerOnRepeat": false,
+                        "BlockIfLevelNotStarted": true,
+                        "PreventAction": true
+                    }
+                }
+            ]
+        },
+        {
             "TabId": "camera",
             "TabName": "Camera",
             "Settings": [

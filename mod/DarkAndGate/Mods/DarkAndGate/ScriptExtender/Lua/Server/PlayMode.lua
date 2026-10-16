@@ -7,7 +7,9 @@
 -- ending when the enemies are gone -- and answers PlayReady { level, cc }:
 -- cc = character creation, where first person waits. At every level start
 -- it tells every client the new level, so after character creation the
--- first level of a new game turns first person on.
+-- first level of a new game turns first person on. PlayMode { on = false }
+-- (!dag_play off, the on / off key) turns real-time fights off once no
+-- player is left in play mode.
 
 local Log        = Ext.Require("Shared/Log.lua")
 local Net        = Ext.Require("Shared/Net.lua")
@@ -62,7 +64,19 @@ function M.Register()
         ServerNet.EnqueueOsi(function()
             players[peer] = p.on and true or nil
             if not p.on then
-                Log.Write(string.format("PlayMode: user %s turned play mode OFF", tostring(peer)))
+                -- The on / off key (Client/ToggleKey.lua): with nobody left in
+                -- play mode the next round is BG3's turn-based one. In co-op,
+                -- real time stays while another player still plays.
+                local rt = "real-time fights stay ON (another player still plays)"
+                if not next(players) then
+                    if Brawl.Enabled() then
+                        Brawl.Disable("play mode OFF by user " .. tostring(peer))
+                        rt = "real-time fights turned OFF"
+                    else
+                        rt = "real-time fights were already off"
+                    end
+                end
+                Log.Write(string.format("PlayMode: user %s turned play mode OFF; %s", tostring(peer), rt))
                 return
             end
             local how = fullOn("user " .. tostring(peer))

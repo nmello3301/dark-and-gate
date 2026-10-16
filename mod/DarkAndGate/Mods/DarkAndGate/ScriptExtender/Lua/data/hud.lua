@@ -35,6 +35,13 @@ return {
     potion_keys  = { health = "T", mana = "Y" },   -- R reloads crossbows (2026-10-12)
     no_potion_tint = { 0.35, 0.35, 0.35, 0.8 },
 
+    -- The key that turns the whole mod on / off (Client/ToggleKey.lua,
+    -- 2026-10-16). Players rebind it in Mod Configuration Menu (Dark and
+    -- Gate > General, MCM_blueprint.json toggle_mod, same default); this one
+    -- is used when MCM isn't installed. SDL scancode names; modifiers
+    -- LCtrl / RCtrl / LShift / RShift / LAlt / RAlt.
+    toggle_key   = { key = "F10", modifiers = { "LCtrl" } },
+
     -- Orbs: the meniscus line drawn at the liquid's edge.
     meniscus     = true,
     low_pulse_below = 0.25,   -- the orb pulses below this fraction

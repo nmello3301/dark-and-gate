@@ -9,7 +9,7 @@
 --   markers  world-anchored labels (projected every frame): "[F]" on the
 --            object F would use, the pick count over spell targets
 --
---   Overlay.Prompt(text|nil)   Overlay.Bar(frac|nil, label)   Overlay.Toast(text, secs)
+--   Overlay.Prompt(text|nil)   Overlay.Bar(frac|nil, label)   Overlay.Toast(text, secs, always)
 --   Overlay.Banner(lines|nil)  Overlay.Count(text|nil)         Overlay.Markers(list|nil)
 --   Overlay.Project(pos) -> sx, sy | nil
 
@@ -46,8 +46,10 @@ end
 -- ---------------------------------------------------------------------
 function M.Prompt(text) S.prompt = (text and text ~= "") and text or nil end
 function M.Bar(frac, label) S.bar = frac and math.max(0, math.min(1, frac)) or nil; S.barLabel = label end
-function M.Toast(text, secs)
+-- always: show it with first person off too.
+function M.Toast(text, secs, always)
     S.toast = text
+    S.toastAlways = always and true or false
     S.toastUntil = now() + (secs or 2.5) * 1000
     Log.Write("Overlay: toast \"" .. tostring(text) .. "\"")
 end
@@ -144,10 +146,18 @@ local function build()
 end
 
 local winShown = nil
+local offView = {}   -- what shows with first person off
 local function tick()
     local t = now()
     if S.toast and t > S.toastUntil then S.toast = nil end
-    local want = (State.povOn or S.force) and (S.prompt or S.bar or S.toast or S.banner or S.count or (S.markers and #S.markers > 0))
+    -- First person off: only a toast given with Toast(..., always) shows
+    -- (Client/PlayMode.lua's "Dark and Gate: OFF").
+    local V = S
+    if not (State.povOn or S.force) then
+        offView.toast = S.toastAlways and S.toast or nil
+        V = offView
+    end
+    local want = V.prompt or V.bar or V.toast or V.banner or V.count or (V.markers and #V.markers > 0)
     if not want then
         if ui and winShown then winShown = false; set(ui.win, "Visible", false); set(ui.win, "Open", false) end
         return
@@ -161,12 +171,12 @@ local function tick()
     end
     if not winShown then winShown = true; set(ui.win, "Open", true); set(ui.win, "Visible", true) end
     local cx, cy = vw / 2, vh / 2
-    place(ui.prompt, S.prompt, cx, cy + 46)
-    place(ui.count, S.count, cx, cy + (S.prompt and 76 or 46))
+    place(ui.prompt, V.prompt, cx, cy + 46)
+    place(ui.count, V.count, cx, cy + (V.prompt and 76 or 46))
     if ui.bar then
-        if S.bar then
-            set(ui.bar, "Value", S.bar)
-            set(ui.bar, "Overlay", S.barLabel or "")
+        if V.bar then
+            set(ui.bar, "Value", V.bar)
+            set(ui.bar, "Overlay", V.barLabel or "")
             set(ui.bar, "AbsolutePosition", { math.floor(cx - 150), math.floor(cy + 70) })
             if not ui.barShown then ui.barShown = true; set(ui.bar, "Visible", true) end
         elseif ui.barShown then
@@ -174,11 +184,11 @@ local function tick()
             set(ui.bar, "Visible", false)
         end
     end
-    place(ui.toast, S.toast, cx, vh * 0.17)
+    place(ui.toast, V.toast, cx, vh * 0.17)
     for i, line in ipairs(ui.banner) do
-        place(line, S.banner and S.banner[i] or nil, cx, vh * 0.24 + (i - 1) * 38 + (i > 1 and 12 or 0))
+        place(line, V.banner and V.banner[i] or nil, cx, vh * 0.24 + (i - 1) * 38 + (i > 1 and 12 or 0))
     end
-    local list = S.markers or {}
+    local list = V.markers or {}
     for i = 1, MAX_MARKERS do
         local m = list[i]
         local sx, sy = nil, nil

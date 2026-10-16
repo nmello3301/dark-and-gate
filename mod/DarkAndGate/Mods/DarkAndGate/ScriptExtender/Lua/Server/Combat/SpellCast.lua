@@ -8,7 +8,8 @@
 --     1. resolve caster = user->character
 --     2. look up spell cost from data/spells.lua
 --     3. Mana.TrySpend; if false, log + bail
---     4. Osi.UseSpell(caster, spell, target) OR UseSpellAtPosition if point
+--     4. a character: the cast request queue with NoMovement (castAtTarget);
+--        a point: Osi.UseSpellAtPosition with WithoutMove = 1
 
 local Log = Ext.Require("Shared/Log.lua")
 local Net = Ext.Require("Shared/Net.lua")
@@ -41,7 +42,8 @@ end
 -- fix3: Osiris call arity differs between patches and SE throws "No
 -- function named X exists that can be called with N parameters" on a
 -- mismatch. Try the known shapes in order and remember the one that
--- worked. WithoutMove = 1 so the caster casts from where they stand.
+-- worked. WithoutMove = 1 so the caster casts from where they stand
+-- (UseSpellAtPosition's 6th argument).
 local arity = {}
 local function callFirst(name, variants)
     local order = {}
@@ -73,11 +75,29 @@ local function castAtPosition(caster, spellId, p)
     })
 end
 
+-- A character target: the cast request queue with NoMovement, like the picked
+-- targets below. Osi.UseSpell's 3-arg story wrapper passes WithoutMove = 0
+-- (the builtin is (Caster, SpellID, Target, Target2, WithoutMove),
+-- docs/spikes/projectiles.md), so BG3 walked the caster into its own range /
+-- line of sight before the spell left (developer 2026-10-16: "the left click
+-- will make the character walk a bit before throwing the spell").
+-- IgnoreTargetChecks: the client's crosshair already checked the line of sight.
+local TARGET_OPTIONS = { "IgnoreHasSpell", "NoMovement", "IgnoreTargetChecks" }
+local NULL_GUID = "NULL_00000000-0000-0000-0000-000000000000"
 local function castAtTarget(caster, spellId, target)
+    -- On yourself there is nowhere to walk: the Osiris call as before.
+    if target == caster then
+        local ok, err = pcall(Osi.UseSpell, caster, spellId, target)
+        if not ok then Log.Write("SpellCast: Osi.UseSpell on yourself failed: " .. tostring(err)) end
+        return ok
+    end
+    local r, err = CastRequest.Submit(caster, spellId, { { uuid = target } }, { options = TARGET_OPTIONS })
+    if r then return true end
+    Log.Write(string.format("SpellCast: %s on %s via the cast request queue failed (%s), Osi.UseSpell instead",
+        tostring(spellId), tostring(target), tostring(err)))
     return callFirst("UseSpell", {
+        { caster, spellId, target, NULL_GUID, 1 },
         { caster, spellId, target },
-        { caster, spellId, target, 1 },
-        { caster, spellId, target, 1, 0 },
     })
 end
 
@@ -288,7 +308,7 @@ function M.Register()
             elseif how then
                 -- picked targets failed: keep the reason
             elseif target then
-                okCast, how = castAtTarget(caster, spellId, target), "UseSpell target=" .. tostring(target)
+                okCast, how = castAtTarget(caster, spellId, target), (target == caster and "UseSpell on yourself" or ("cast request (NoMovement) target=" .. tostring(target)))
             elseif parsed.hitPoint then
                 okCast = castAtPosition(caster, spellId, parsed.hitPoint)
                 how = string.format("UseSpellAtPosition (%.2f,%.2f,%.2f)",
