@@ -107,6 +107,9 @@ end
 -- Switch State.hotbar to `uuid`'s saved layout (or the defaults).
 local function load(uuid)
     owner = uuid
+    -- A retry left over from before the character was known (Register seeds
+    -- with no owner) must not overwrite the saved layout loaded here.
+    needOwn = false
     for i = 1, 10 do State.hotbar[i] = nil end
     local ok, txt = pcall(Ext.IO.LoadFile, path(uuid))
     local okJ, t = false, nil
