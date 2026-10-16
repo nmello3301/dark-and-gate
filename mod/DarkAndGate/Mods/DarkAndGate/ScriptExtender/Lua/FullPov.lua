@@ -89,6 +89,7 @@ local S = {
     rj_sync_guard = 1,   -- RealJump: skip the server-flag reset during a jump
     jump_wait_ms = 250,  -- bunny-hop grace: a jump that comes while still falling waits this long for the landing
     rj_land_hold = 0,    -- RealJump: 1 = keep BG3's landing hold (recover) after a jump
+    rj_slope_deg = 50,   -- RealJump: steepest uphill the jump's floor follows (0 = off)
     mp_tag = "-",        -- multiplayer: native.log line tag ("p2", "p1-host"; Client/MP.lua)
     mp_remote = 0,       -- multiplayer: 1 = other players connected (the host's server replays their direct movement)
     -- WASD speed multipliers for the DLL's ground-speed lever
@@ -354,11 +355,11 @@ local function writeState()
     if S.on and USE_BONE_ANCHOR then refreshCache(e, now) end
 
     local line = string.format(
-        "orbit=%d orbit_seq=%d orbit_dist=%.2f orbit_up=%.2f orbit_pmin=%.1f orbit_pmax=%.1f orbit_spin=%d orbit_tilt=%d orbit_rate=%.1f orbit_tilt_rate=%.1f orbit_vis=%s orbit_x=%.3f orbit_y=%.3f orbit_z=%.3f crouch=%d level_seq=%d on=%d active=%d menu=%d foreign_follow=%d foreign_mouse_ms=%d foreign_ease_ms=%d anim_inst=%s anim_rate=%.3f clip_inst=%s clip_rates=%s nclips=%s nocombatcam=%d combat_wasd=%d rec_inst=%s lift_objects=%d jump_mode=%d genome_capture=%d strafe_sign=%d rj_land_speed=%.2f rj_wall_h=%.2f rj_sync_guard=%d jump_wait_ms=%d rj_land_hold=%d mp_tag=%s mp_remote=%d head_smooth=%.2f move_walk=%.3f move_run=%.3f move_mode=%d move_accel=%.3f move_decel=%.3f move_turn=%.1f move_raw=%d move_hold=%d move_metrics=%d move_face_idle=%.1f move_face_air=%d loco_inst=%s loco_rate=%.2f loco_skip=%s visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
+        "orbit=%d orbit_seq=%d orbit_dist=%.2f orbit_up=%.2f orbit_pmin=%.1f orbit_pmax=%.1f orbit_spin=%d orbit_tilt=%d orbit_rate=%.1f orbit_tilt_rate=%.1f orbit_vis=%s orbit_x=%.3f orbit_y=%.3f orbit_z=%.3f crouch=%d level_seq=%d on=%d active=%d menu=%d foreign_follow=%d foreign_mouse_ms=%d foreign_ease_ms=%d anim_inst=%s anim_rate=%.3f clip_inst=%s clip_rates=%s nclips=%s nocombatcam=%d combat_wasd=%d rec_inst=%s lift_objects=%d jump_mode=%d genome_capture=%d strafe_sign=%d rj_land_speed=%.2f rj_wall_h=%.2f rj_sync_guard=%d jump_wait_ms=%d rj_land_hold=%d rj_slope_deg=%.1f mp_tag=%s mp_remote=%d head_smooth=%.2f move_walk=%.3f move_run=%.3f move_mode=%d move_accel=%.3f move_decel=%.3f move_turn=%.1f move_raw=%d move_hold=%d move_metrics=%d move_face_idle=%.1f move_face_air=%d loco_inst=%s loco_rate=%.2f loco_skip=%s visual=%s anchor=%d eye_up=%.3f eye_fwd=%.3f look=%.3f eye_height=%.3f pivot_up=%.3f down_fwd=%.3f jump_seq=%d jump_ms=%d jump_h=%.3f jump_k=%.2f dump=%d sock=%d skel=%d rootx=%.4f rooty=%.4f rootz=%.4f meshes=%s t=%d",
         S.orbit, S.orbit_seq, S.orbit_dist, S.orbit_up, S.orbit_pmin, S.orbit_pmax, S.orbit_spin, S.orbit_tilt, S.orbit_rate,
         S.orbit_tilt_rate, S.orbit_vis, S.orbit_x, S.orbit_y, S.orbit_z, S.crouch, S.level_seq,
         S.on and 1 or 0, active and 1 or 0, S.menu and 1 or 0,
-        S.foreign_follow, math.floor(S.foreign_mouse_ms + 0.5), math.floor(S.foreign_ease_ms + 0.5), S.anim_inst, S.anim_rate, S.clip_inst, S.clip_rates, S.nclips, S.nocombatcam, S.combat_wasd, S.rec_inst, S.lift_objects, S.jump_mode, S.genome_capture, S.strafe_sign, S.rj_land_speed, S.rj_wall_h, S.rj_sync_guard, math.floor(S.jump_wait_ms + 0.5), S.rj_land_hold, S.mp_tag, S.mp_remote, S.head_smooth, S.move_walk, S.move_run, S.move_mode, S.move_accel, S.move_decel, S.move_turn, S.move_raw, S.move_hold, S.move_metrics, S.move_face_idle, S.move_face_air, S.loco_inst, S.loco_rate, S.loco_skip, (S.on and cache.visual) or "0", S.anchor, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
+        S.foreign_follow, math.floor(S.foreign_mouse_ms + 0.5), math.floor(S.foreign_ease_ms + 0.5), S.anim_inst, S.anim_rate, S.clip_inst, S.clip_rates, S.nclips, S.nocombatcam, S.combat_wasd, S.rec_inst, S.lift_objects, S.jump_mode, S.genome_capture, S.strafe_sign, S.rj_land_speed, S.rj_wall_h, S.rj_sync_guard, math.floor(S.jump_wait_ms + 0.5), S.rj_land_hold, S.rj_slope_deg, S.mp_tag, S.mp_remote, S.head_smooth, S.move_walk, S.move_run, S.move_mode, S.move_accel, S.move_decel, S.move_turn, S.move_raw, S.move_hold, S.move_metrics, S.move_face_idle, S.move_face_air, S.loco_inst, S.loco_rate, S.loco_skip, (S.on and cache.visual) or "0", S.anchor, S.eye_up, S.eye_fwd, S.look, S.eye_height, S.pivot_up, S.down_fwd,
         S.jump_seq, math.floor(S.jump_ms + 0.5), S.jump_h, S.jump_k,
         S.dump, cache.sock or -1, cache.skel or 0, x, y, z,
         (S.on and #cache.meshes > 0) and table.concat(cache.meshes, ",") or "0",
@@ -487,6 +488,14 @@ function M.SetMpTag(t)
     lastWrite = 0
     pcall(writeState)
 end
+-- Uphill jumps: the steepest slope (degrees) the real jump's floor follows
+-- (RealJump.cpp FollowSlope); 0 = off.
+function M.SetJumpSlope(deg)
+    S.rj_slope_deg = math.max(0, tonumber(deg) or 0)
+    lastWrite = 0
+    pcall(writeState)
+end
+function M.JumpSlope() return S.rj_slope_deg end
 -- Keep (true) or skip (false) BG3's landing hold after a real jump.
 function M.SetJumpLandHold(on)
     S.rj_land_hold = on and 1 or 0

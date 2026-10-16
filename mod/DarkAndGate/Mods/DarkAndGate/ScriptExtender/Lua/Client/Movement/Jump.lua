@@ -45,6 +45,8 @@
 --                                          before landing still jumps (0 = off)
 --   !dag_jump_land_hold on|off             real mode: BG3's landing hold (the
 --                                          recover after a jump), off = skipped
+--   !dag_jump_slope <deg>                  real mode: uphill jumps follow slopes
+--                                          up to <deg> (0 = off, the old jump)
 
 local Log       = Ext.Require("Shared/Log.lua")
 local MCM       = Ext.Require("Shared/MCM.lua")
@@ -457,6 +459,13 @@ function M.Register()
         Log.Write("Jump: A/D in the air flipped, strafe_sign = " .. tostring(FullPov.FlipStrafe()))
     end)
     FullPov.SetRealJumpTuning(D.strafe_sign, D.land_speed, D.wall_check_m)
+    FullPov.SetJumpSlope(D.slope_max_deg or 0)
+    Ext.RegisterConsoleCommand("dag_jump_slope", function(_, x)
+        if tonumber(x) then FullPov.SetJumpSlope(tonumber(x)) end
+        local deg = FullPov.JumpSlope()
+        Log.Write(deg > 0 and string.format("Jump: uphill follow on, slopes up to %.0f deg (native.log RJUMP end ... uphill:)", deg)
+            or "Jump: uphill follow off (the jump starts at the take-off height, as before 2026-10-15)")
+    end)
     -- The server's flag-0x20 change ~60 ms after take-off makes the engine
     -- stop all movement; the DLL skips that reset during a jump (playtest 5).
     local syncGuard = D.sync_guard ~= false

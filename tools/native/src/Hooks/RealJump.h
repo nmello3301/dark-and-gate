@@ -42,6 +42,12 @@ void SetLandSpeed(float vmax);
 // low rocks and debris don't stop the jump).
 void SetWallHeight(float h);
 
+// Uphill jumps: the curve's floor follows ground that rises no steeper than
+// maxDeg under the jump (the falling Update's own ground probe), so a jump
+// up a slope keeps its height over the slope instead of landing early.
+// 0 = off (the curve is measured from the take-off height only).
+void SetSlopeFollow(float maxDeg);
+
 // Start a real jump now (game thread). Returns false (and logs why) if the
 // engine state couldn't be entered; the caller then falls back to the
 // visual lift. curve: y = h * (1 - |2u - 1|^k), u = t / durMs.

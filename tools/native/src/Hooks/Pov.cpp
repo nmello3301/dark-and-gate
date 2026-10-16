@@ -187,6 +187,7 @@ struct LuaState {
     bool      syncGuard = true;   // RealJump: skip the server-flag reset during a jump
     float     jumpWaitMs = 250.f; // bunny-hop grace: a jump that comes while still in the air waits this long for the landing
     bool      landHold = false;   // RealJump: keep BG3's landing hold (recover) after a jump
+    float     slopeDeg = 50.f;    // RealJump: steepest uphill the curve's floor follows (0 = off)
     bool      menu = false;        // a BG3 panel is open (Lua, Client/HUD): mouse-look off, cursor free
     // Foreign camera (see Foreign below; data/camera.lua foreign_camera):
     // follow 1 = the view keeps following your mouse, 0 = it holds the last
@@ -343,6 +344,7 @@ void PollLuaFile()
     s.syncGuard = ValI(buf, "rj_sync_guard", 1) != 0;
     s.jumpWaitMs = ValF(buf, "jump_wait_ms", 250.f);
     s.landHold = ValI(buf, "rj_land_hold", 0) != 0;
+    s.slopeDeg = ValF(buf, "rj_slope_deg", 50.f);
     // Multiplayer log tag ("u65537-host"), once the server has said who we are.
     if (const char* v = FindVal(buf, "mp_tag")) {
         char tag[48];
@@ -1009,6 +1011,7 @@ void UpdateJump()
                 dag::realjump::SetWallHeight(g_lua.wallH);
                 dag::realjump::SetSyncGuard(g_lua.syncGuard);
                 dag::realjump::SetLandHold(g_lua.landHold);
+                dag::realjump::SetSlopeFollow(g_lua.slopeDeg);
                 g_jump.real = dag::realjump::Start(g_jump.durMs, g_jump.h, g_jump.k, nullptr, g_jump.seq);
                 // Still in the air (the last fall hasn't landed): wait for
                 // the landing within the bunny-hop grace, below. Never the

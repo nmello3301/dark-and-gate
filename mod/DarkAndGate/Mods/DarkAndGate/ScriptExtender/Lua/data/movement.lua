@@ -46,6 +46,12 @@
 --   land_speed      real mode: the curve ends steep (~13 m/s at k=3), which
 --                   landed hard and stuck; the engine gets at most this fall
 --                   speed for the touchdown.
+--   slope_max_deg   real mode, uphill jumps (2026-10-15): the curve's floor
+--                   rises with ground under the jump that is no steeper than
+--                   this, so a jump up a slope keeps its height over the
+--                   slope instead of landing a third of the way in. Steeper
+--                   rises (a rock's edge) still land the jump. 0 = off (the
+--                   curve starts at the take-off height). !dag_jump_slope <deg>.
 --   max_clip_rate   the clips are fitted to the airtime (rate = clip time /
 --                   airtime, 1.73 s of clips into 1.28 s = x1.35); capped here.
 --   anims           BG3 animation-mapping ids for the JumpFlight phases (found by
@@ -153,6 +159,7 @@ return {
         mode          = "real",   -- 2026-10-10 playtest: real jump approved
         strafe_sign   = -1,       -- A/D in the air (playtest: +1 was reversed)
         land_speed    = 3.0,      -- m/s, max fall speed handed back at the end of the curve
+        slope_max_deg = 50,       -- real mode: uphill jumps follow slopes up to this (0 = off; 2026-10-15)
         wall_check_m  = 1.5,      -- real mode: wall check height above the feet (chest; rocks pass under; 2026-10-10 tuned 1.3 -> 1.5)
         sync_guard    = true,     -- real mode: the server's flag-0x20 reset ~60 ms after take-off doesn't stop the jump (playtest 5)
         -- 2026-10-10: no take-off windup (the Cast clip felt clunky; jumps

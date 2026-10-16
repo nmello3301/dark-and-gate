@@ -2,6 +2,10 @@
 
 Versions follow `meta.lsx` (`major.minor.revision`). Every release names the game version it was tested on.
 
+## Unreleased
+
+- Jumping up a slope keeps the jump's full height over the slope instead of ending in a short hop (`data/movement.lua` `jump.slope_max_deg`, `!dag_jump_slope`).
+
 ## 0.1.0 (alpha), 2026-10-15
 
 First public build, on Nexus Mods. Tested on BG3 4.1.1.7631656 (Steam, DirectX 11) with Script Extender v33, from the nautiloid through the Emerald Grove.

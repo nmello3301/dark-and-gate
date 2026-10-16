@@ -27,6 +27,7 @@ From [real-lift.md](real-lift.md) Q1–Q2, plus this spike:
     - The byte is 1 (and the rest zero) when the grid has no cell there.
     - Otherwise `groundY` = the hit point's Y (sweep result `+0x10`; the result is normal `+0x00`, point `+0x0C`, distance `+0x18`, `FLT_MAX` = no hit), or the grid height if nothing was hit.
   - Prologue `48 8B C4 55 53 56 57` (7 whole instructions, no RIP-relative operand).
+  - **Verified in-game 2026-10-15** (the uphill jump fix, RealJump.cpp `FollowSlope`): the falling Update's probe answer `out + 4` is the ground under the jump; uphill jumps logged the floor rising up to +1.93 m along it.
   - Callers: client `0x141195788` (ShouldFall), `0x141BF0281`, `0x141BF02C0`, `0x141BD7480` (the falling Update), `0x141BF1912`; server `0x14305F7BA`, `0x14305F7F9`, `0x1430605D0`, `0x1430630FA`, `0x1430632D1`, `0x143064209`.
 - **So:**
   - a character whose centre is past a rock's edge falls off it;

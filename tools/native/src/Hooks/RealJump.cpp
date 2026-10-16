@@ -94,6 +94,9 @@ float g_landSpeed = 3.f;
 // (data jump.land_hold, 2026-10-13).
 std::atomic<bool> g_landHold{ false };
 float g_wallH = 1.3f;
+// Uphill (2026-10-15): tan of the steepest ground rise the curve's floor
+// follows (data jump.slope_max_deg); 0 = off.
+float g_slopeTan = 1.19f;
 
 // Physics scene from the falling Update's ground probe call.
 using ProbeFn = void*(__fastcall*)(void* out, void* grid, void* scene, float* pos, float radius, float extraUp);
@@ -104,10 +107,15 @@ std::atomic<void*> g_scene{ nullptr };
 constexpr const char* kProbeCallPattern =
     "4C 8B 42 30 4C 8D 4D 60 48 8B 92 80 00 00 00 48 8D 4D 70 F3 0F 11 74 24 28 F3 0F 11 44 24 20 E8";
 
+void FollowSlope(uint8_t* out, const float* pos);
+
 void* __fastcall HookProbe(void* out, void* grid, void* scene, float* pos, float radius, float extraUp)
 {
     if (scene) g_scene.store(scene, std::memory_order_relaxed);
-    return g_origProbe(out, grid, scene, pos, radius, extraUp);
+    void* r = g_origProbe(out, grid, scene, pos, radius, extraUp);
+    // Only inside our jump's own falling Update (g_inFallUpdate).
+    if (g_inFallUpdate && out && pos) FollowSlope(static_cast<uint8_t*>(out), pos);
+    return r;
 }
 
 // Sphere sweep from -> to; true + distance on a hit.
@@ -145,6 +153,12 @@ struct Jump {
     bool     bonked = false;
     bool     holdSkipped = false; // BG3's landing hold cleared after this jump
     bool     offLogged = false;   // "fall state off the machine" logged
+    // Uphill: the curve is drawn from `base`, which starts at the take-off
+    // height and rises with a slope under the jump (FollowSlope).
+    float    base = 0;
+    float    u = 0;               // this frame's curve position (FollowSlope)
+    float    gLast = 0, gx = 0, gz = 0;   // last ground probe answer and where
+    int      probes = 0, slopeFrames = 0, saves = 0, steps = 0;
 } g_j;
 
 // Horizontal velocity of the character, measured per frame (for inertia).
@@ -251,6 +265,60 @@ float Curve(float u)
     return g_j.h * (1.f - std::pow(std::fabs(2.f * u - 1.f), g_j.k));
 }
 
+// Uphill (developer 2026-10-15: "jumps are terrible going up slopes; they
+// work on the way down"). The curve rose from the take-off height, so
+// running up a slope the ground ahead caught up with it and the engine's
+// landing test (pos.y at or under its ground probe) ended the jump a third
+// of the way in, a little hop. The falling Update's own ground probe
+// (docs/spikes/ground-support.md: out = { x, groundY, z, byte +0xC = no grid
+// cell }) tells us the ground under the jump every frame:
+//   - a rise a slope can explain (no steeper than slope_max_deg over the
+//     step since the last probe) lifts the curve's floor to it, and this
+//     frame's landing test is told the ground is just under us;
+//   - a steeper rise (a rock's edge, a crate) is left alone: the jump lands
+//     on it as before;
+//   - ground going down never lowers the floor (downhill already worked:
+//     the curve hands back at its floor and the engine falls the rest).
+void FollowSlope(uint8_t* out, const float* pos)
+{
+    if (!g_j.active || g_slopeTan <= 0.f) return;
+    __try {
+        if (out[0xC] != 0) return;
+        float& gy = *reinterpret_cast<float*>(out + 4);
+        if (!std::isfinite(gy) || !std::isfinite(pos[1])) return;
+        const float dx = pos[0] - g_j.gx, dz = pos[2] - g_j.gz;
+        const float d = std::sqrt(dx * dx + dz * dz);
+        const float rise = gy - g_j.gLast;
+        // The first probe is measured from the feet at take-off, which can
+        // sit a few cm into an uphill.
+        const float slack = g_j.probes == 0 ? 0.10f : 0.03f;
+        const bool slope = rise <= g_slopeTan * d + slack;
+        ++g_j.probes;
+        g_j.gLast = gy; g_j.gx = pos[0]; g_j.gz = pos[2];
+        if (!slope) {
+            if (gy >= pos[1]) ++g_j.steps;
+            return;
+        }
+        if (gy > g_j.base) { g_j.base = gy; ++g_j.slopeFrames; }
+        // The floor moves from the next frame; keep this frame airborne.
+        // Near the curve's end the ground meeting us is the touchdown.
+        if (gy >= pos[1] - 0.005f && g_j.u < 0.9f) {
+            gy = pos[1] - 0.01f;
+            ++g_j.saves;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+// For the RJUMP end / landed early lines.
+const char* SlopeSummary()
+{
+    static char buf[160];
+    if (g_slopeTan <= 0.f) return "uphill follow off";
+    std::snprintf(buf, sizeof(buf), "uphill: floor +%.2f m (rose on %d of %d probes), %d landing tests held off, %d steps",
+                  g_j.base - g_j.start[1], g_j.slopeFrames, g_j.probes, g_j.saves, g_j.steps);
+    return buf;
+}
+
 // After our jump (from take-off to 2 s after its planned end): clear BG3's
 // landing hold before the engine's Update, so the landed state ends at once
 // (state 3 pops layer 1 on the next Update) and you move / hop right away.
@@ -325,7 +393,7 @@ uint64_t __fastcall HookUpdate(uint8_t* st, uint8_t* gameTime)
 
     // Ceiling: rising into something = bonk, the engine's gravity takes over.
     if (u < 1.f && !g_j.bonked) {
-        const float yNext = g_j.start[1] + Curve(u);
+        const float yNext = g_j.base + Curve(u);
         if (yNext > g_j.pos[1] + 1e-4f) {
             const float from[3] = { g_j.pos[0], g_j.pos[1] + 1.6f, g_j.pos[2] };
             const float to[3] = { from[0], yNext + 1.6f + 0.15f, from[2] };
@@ -352,23 +420,24 @@ uint64_t __fastcall HookUpdate(uint8_t* st, uint8_t* gameTime)
         const float du = 0.01f;
         float vy = (Curve(1.f - du) - Curve(1.f - 2 * du)) / (du * g_j.durMs / 1000.f);
         if (vy < -g_landSpeed) vy = -g_landSpeed;
-        const float p[3] = { g_j.pos[0], g_j.start[1] + 0.001f, g_j.pos[2] };
+        const float p[3] = { g_j.pos[0], g_j.base + 0.001f, g_j.pos[2] };
         std::memcpy(st + 0x1C, p, 12);
         const float v[3] = { g_j.vel[0], vy < 0.f ? vy : -1.f, g_j.vel[1] };
         std::memcpy(st + 0x28, v, 12);
         *reinterpret_cast<float*>(st + 0x48) = 0.f;
         g_j.active = false;
-        dag::log::Writef("RJUMP end seq=%d steered %d frames, re-seeds=%d, walls=%d, handed back vy=%.2f at (%.2f,%.2f,%.2f) scene=%s",
+        dag::log::Writef("RJUMP end seq=%d steered %d frames, re-seeds=%d, walls=%d, handed back vy=%.2f at (%.2f,%.2f,%.2f) scene=%s; %s",
                          g_j.seq, g_j.frames, g_j.reseeds, g_j.walls, v[1], p[0], p[1], p[2],
-                         g_scene.load() ? "yes" : "NO (no wall/ceiling checks)");
+                         g_scene.load() ? "yes" : "NO (no wall/ceiling checks)", SlopeSummary());
         return g_origUpdate(st, gameTime);
     }
 
     // Height from the curve; keep a 3 cm floor early on so the engine's
     // landing test doesn't end the jump on the first frame.
-    float y = g_j.start[1] + Curve(u);
-    if (u < 0.5f && y < g_j.start[1] + 0.03f) y = g_j.start[1] + 0.03f;
+    float y = g_j.base + Curve(u);
+    if (u < 0.5f && y < g_j.base + 0.03f) y = g_j.base + 0.03f;
     g_j.pos[1] = y;
+    g_j.u = u;
 
     // The engine computes pos = Start + Vel*t' - (0, 20 t'^2, 0), t' = t + dt.
     // With Vel = 0 and t = 0: Start = our point + (0, 20 dt^2, 0).
@@ -385,8 +454,8 @@ uint64_t __fastcall HookUpdate(uint8_t* st, uint8_t* gameTime)
     const int stNow = *reinterpret_cast<int*>(st + 0x54);
     if (stNow >= 2) {
         g_j.active = false;
-        dag::log::Writef("RJUMP landed early seq=%d at u=%.2f y=%.2f (on something; engine state %d), %d frames, re-seeds=%d",
-                         g_j.seq, u, y, stNow, g_j.frames, g_j.reseeds);
+        dag::log::Writef("RJUMP landed early seq=%d at u=%.2f y=%.2f (on something; engine state %d), %d frames, re-seeds=%d; %s",
+                         g_j.seq, u, y, stNow, g_j.frames, g_j.reseeds, SlopeSummary());
     }
     return r;
 }
@@ -529,6 +598,16 @@ void ForgetCharacter()
 void SetStrafeSign(float s) { g_strafeSign = s < 0.f ? -1.f : 1.f; }
 void SetLandSpeed(float vmax) { if (vmax > 0.1f && vmax < 50.f) g_landSpeed = vmax; }
 void SetWallHeight(float h) { if (h > 0.2f && h < 3.f) g_wallH = h; }
+
+void SetSlopeFollow(float maxDeg)
+{
+    const float t = (maxDeg > 0.f && maxDeg < 85.f) ? std::tan(maxDeg * 3.14159265f / 180.f) : 0.f;
+    if (std::fabs(t - g_slopeTan) > 1e-4f) {
+        g_slopeTan = t;
+        if (t > 0.f) dag::log::Writef("RJUMP: uphill follow on, slopes up to %.0f deg", maxDeg);
+        else dag::log::Writef("RJUMP: uphill follow off (the curve starts at the take-off height)");
+    }
+}
 bool RefusedAirborne() { return g_refusedAirborne; }
 
 void SetLandHold(bool on)
@@ -628,7 +707,7 @@ bool Start(float durMs, float h, float k, const float camFwdXZ[2], int seq)
             // that is a real fall (off a ledge): no take-over mid-air (the
             // bunny-hop grace would make that a double jump); Pov waits for
             // the landing instead.
-            const float drop = g_j.seq ? g_j.start[1] - pos[1] : 0.f;
+            const float drop = g_j.seq ? g_j.base - pos[1] : 0.f;
             const bool ourTail = !g_j.active && sinceEnd > -0.05 && sinceEnd < 0.8 && drop < 0.25f;
             if (fallState < 2 && !ourTail) {
                 g_refusedAirborne = true;
@@ -652,6 +731,8 @@ bool Start(float durMs, float h, float k, const float camFwdXZ[2], int seq)
     g_j.durMs = durMs > 50.f ? durMs : 50.f; g_j.h = h; g_j.k = k < 1.f ? 1.f : k;
     std::memcpy(g_j.start, pos, 12);
     std::memcpy(g_j.pos, pos, 12);
+    g_j.base = g_j.gLast = pos[1];
+    g_j.gx = pos[0]; g_j.gz = pos[2];
     g_j.vel[0] = g_measVel[0]; g_j.vel[1] = g_measVel[1];
     const bool carried = carry[0] * carry[0] + carry[1] * carry[1] > g_j.vel[0] * g_j.vel[0] + g_j.vel[1] * g_j.vel[1];
     if (carried) { g_j.vel[0] = carry[0]; g_j.vel[1] = carry[1]; }
