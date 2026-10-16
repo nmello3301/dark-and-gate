@@ -108,7 +108,8 @@ function Get-LocalAppData {
 
 function Test-GameRoot([string]$p) {
   if (-not $p) { return $false }
-  return ((Test-Path -LiteralPath (Join-Path $p 'bin\bg3_dx11.exe')) -or (Test-Path -LiteralPath (Join-Path $p 'bin\bg3.exe')))
+  # Join-Path throws for a drive that doesn't exist (a mistyped -GameRoot).
+  try { return ((Test-Path -LiteralPath (Join-Path $p 'bin\bg3_dx11.exe')) -or (Test-Path -LiteralPath (Join-Path $p 'bin\bg3.exe'))) } catch { return $false }
 }
 
 # Every Steam library (Steam's registry keys + libraryfolders.vdf + the
