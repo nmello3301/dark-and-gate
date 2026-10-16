@@ -21,7 +21,7 @@ set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_DEBUG OFF)
 
 project(
     DarkAndGate
-    VERSION 0.4.1
+    VERSION 0.5.0
     LANGUAGES CXX RC
     DESCRIPTION "Dark and Gate native plugin"
 )

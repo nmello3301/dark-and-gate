@@ -2,6 +2,13 @@
 
 Versions follow `meta.lsx` (`major.minor.revision`). Every release names the game version it was tested on.
 
+## 0.5.0 (alpha), 2026-10-16
+
+Built for BG3 4.1.1.7631656 (Steam, DirectX 11) with Script Extender v33. Still an alpha: play on a new save or a copy.
+
+- **On / off key: Ctrl+F10** turns the whole mod off and back on, for any spot the mod can't handle. Off gives you vanilla BG3: the normal camera, cursor, HUD and click-to-move, and turn-based fights. In co-op, fights stay real time while any player still has the mod on. Your PC remembers the choice. To change the key, go to Mod Configuration Menu > Dark and Gate > General. Console: `!dag_play off`, `!dag_play`, `!dag_play toggle`.
+- Fixed: releasing a channelled spell on a character could make yours walk a few steps before the spell left. A spell cast on someone now always leaves from where you stand.
+
 ## 0.4.1 (alpha), 2026-10-16
 
 Built for BG3 4.1.1.7631656 (Steam, DirectX 11) with Script Extender v33. Local build for friends; not on GitHub or Nexus.

@@ -1,7 +1,7 @@
 Dark and Gate
 First-person, real-time action combat for Baldur's Gate 3
 
-Alpha (0.4.0): expect bugs and changing balance. Play on a new save or a copy, never your main playthrough.
+Alpha (0.5.0): expect bugs and changing balance. Play on a new save or a copy, never your main playthrough.
 
 Fight in first person and in real time: swing your weapon, cast BG3's own spells at the crosshair, draw a bow, and face enemies that move and attack without waiting for turns.
 
@@ -30,9 +30,9 @@ Windows, Steam version, DirectX 11 only (not Vulkan).
 
 INSTALLATION
 1. Install the requirements.
-2. Mod file: drag DarkAndGate-0.4.0-mod.zip into BG3 Mod Manager, activate DarkAndGate below Mod Configuration Menu and AnimationUnlocker, then click Export Order to Game.
-3. Native file: extract DarkAndGate-0.4.0-native.zip into the game folder, so that you get bin\NativeMods\DarkAndGate.dll.
-4. Optional: back up your BG3NativeCameraTweaks.toml and BG3WASD.toml, then extract DarkAndGate-0.4.0-recommended-settings.zip into the game folder.
+2. Mod file: drag DarkAndGate-0.5.0-mod.zip into BG3 Mod Manager, activate DarkAndGate below Mod Configuration Menu and AnimationUnlocker, then click Export Order to Game.
+3. Native file: extract DarkAndGate-0.5.0-native.zip into the game folder, so that you get bin\NativeMods\DarkAndGate.dll.
+4. Optional: back up your BG3NativeCameraTweaks.toml and BG3WASD.toml, then extract DarkAndGate-0.5.0-recommended-settings.zip into the game folder.
 5. In bin\ScriptExtenderSettings.json, set "CreateConsole": true.
 6. Launch with DirectX 11 and load a game. In the Script Extender console, press Enter, type client, press Enter, then type !dag_play. It turns on by itself from then on.
 
